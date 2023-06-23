@@ -11,6 +11,39 @@ namespace Impunity.Connection
 
 	public class LocalGameConnection : IGameStateConnection, IGameStateResultHandler, IDisposable
 	{
+
+		protected class ConnectActionRecord : IImpunityAction
+		{
+			ImpunityCallback ResultsCallback;
+
+			public ConnectActionRecord(ImpunityCallback onComplete)
+			{
+				ResultsCallback = onComplete;
+			}
+
+			public void InvokeAction()
+			{
+				
+			}
+
+			public void InvokeResultsCallback()
+			{
+				ResultsCallback?.Invoke(null);
+			}
+
+			public bool HasResult() { return false; }
+
+			public BsonDocument GetResult()
+			{
+				return null;
+			}
+
+			public ImpunityError GetError()
+			{
+				return null;
+			}
+		}
+
 		GameStateServer State;
 		ConcurrentQueue<IImpunityAction> PendingCallbacks;
 
@@ -20,9 +53,9 @@ namespace Impunity.Connection
 			PendingCallbacks = new ConcurrentQueue<IImpunityAction>();
 		}
 
-		public void Connect()
+		public void Connect(ImpunityCallback onComplete)
 		{
-			// No-op for local connections
+			PendingCallbacks.Enqueue(new ConnectActionRecord(onComplete));
 		}
 
 		public void Update()

@@ -15,8 +15,10 @@ namespace Impunity.Networking
 
 		NetworkStream SocketStream;
 
+		ImpunityCallback OnConnectCallback;
+
 		public NetworkMessageHandler OnMessageRecieved { get; set; }
-		public NetworkErrorHandler OnNetworkError { get; set; }
+		public ImpunityCallback OnNetworkError { get; set; }
 
 		public static IImpunityClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{
@@ -36,8 +38,10 @@ namespace Impunity.Networking
 			ClientSocket = new TcpClient();
 		}
 
-		public void Connect()
+		public void Connect(ImpunityCallback onComplete)
 		{
+			OnConnectCallback = onComplete;
+
 			ClientSocketThread = new Thread(new ThreadStart(SocketListenerThread));
 			ClientSocketThread.IsBackground = true;
 			ClientSocketThread.Name = "TCPClient socket reader";
@@ -63,11 +67,17 @@ namespace Impunity.Networking
 		private void SocketListenerThread()
 		{
 			byte[] receiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
+			bool connected = false;
+
 			try
 			{
 				ClientSocket.Connect(ServerEndpoint);
 
 				SocketStream = ClientSocket.GetStream();
+
+				connected = true;
+				OnConnectCallback?.Invoke(null);
+				OnConnectCallback = null;
 
 				int bytesReceived = 0;
 				int maxBytesToReceive = ImpunityConstants.MaxMessageSize;
@@ -113,9 +123,15 @@ namespace Impunity.Networking
 			}
 			catch (Exception e)
 			{
-				if (ClientSocket != null)
+				if (!connected)
+                {
+					OnConnectCallback?.Invoke(new ImpunityError(e.Message));
+					OnConnectCallback = null;
+				}
+				else if (ClientSocket != null)
 				{
-					OnNetworkError?.Invoke(e.Message);
+					// Client socket is null on regular requested disonnect
+					OnNetworkError?.Invoke(new ImpunityError(e.Message));
 
 					ImpunityLogger.LogError(e, "Client socket error");
 				}

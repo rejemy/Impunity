@@ -9,13 +9,14 @@ using Impunity.Networking;
 
 namespace Impunity.Connection
 {
+
 	interface IImpunityNetworkAction
 	{
 		ushort MessageId { get; }
 		ushort MessageType { get; }
 		object Request { get; }
+		ImpunityError Err { get; set; }
 
-		void SetError(ImpunityError err);
 		void SetResult(BsonValue result);
 
 		bool HasCallback();
@@ -27,9 +28,10 @@ namespace Impunity.Connection
 		public ushort MessageId { get; set; }
 		public ushort MessageType { get; set; }
 		public object Request { get; set; }
+		public ImpunityError Err { get; set; }
 
 		ImpunityCallback OnComplete;
-		ImpunityError Err;
+		
 
 		public ImpunityNetworkAction(ushort messageType, ushort messageId, object requestBody, ImpunityCallback callback)
 		{
@@ -44,10 +46,6 @@ namespace Impunity.Connection
 			return OnComplete != null;
 		}
 
-		public void SetError(ImpunityError err)
-		{
-			Err = err;
-		}
 
 		public void SetResult(BsonValue result)
 		{
@@ -65,11 +63,11 @@ namespace Impunity.Connection
 		public ushort MessageId { get; set; }
 		public ushort MessageType { get; set; }
 		public object Request { get; set; }
+		public ImpunityError Err { get; set; }
 
 		ImpunityCallback<bool> OnComplete;
 
 		bool Result;
-		ImpunityError Err;
 
 		public ImpunityNetworkActionBool(ushort messageType, ushort messageId, object requestBody, ImpunityCallback<bool> callback)
 		{
@@ -82,11 +80,6 @@ namespace Impunity.Connection
 		public bool HasCallback()
 		{
 			return OnComplete != null;
-		}
-
-		public void SetError(ImpunityError err)
-		{
-			Err = err;
 		}
 
 		public void SetResult(BsonValue result)
@@ -105,11 +98,11 @@ namespace Impunity.Connection
 		public ushort MessageId { get; set; }
 		public ushort MessageType { get; set; }
 		public object Request { get; set; }
+		public ImpunityError Err { get; set; }
 
 		ImpunityCallback<BsonValue> OnComplete;
 
-		bool Result;
-		ImpunityError Err;
+		BsonValue Result;
 
 		public ImpunityNetworkActionValue(ushort messageType, ushort messageId, object requestBody, ImpunityCallback<BsonValue> callback)
 		{
@@ -122,11 +115,6 @@ namespace Impunity.Connection
 		public bool HasCallback()
 		{
 			return OnComplete != null;
-		}
-
-		public void SetError(ImpunityError err)
-		{
-			Err = err;
 		}
 
 		public void SetResult(BsonValue result)
@@ -146,11 +134,11 @@ namespace Impunity.Connection
 		public ushort MessageId { get; set; }
 		public ushort MessageType { get; set; }
 		public object Request { get; set; }
+		public ImpunityError Err { get; set; }
 
 		ImpunityCallback<TResult> OnComplete;
 
 		TResult Result;
-		ImpunityError Err;
 
 		public ImpunityNetworkAction(ushort messageType, ushort messageId, object requestBody, ImpunityCallback<TResult> callback)
 		{
@@ -165,14 +153,10 @@ namespace Impunity.Connection
 			return OnComplete != null;
 		}
 
-		public void SetError(ImpunityError err)
-		{
-			Err = err;
-		}
-
 		public void SetResult(BsonValue result)
 		{
-			Result = ImpunityNetworkingUtil.GetBsonMapper().ToObject<TResult>((BsonDocument)result);
+			BsonDocument resultDoc = (BsonDocument)result;
+			Result = ImpunityNetworkingUtil.GetBsonMapper().ToObject<TResult>(resultDoc);
 		}
 
 		public void InvokeCallback()
@@ -186,6 +170,8 @@ namespace Impunity.Connection
 		BlockingCollection<IImpunityNetworkAction> PendingWrite;
 		ConcurrentQueue<IImpunityNetworkAction> PendingResponse;
 		ConcurrentQueue<IImpunityNetworkAction> PendingCallbacks;
+
+		public ImpunityCallback OnNetworkError { get; set; }
 
 		IImpunityClient NetworkClient;
 		Thread NetworkWriterThread;
@@ -201,21 +187,35 @@ namespace Impunity.Connection
 			PendingCallbacks = new ConcurrentQueue<IImpunityNetworkAction>();
 
 			NetworkClient = ImpunityTCPClient.MakeTCPClient(serverEndpoint, options);
-			NetworkClient.OnNetworkError = OnNetworkError;
-			NetworkClient.OnMessageRecieved = OnNetworkMessage;
+			NetworkClient.OnNetworkError = OnClientNetworkError;
+			NetworkClient.OnMessageRecieved = OnClientNetworkMessage;
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 		}
 
-		public void Connect()
+		public void Connect(ImpunityCallback onComplete)
 		{
-			NetworkClient.Connect();
+			NetworkClient.Connect((ImpunityError err) =>
+			{
+				ImpunityNetworkAction connectAction = new ImpunityNetworkAction(0, 0, null, onComplete);
 
-			Running = true;
-			NetworkWriterThread = new Thread(new ThreadStart(NetworkWriterThreadMain));
-			NetworkWriterThread.IsBackground = true;
-			NetworkWriterThread.Name = "Network writer";
-			NetworkWriterThread.Start();
+				if (err != null)
+				{
+					connectAction.Err = err;
+					PendingCallbacks.Enqueue(connectAction);
+					return;
+				}
+
+				Running = true;
+				NetworkWriterThread = new Thread(new ThreadStart(NetworkWriterThreadMain));
+				NetworkWriterThread.IsBackground = true;
+				NetworkWriterThread.Name = "Network writer";
+				NetworkWriterThread.Start();
+
+				PendingCallbacks.Enqueue(connectAction);
+			});
+
+			
 		}
 
 		public void Update()
@@ -224,7 +224,18 @@ namespace Impunity.Connection
 			{
 				try
 				{
-					action.InvokeCallback();
+					if (action.HasCallback())
+					{
+						action.InvokeCallback();
+					}
+					else if (action.Err != null)
+                    {
+						OnNetworkError?.Invoke(action.Err);
+					}
+					else
+                    {
+						ImpunityLogger.LogError("Got action callback with no callback or error");
+                    }
 				}
 				catch (Exception e)
 				{
@@ -268,7 +279,8 @@ namespace Impunity.Connection
 			BsonDocument requestBson = null;
 			if (requestBody != null)
 			{
-				requestBson = ImpunityNetworkingUtil.GetBsonMapper().ToDocument(requestBody);
+				BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+				requestBson = mapper.ToDocument(requestBody.GetType(), requestBody);
 			}
 
 			ushort flags = 0;
@@ -284,7 +296,7 @@ namespace Impunity.Connection
 		}
 
 		// On dotnet internal socket thread
-		private void OnNetworkMessage(byte[] buffer, int length)
+		private void OnClientNetworkMessage(byte[] buffer, int length)
 		{
 			MessageStruct msg;
 
@@ -308,9 +320,11 @@ namespace Impunity.Connection
 
 
 		// On dotnet internal socket thread
-		private void OnNetworkError(string error)
+		private void OnClientNetworkError(ImpunityError error)
 		{
-
+			ImpunityNetworkAction errAction = new ImpunityNetworkAction(0, 0, null, null);
+			errAction.Err = error;
+			PendingCallbacks.Enqueue(errAction);
 		}
 
 
@@ -331,10 +345,11 @@ namespace Impunity.Connection
 
 			try
 			{
-				ServerReply reply = ImpunityNetworkingUtil.GetBsonMapper().ToObject<ServerReply>(body);
+				BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+				ServerReply reply = mapper.ToObject<ServerReply>(body);
 				if (reply.Error != null)
 				{
-					action.SetError(reply.Error);
+					action.Err = reply.Error;
 				}
 				else if (reply.Result != null)
 				{

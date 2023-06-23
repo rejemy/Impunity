@@ -4,7 +4,6 @@ using UltraLiteDB;
 
 namespace Impunity
 {
-	public delegate void ImpunityActionComplete(ImpunityError err);
 	public delegate void ImpunityCallback(ImpunityError err);
 	public delegate void ImpunityCallback<TReturn>(ImpunityError err, TReturn returnValue);
 

@@ -3,14 +3,13 @@
 namespace Impunity.Networking
 {
 	public delegate void NetworkMessageHandler(byte[] buffer, int length);
-	public delegate void NetworkErrorHandler(string error);
 
 	public interface IImpunityClient : IDisposable
 	{
 		NetworkMessageHandler OnMessageRecieved { get; set; }
-		NetworkErrorHandler OnNetworkError { get; set; }
+		ImpunityCallback OnNetworkError { get; set; }
 
-		void Connect();
+		void Connect(ImpunityCallback onComplete);
 		void Disconnect();
 
 		bool SupportsUnguaranteed();

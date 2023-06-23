@@ -54,6 +54,13 @@ namespace Impunity.Unity
 
 	public static class ConnectionCoroutines
 	{
+		public static ImpunityYield Connect(this IGameStateConnection connection)
+		{
+			ImpunityYield action = new ImpunityYield();
+			connection.Connect(action.OnComplete);
+			return action;
+		}
+
 		public static ImpunityYield SetGameSummary(this IGameStateConnection connection, BsonDocument summary)
 		{
 			ImpunityYield action = new ImpunityYield();

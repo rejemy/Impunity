@@ -8,7 +8,7 @@ namespace Impunity.Connection
 
 	public interface IGameStateConnection : IDisposable
 	{
-		void Connect();
+		void Connect(ImpunityCallback onComplete);
 
 		void Update();
 

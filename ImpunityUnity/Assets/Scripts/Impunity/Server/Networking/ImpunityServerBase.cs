@@ -85,6 +85,11 @@ namespace Impunity.Networking
 		// Called on write thread
 		private void SendActionReply(IClientContext client, ushort messageId, ImpunityError error, BsonValue reply = null)
 		{
+			if (client == null)
+            {
+				return;
+            }
+
 			client.SendActionResult(messageId, error, reply);
 		}
 
@@ -107,10 +112,10 @@ namespace Impunity.Networking
 			ImpunityNetworkingUtil.ReadMessage(buffer, length, out msg);
 
 			IClientContext replyContext = null;
-			if ((msg.Flags &= ImpunityMessageFlags.NO_REPLY) == 0)
+			if ((msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0)
 			{
-				// Reply expected
-				replyContext = client;
+                // Reply expected
+                replyContext = client;
 			}
 
 			switch (msg.MessageType)

@@ -1,0 +1,24 @@
+{
+  "runtimeTarget": {
+    "name": ".NETStandard,Version=v2.1/",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETStandard,Version=v2.1": {},
+    ".NETStandard,Version=v2.1/": {
+      "UltraLiteDB/1.4.6": {
+        "runtime": {
+          "UltraLiteDB.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "UltraLiteDB/1.4.6": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

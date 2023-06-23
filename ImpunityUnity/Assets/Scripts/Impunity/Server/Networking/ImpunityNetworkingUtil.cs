@@ -28,7 +28,8 @@ namespace Impunity.Networking
 			}
 
 			Mapper = new BsonMapper();
-
+			Mapper.IncludeFields = true;
+			
 			return Mapper;
 		}
 
@@ -90,12 +91,12 @@ namespace Impunity.Networking
 		{
 			msg.Length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 0, 4));
 			msg.MessageType = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 4, 2));
-			msg.MessageId = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 4, 2));
-			msg.Flags = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 4, 2));
+			msg.MessageId = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 6, 2));
+			msg.Flags = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 8, 2));
 
 			if (length > 12)
 			{
-				msg.Body = null;
+				msg.Body = BsonReader.Deserialize(new ArraySegment<byte>(messageBuffer, 12, msg.Length));
 			}
 			else
 			{

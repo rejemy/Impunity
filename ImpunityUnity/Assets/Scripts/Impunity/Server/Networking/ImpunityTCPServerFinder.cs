@@ -133,7 +133,7 @@ namespace Impunity.Networking
 			BsonDocument doc = null;
 			try
 			{
-				doc = BsonSerializer.Deserialize(packet, true, ServerAnnounceHeader.Length);
+				doc = BsonSerializer.Deserialize(packet, ServerAnnounceHeader.Length);
 			}
 			catch (Exception e)
 			{
