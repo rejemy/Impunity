@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.IO;
 
@@ -17,11 +18,13 @@ public class ImpunityTestComponent : MonoBehaviour
 	ImpunityOptions Options;
 	GameStateFormat CurrFormat;
 
+	string GameStatePath;
+
 	GameStateServer GameServer;
+
 	LocalGameConnection LocalGame;
 
 	ImpunityServer TCPServer;
-
 	ImpunityTCPServerFinder Finder;
 	RemoteGameConnection RemoteGame;
 
@@ -39,26 +42,13 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	IEnumerator ComboTest()
 	{
-		BsonDocument summary = new BsonDocument();
-		summary["name"] = "Test Game";
+		GameStatePath = Path.Join(Application.persistentDataPath, "ImpTest", "TestGame");
 
 		Options = new ImpunityOptions
 		{
 			GameTypeCode = "ImpTest",
 			LANDiscoverable = true
 		};
-
-		string gamestatePath = Path.Join(Application.persistentDataPath, "ImpTest", "TestGame");
-		DeleteFolder(gamestatePath);
-
-		Debug.Log("Creating local game server");
-
-		GameServer = GameStateServer.Create(gamestatePath, summary);
-
-		//Debug.Log("Creating TCP game server");
-
-		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
-		TCPServer.Start();
 
 		CurrFormat = new GameStateFormat
 		{
@@ -73,12 +63,29 @@ public class ImpunityTestComponent : MonoBehaviour
 			}
 		};
 
+		yield return Setup();
+
 		yield return LocalConnectionTest();
+
+		yield return Setup();
 
 		yield return TCPConnectionTest();
 
-
 		Cleanup();
+	}
+
+	IEnumerator Setup()
+    {
+		Cleanup();
+
+		yield return new WaitForSeconds(0.1f);
+
+		Debug.Log("Creating local game server");
+
+		BsonDocument summary = new BsonDocument();
+		summary["name"] = "Test Game";
+
+		GameServer = GameStateServer.Create(GameStatePath, summary);
 	}
 
 	void Cleanup()
@@ -94,6 +101,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		GameServer?.Dispose();
 		GameServer = null;
+
+		DeleteFolder(GameStatePath);
 	}
 
 	IEnumerator LocalConnectionTest()
@@ -102,39 +111,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		LocalGame = new LocalGameConnection(GameServer);
 
-		Debug.Log("Calling EnsureFormat");
-		ImpunityYield ensureFormat = LocalGame.EnsureFormat(CurrFormat);
-		yield return ensureFormat;
-		if (ensureFormat.Error != null)
-		{
-			Debug.LogError(ensureFormat.Error.Message);
-			yield break;
-		}
-
-		BsonDocument char1 = new BsonDocument();
-		char1["_id"] = "char1";
-		char1["name"] = "Hogwind";
-		char1["level"] = 1;
-
-		Debug.Log("Calling InsertDocument");
-		ImpunityYield<BsonValue> insertAction = LocalGame.InsertDocument(1, char1);
-		yield return insertAction;
-		if (insertAction.Error != null)
-		{
-			Debug.LogError(insertAction.Error.Message);
-			yield break;
-		}
-
-		Debug.Log("Calling FindDocumentById");
-		ImpunityYield<BsonDocument> findAction = LocalGame.FindDocumentById(1, "char1");
-		yield return findAction;
-		if (findAction.Error != null)
-		{
-			Debug.LogError(findAction.Error.Message);
-			yield break;
-		}
-
-		Debug.Log("Found character " + (string)(findAction.Value["name"]));
+		yield return GenericConnectionTest(LocalGame);
 
 		LocalGame.Dispose();
 		LocalGame = null;
@@ -143,6 +120,13 @@ public class ImpunityTestComponent : MonoBehaviour
 	IEnumerator TCPConnectionTest()
 	{
 		Debug.Log("Running tcp connection test");
+
+		Debug.Log("Creating TCP game server");
+
+		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+		TCPServer.Start();
+
+		yield return new WaitForSeconds(0.1f);
 
 		Debug.Log("Looking for server");
 		Finder = new ImpunityTCPServerFinder(Options, OnServerFound);
@@ -154,13 +138,24 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 		Debug.Log("Found TCP server at " + ServerEndpoint.ToString());
 
+		Finder.Dispose();
+		Finder = null;
+
 		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, Options);
 		RemoteGame.OnNetworkError = OnNetworkError;
 
-		ImpunityYield connectAction = RemoteGame.Connect();
+		yield return GenericConnectionTest(RemoteGame);
+
+		RemoteGame.Dispose();
+		RemoteGame = null;
+	}
+
+	IEnumerator GenericConnectionTest(BaseGameConnection connection)
+    {
+		ImpunityYield connectAction = connection.Connect();
 		yield return connectAction;
-		if( connectAction.Error != null)
-        {
+		if (connectAction.Error != null)
+		{
 			Debug.Log("Error connecting: " + connectAction.Error.Message);
 			yield break;
 		}
@@ -168,7 +163,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Debug.Log("TCP Connected");
 
 		Debug.Log("Calling EnsureFormat");
-		ImpunityYield ensureFormat = RemoteGame.EnsureFormat(CurrFormat);
+		ImpunityYield ensureFormat = connection.EnsureFormat(CurrFormat);
 		yield return ensureFormat;
 		if (ensureFormat.Error != null)
 		{
@@ -176,13 +171,13 @@ public class ImpunityTestComponent : MonoBehaviour
 			yield break;
 		}
 
-		BsonDocument char2 = new BsonDocument();
-		char2["_id"] = "char2";
-		char2["name"] = "Hogstorm";
-		char2["level"] = 1;
+		BsonDocument char1 = new BsonDocument();
+		char1["_id"] = "char1";
+		char1["name"] = "Hogstorm";
+		char1["level"] = 1;
 
 		Debug.Log("Calling InsertDocument");
-		ImpunityYield<BsonValue> insertAction = RemoteGame.InsertDocument(1, char2);
+		ImpunityYield<BsonValue> insertAction = connection.InsertDocument(1, char1);
 		yield return insertAction;
 		if (insertAction.Error != null)
 		{
@@ -190,8 +185,19 @@ public class ImpunityTestComponent : MonoBehaviour
 			yield break;
 		}
 
+		char1["level"] = 2;
+
+		Debug.Log("Calling UpsertDocument");
+		ImpunityYield<bool> upsertAction = connection.UpsertDocument(1, char1);
+		yield return upsertAction;
+		if (upsertAction.Error != null)
+		{
+			Debug.LogError(upsertAction.Error.Message);
+			yield break;
+		}
+
 		Debug.Log("Calling FindDocumentById");
-		ImpunityYield<BsonDocument> findAction = RemoteGame.FindDocumentById(1, "char2");
+		ImpunityYield<BsonDocument> findAction = connection.FindDocumentById(1, "char1");
 		yield return findAction;
 		if (findAction.Error != null)
 		{
@@ -201,8 +207,49 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("Found character " + (string)(findAction.Value["name"]));
 
-		RemoteGame.Dispose();
-		RemoteGame = null;
+
+		BsonDocument char2 = new BsonDocument();
+		char2["_id"] = "char2";
+		char2["name"] = "Hogwind";
+		char2["level"] = 1;
+
+		Debug.Log("Calling InsertDocument for char 2");
+		ImpunityYield<BsonValue> insert2Action = connection.InsertDocument(1, char2);
+		yield return insert2Action;
+		if (insert2Action.Error != null)
+		{
+			Debug.LogError(insert2Action.Error.Message);
+			yield break;
+		}
+
+		Debug.Log("Calling ListDocuments");
+		ImpunityYield<List<BsonDocument>> listAction = connection.ListDocuments(1);
+		yield return listAction;
+		if (listAction.Error != null)
+		{
+			Debug.LogError(listAction.Error.Message);
+			yield break;
+		}
+
+		Debug.Log("characters found " + listAction.Value.Count);
+
+		char1["level"] = 10;
+		char2["level"] = 10;
+
+		Debug.Log("Compound upsert");
+		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundAction(new GameStateActionBase[] {
+			new UpsertDocumentAction(1, char1),
+			new UpsertDocumentAction(1, char2),
+			new ListDocumentActions(1),
+		});
+		yield return compoundAction;
+		if (compoundAction.Error != null)
+		{
+			Debug.LogError(compoundAction.Error.Message);
+			yield break;
+		}
+
+		Debug.Log("Compound action results " + compoundAction.Value.Count);
 	}
 
 	void OnNetworkError(ImpunityError err)

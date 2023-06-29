@@ -1,8 +1,10 @@
-﻿using UnityEngine;
+﻿using System.Collections.Generic;
+
+using UnityEngine;
 
 using UltraLiteDB;
 
-
+using Impunity.GameState;
 using Impunity.Connection;
 
 
@@ -113,7 +115,21 @@ namespace Impunity.Unity
 		public static ImpunityYield<bool> DeleteDocument(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
-			connection.DeleteDocument(collectionId, id);
+			connection.DeleteDocument(collectionId, id, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<List<BsonDocument>> ListDocuments(this BaseGameConnection connection, int collectionId)
+		{
+			ImpunityYield<List<BsonDocument>> action = new ImpunityYield<List<BsonDocument>>();
+			connection.ListDocuments(collectionId, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<List<ActionResult>> CompoundAction(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
+		{
+			ImpunityYield<List<ActionResult>> action = new ImpunityYield<List<ActionResult>>();
+			connection.CompoundAction(actions, action.OnComplete);
 			return action;
 		}
 

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 
 using UltraLiteDB;
@@ -297,6 +298,16 @@ namespace Impunity.GameState
 			}
 
 			return Collections[collectionId].Collection.Delete(id);
+		}
+
+		public List<BsonDocument> ListDocuments(int collectionId)
+		{
+			if (collectionId <= 0 || collectionId >= Collections.Length)
+			{
+				throw new Exception("Invalid collection id: " + collectionId);
+			}
+
+			return new List<BsonDocument>(Collections[collectionId].Collection.FindAll());
 		}
 	}
 

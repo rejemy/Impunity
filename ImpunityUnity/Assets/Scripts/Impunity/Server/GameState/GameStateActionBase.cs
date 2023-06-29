@@ -16,10 +16,8 @@ namespace Impunity.GameState
         public ImpunityError Error;
     }
 
-    public class ActionResult<TResult>
+    public class ActionResult<TResult> : ActionResult
     {
-        [BsonField("e")]
-        public ImpunityError Error;
         [BsonField("r")]
         public TResult Result;
     }
@@ -52,8 +50,17 @@ namespace Impunity.GameState
 
         protected abstract void DoAction(GameStateLogic game);
 
+        public abstract ActionResult GetResult();
 
-        public abstract BsonDocument SerializeResults();
+        public abstract Type GetResultType();
+
+        public BsonDocument SerializeResults()
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            ActionResult reply = GetResult();
+            return mapper.ToDocument(reply);
+        }
+
         public abstract void DeserializeResults(BsonDocument resultBody);
 
         public abstract void InvokeOnCompleteCallback();
@@ -69,12 +76,16 @@ namespace Impunity.GameState
             return OnCompleteCallback != null;
         }
 
-        public override BsonDocument SerializeResults()
+        public override ActionResult GetResult()
         {
-            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
             ActionResult reply = new ActionResult();
             reply.Error = Error;
-            return mapper.ToDocument(reply);
+            return reply;
+        }
+
+        public override Type GetResultType()
+        {
+            return typeof(ActionResult);
         }
 
         public override void DeserializeResults(BsonDocument resultBody)
@@ -103,13 +114,17 @@ namespace Impunity.GameState
             return OnCompleteCallback != null;
         }
 
-        public override BsonDocument SerializeResults()
+        public override ActionResult GetResult()
         {
-            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
             ActionResult<TResult> reply = new ActionResult<TResult>();
             reply.Error = Error;
             reply.Result = Result;
-            return mapper.ToDocument(reply);
+            return reply;
+        }
+
+        public override Type GetResultType()
+        {
+            return typeof(ActionResult<TResult>);
         }
 
         public override void DeserializeResults(BsonDocument resultBody)

@@ -70,6 +70,6 @@ ImpunityUnity/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
 ImpunityUnity/[Aa]ssets/[Ss]treamingAssets/aa.meta
 ImpunityUnity/[Aa]ssets/[Ss]treamingAssets/aa/*
 
-
-# Server ignores
-
+bin
+lib
+obj

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 
 using UltraLiteDB;
 
@@ -59,6 +60,16 @@ namespace Impunity.Connection
 		{
 			DoAction(new DeleteDocumentAction(collectionId, id, onComplete));
 		}
+
+		public void ListDocuments(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete)
+		{
+			DoAction(new ListDocumentActions(collectionId, onComplete));
+		}
+
+		public void CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
+        {
+			DoAction(new CompoundAction(actions, onComplete));
+        }
 	}
 
 }

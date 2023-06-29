@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 
 using UltraLiteDB;
+
+using Impunity.Networking;
 
 namespace Impunity.GameState
 {
@@ -14,6 +17,7 @@ namespace Impunity.GameState
         UPSERT_DOCUMENT = 6,
         FIND_DOCUMENT_BY_ID = 7,
         DELETE_DOCUMENT = 8,
+        LIST_DOCUMENTS = 9,
 
         COMPOUND = 100,
     }
@@ -40,6 +44,8 @@ namespace Impunity.GameState
                     return typeof(FindDocumentByIdAction);
                 case GameStateActionType.DELETE_DOCUMENT:
                     return typeof(DeleteDocumentAction);
+                case GameStateActionType.LIST_DOCUMENTS:
+                    return typeof(ListDocumentActions);
                 case GameStateActionType.COMPOUND:
                     return typeof(CompoundAction);
             }
@@ -247,27 +253,53 @@ namespace Impunity.GameState
         }
     }
 
-    public class CompoundAction : GameStateActionResultlessBase
+    public class ListDocumentActions : GameStateActionResultBase<List<BsonDocument>>
     {
-        [BsonField("as")]
-        public GameStateActionBase[] Actions;
+        [BsonField("cid")]
+        public int CollectionId;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.COMPOUND; }
+        public override ushort GetActionType() { return (ushort)GameStateActionType.LIST_DOCUMENTS; }
 
-        public CompoundAction() { }
+        public ListDocumentActions() { }
 
-        public CompoundAction(GameStateActionBase[] actions, ImpunityCallback onComplete = null)
+        public ListDocumentActions(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
         {
-            Actions = actions;
+            CollectionId = collectionId;
             OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateLogic game)
         {
+            Result = game.ListDocuments(CollectionId);
+        }
+    }
+
+    public class CompoundAction : GameStateActionResultBase<List<ActionResult>>
+    {
+        [BsonField("as")]
+        public List<GameStateActionBase> Actions;
+
+        public override ushort GetActionType() { return (ushort)GameStateActionType.COMPOUND; }
+
+        public CompoundAction() { }
+
+        public CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete = null)
+        {
+            Actions = new List<GameStateActionBase>(actions);
+            OnCompleteCallback = onComplete;
+        }
+
+        protected override void DoAction(GameStateLogic game)
+        {
+            Result = new List<ActionResult>();
+
             bool error = false;
             foreach (GameStateActionBase action in Actions)
             {
                 action.Run(game);
+
+                Result.Add(action.GetResult());
+
                 if (action.Error != null)
                 {
                     error = true;
@@ -277,6 +309,33 @@ namespace Impunity.GameState
             if (error)
             {
                 Error = new ImpunityError("Compound action error");
+            }
+        }
+
+
+        // Custom deserializer so that we know what to expect for each result type in the list
+        public override void DeserializeResults(BsonDocument resultBody)
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+
+            BsonValue errorVal = resultBody["e"];
+            if (!errorVal.IsNull)
+            {
+                Error = mapper.ToObject<ImpunityError>(errorVal.AsDocument);
+            }
+
+            BsonArray resultArray = (BsonArray)(resultBody["r"]);
+
+            Result = new List<ActionResult>(resultArray.Count);
+
+            for(int i=0; i < Actions.Count; i++)
+            {
+                GameStateActionBase action = Actions[i];
+                BsonDocument resultVal = resultArray[i].AsDocument;
+
+                Type resultType = action.GetResultType();
+
+                Result.Add((ActionResult)mapper.ToObject(resultType, resultVal));
             }
         }
     }
