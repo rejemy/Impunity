@@ -1,0 +1,130 @@
+using System;
+
+using UltraLiteDB;
+
+using Impunity.Networking;
+
+namespace Impunity.GameState
+{
+
+    public delegate void ImpunityActionCallback(GameStateActionBase action);
+
+
+    public class ActionResult
+    {
+        [BsonField("e")]
+        public ImpunityError Error;
+    }
+
+    public class ActionResult<TResult>
+    {
+        [BsonField("e")]
+        public ImpunityError Error;
+        [BsonField("r")]
+        public TResult Result;
+    }
+
+    public abstract class GameStateActionBase
+    {
+        [BsonIgnore]
+        public ImpunityError Error;
+
+        [BsonIgnore]
+        internal ImpunityActionCallback OnCompleteHandler;
+
+        [BsonIgnore]
+        public object Context { get; set; }
+
+        public abstract ushort GetActionType();
+        public abstract bool HasCallback();
+
+        public void Run(GameStateLogic game)
+        {
+            try
+            {
+                DoAction(game);
+            }
+            catch(Exception e)
+            {
+                Error = new ImpunityError(e);
+            }
+        }
+
+        protected abstract void DoAction(GameStateLogic game);
+
+
+        public abstract BsonDocument SerializeResults();
+        public abstract void DeserializeResults(BsonDocument resultBody);
+
+        public abstract void InvokeOnCompleteCallback();
+    }
+
+    public abstract class GameStateActionResultlessBase : GameStateActionBase
+    {
+        [BsonIgnore]
+        public ImpunityCallback OnCompleteCallback;
+
+        public override bool HasCallback()
+        {
+            return OnCompleteCallback != null;
+        }
+
+        public override BsonDocument SerializeResults()
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            ActionResult reply = new ActionResult();
+            reply.Error = Error;
+            return mapper.ToDocument(reply);
+        }
+
+        public override void DeserializeResults(BsonDocument resultBody)
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            ActionResult reply = mapper.ToObject<ActionResult>(resultBody);
+            Error = reply.Error;
+        }
+
+        public override void InvokeOnCompleteCallback()
+        {
+            OnCompleteCallback?.Invoke(Error);
+        }
+    }
+
+    public abstract class GameStateActionResultBase<TResult> : GameStateActionBase
+    {
+        [BsonIgnore]
+        public TResult Result;
+
+        [BsonIgnore]
+        public ImpunityCallback<TResult> OnCompleteCallback;
+
+        public override bool HasCallback()
+        {
+            return OnCompleteCallback != null;
+        }
+
+        public override BsonDocument SerializeResults()
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            ActionResult<TResult> reply = new ActionResult<TResult>();
+            reply.Error = Error;
+            reply.Result = Result;
+            return mapper.ToDocument(reply);
+        }
+
+        public override void DeserializeResults(BsonDocument resultBody)
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            ActionResult<TResult> reply = mapper.ToObject<ActionResult<TResult>>(resultBody);
+            Error = reply.Error;
+            Result = reply.Result;
+        }
+
+        public override void InvokeOnCompleteCallback()
+        {
+            OnCompleteCallback?.Invoke(Error, Result);
+        }
+    }
+
+
+}

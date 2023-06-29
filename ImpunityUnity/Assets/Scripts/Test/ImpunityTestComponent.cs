@@ -20,7 +20,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	GameStateServer GameServer;
 	LocalGameConnection LocalGame;
 
-	ImpunityTCPServer TCPServer;
+	ImpunityServer TCPServer;
 
 	ImpunityTCPServerFinder Finder;
 	RemoteGameConnection RemoteGame;
@@ -55,9 +55,9 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		GameServer = GameStateServer.Create(gamestatePath, summary);
 
-		Debug.Log("Creating TCP game server");
+		//Debug.Log("Creating TCP game server");
 
-		TCPServer = new ImpunityTCPServer(GameServer, Options);
+		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
 		TCPServer.Start();
 
 		CurrFormat = new GameStateFormat
@@ -154,7 +154,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 		Debug.Log("Found TCP server at " + ServerEndpoint.ToString());
 
-		RemoteGame = new RemoteGameConnection(ServerEndpoint, Options);
+		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, Options);
 		RemoteGame.OnNetworkError = OnNetworkError;
 
 		ImpunityYield connectAction = RemoteGame.Connect();
@@ -212,7 +212,12 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	void OnServerFound(ServerInfo serverInfo)
 	{
-		string gameName = serverInfo.GameSummary["name"];
+
+		string gameName = "new game";
+		if (serverInfo.GameSummary != null)
+        {
+			gameName = serverInfo.GameSummary["name"];
+		}
 		Debug.Log("Found a server: " + gameName);
 
 		FoundServer = true;

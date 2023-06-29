@@ -17,7 +17,7 @@ namespace Impunity.Networking
 
 		ImpunityCallback OnConnectCallback;
 
-		public NetworkMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		public ImpunityCallback OnNetworkError { get; set; }
 
 		public static IImpunityClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
@@ -110,7 +110,7 @@ namespace Impunity.Networking
 
 					try
 					{
-						OnMessageRecieved.Invoke(receiveBuffer, messageLength);
+						OnMessageRecieved.Invoke(new ArraySegment<byte>(receiveBuffer, 0, messageLength));
 					}
 					catch (Exception e)
 					{
@@ -149,24 +149,24 @@ namespace Impunity.Networking
 			ImpunityLogger.LogInformation("Client socket closed");
 		}
 
-		public void SendGuaranteedMessage(byte[] buffer, int offset, int length)
+		public void SendGuaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			if (ClientSocket == null || !ClientSocket.Connected)
 			{
 				return;
 			}
 
-			SocketStream.Write(buffer, offset, length);
+			SocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
-		public void SendUnguaranteedMessage(byte[] buffer, int offset, int length)
+		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			if (ClientSocket == null || !ClientSocket.Connected)
 			{
 				return;
 			}
 
-			SocketStream.Write(buffer, offset, length);
+			SocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
 		public void Dispose()

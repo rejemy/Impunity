@@ -131,14 +131,18 @@ namespace Impunity.Networking
 		{
 
 			BsonDocument doc = null;
-			try
+
+			if (packet.Length - ServerAnnounceHeader.Length > 0)
 			{
-				doc = BsonSerializer.Deserialize(packet, ServerAnnounceHeader.Length);
-			}
-			catch (Exception e)
-			{
-				ImpunityLogger.LogError(e, "Exception deserializing game summary");
-				return;
+				try
+				{
+					doc = BsonSerializer.Deserialize(packet, ServerAnnounceHeader.Length);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception deserializing game summary");
+					return;
+				}
 			}
 
 			ServerInfo info = new ServerInfo();

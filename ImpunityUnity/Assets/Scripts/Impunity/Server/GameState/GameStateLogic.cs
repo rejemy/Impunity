@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Collections.Concurrent;
 
 using UltraLiteDB;
 
@@ -33,10 +34,13 @@ namespace Impunity.GameState
 		GameMetadata Metadata;
 		CollectionData[] Collections;
 
+		ConcurrentDictionary<int,IGameStateListener> Listeners;
+
 		private GameStateLogic(string path)
 		{
 			RootDirectory = path;
 			DBFilename = Path.Combine(RootDirectory, GameDBFile);
+			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
 		}
 
@@ -122,20 +126,6 @@ namespace Impunity.GameState
 			}
 		}
 
-		public void SetGameSummary(BsonDocument summary)
-		{
-			Summary = summary;
-
-			byte[] summaryBytes = BsonSerializer.Serialize(summary);
-			string summaryFile = Path.Combine(RootDirectory, GameSummaryFile);
-			File.WriteAllBytes(summaryFile, summaryBytes);
-		}
-
-		// NOTE - sometimes called from external thread
-		public BsonDocument GetSummary()
-		{
-			return Summary;
-		}
 
 		public static BsonDocument LoadSummary(string path)
 		{
@@ -157,6 +147,7 @@ namespace Impunity.GameState
 			}
 		}
 
+
 		private void LoadMetadata()
 		{
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
@@ -173,6 +164,53 @@ namespace Impunity.GameState
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
 			metadataCollection.Upsert(Metadata);
 		}
+
+
+		public void RunAction(GameStateActionBase action)
+        {
+			action.Run(this);
+        }
+
+		public void AddListener(IGameStateListener listener)
+		{
+			Listeners[listener.GetHashCode()] = listener;
+		}
+
+		public void RemoveListener(IGameStateListener listener)
+		{
+			Listeners.TryRemove(listener.GetHashCode(), out _);
+		}
+
+		// ------------ API -----------------
+
+		// NOTE - sometimes called from external thread
+		public BsonDocument GetGameSummary()
+		{
+			return Summary;
+		}
+
+
+		public void SetGameSummary(BsonDocument summary)
+		{
+			Summary = summary;
+
+			byte[] summaryBytes = BsonSerializer.Serialize(summary);
+			string summaryFile = Path.Combine(RootDirectory, GameSummaryFile);
+			File.WriteAllBytes(summaryFile, summaryBytes);
+
+			foreach (IGameStateListener listener in Listeners.Values)
+            {
+				try
+                {
+					listener.OnGameSummaryChanged(summary);
+				}
+				catch(Exception e)
+                {
+					ImpunityLogger.LogError(e, "Exception in OnGameSummaryChanged handler");
+                }
+            }
+		}
+
 
 		public void EnsureFormat(GameStateFormat format)
 		{

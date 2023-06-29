@@ -39,19 +39,15 @@ namespace Impunity.Networking
 		// UTF8encoded: "IMP{{ImpunityVersion}}_SRCH:{{GameTypeCode}}:{{BsonBody}}
 		//
 
-		public static ArraySegment<byte> WriteBroadcastPacket(byte[] destBuffer, byte[] header, BsonDocument message)
-		{
-			Buffer.BlockCopy(header, 0, destBuffer, 0, header.Length);
-			int length = BsonWriter.SerializeTo(message, destBuffer, header.Length);
-			return new ArraySegment<byte>(destBuffer, 0, length);
-		}
-
-		public static ArraySegment<byte> WriteBroadcastPacket(byte[] destBuffer, string header, BsonDocument message)
+		public static ArraySegment<byte> MakeBroadcastPacket(byte[] destBuffer, string header, byte[] summaryBytes, int summaryBytesLength)
 		{
 			byte[] headerBytes = Encoding.UTF8.GetBytes(header);
-			Buffer.BlockCopy(headerBytes, 0, destBuffer, 0, header.Length);
-			int length = BsonWriter.SerializeTo(message, destBuffer, header.Length);
-			return new ArraySegment<byte>(destBuffer, 0, length);
+			Buffer.BlockCopy(headerBytes, 0, destBuffer, 0, headerBytes.Length);
+			if (summaryBytes != null)
+			{
+				Buffer.BlockCopy(summaryBytes, 0, destBuffer, headerBytes.Length, summaryBytesLength);
+			}
+			return new ArraySegment<byte>(destBuffer, 0, headerBytes.Length + summaryBytesLength);
 		}
 
 		// Binary message format:
@@ -82,21 +78,31 @@ namespace Impunity.Networking
 				length = BsonWriter.SerializeTo(message, destBuffer, length);
 			}
 
+			if (length >= ImpunityConstants.MaxMessageSize)
+            {
+				throw new Exception("Tried to send a message that's too large! Length: " + length);
+            }
+
 			BinaryPrimitives.WriteInt32LittleEndian(new Span<byte>(destBuffer, 0, 4), length);
 
 			return new ArraySegment<byte>(destBuffer, 0, length);
 		}
 
-		public static void ReadMessage(byte[] messageBuffer, int length, out MessageStruct msg)
+		public static void ReadMessage(ArraySegment<byte> messageBytes, out MessageStruct msg)
 		{
-			msg.Length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 0, 4));
-			msg.MessageType = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 4, 2));
-			msg.MessageId = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 6, 2));
-			msg.Flags = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 8, 2));
+			msg.Length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset, 4));
+			msg.MessageType = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 4, 2));
+			msg.MessageId = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 6, 2));
+			msg.Flags = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 8, 2));
 
-			if (length > 12)
+			if (messageBytes.Count >= ImpunityConstants.MaxMessageSize)
 			{
-				msg.Body = BsonReader.Deserialize(new ArraySegment<byte>(messageBuffer, 12, msg.Length));
+				throw new Exception("Received a message that's too large! Length: " + messageBytes.Count);
+			}
+
+			if (messageBytes.Count > 12)
+			{
+				msg.Body = BsonReader.Deserialize(new ArraySegment<byte>(messageBytes.Array, messageBytes.Offset + 12, msg.Length));
 			}
 			else
 			{
@@ -104,9 +110,9 @@ namespace Impunity.Networking
 			}
 		}
 
-		public static int GetMessageLength(byte[] messageBuffer)
+		public static int GetMessageLength(ArraySegment<byte> messageBytes)
 		{
-			return BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBuffer, 0, 4));
+			return BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset, 4));
 		}
 
 		public static bool StartsWith(byte[] packet, byte[] header)

@@ -4,147 +4,15 @@ using System.Threading;
 
 using UltraLiteDB;
 
-using Impunity.Networking;
 
 namespace Impunity.GameState
 {
-	public interface IGameStateResultHandler
-	{
-		void OnActionComplete(IImpunityAction action);
-	}
-
-
-	public interface IImpunityAction
-	{
-		void InvokeAction();
-
-		void InvokeResultsCallback();
-
-		bool HasResult();
-		BsonDocument GetResult();
-		ImpunityError GetError();
-	}
 
 	public class GameStateServer
 	{
-		protected class VoidActionRecord : IImpunityAction
-		{
-			IGameStateResultHandler ReportTo;
-
-			Action Work;
-			ImpunityError Err;
-
-			ImpunityCallback ResultsCallback;
-
-			public VoidActionRecord(IGameStateResultHandler reportTo, ImpunityCallback onComplete, Action work)
-			{
-				ReportTo = reportTo;
-				Work = work;
-				ResultsCallback = onComplete;
-			}
-
-			public void InvokeAction()
-			{
-				try
-				{
-					Work();
-				}
-				catch (Exception e)
-				{
-					Err = new ImpunityError(e);
-				}
-
-				if (ResultsCallback != null)
-				{
-					OnActionComplete();
-				}
-			}
-
-			public void OnActionComplete()
-			{
-				ReportTo.OnActionComplete(this);
-			}
-
-			public void InvokeResultsCallback()
-			{
-				ResultsCallback.Invoke(Err);
-			}
-
-			public bool HasResult() { return false; }
-
-			public BsonDocument GetResult()
-			{
-				return null;
-			}
-
-			public ImpunityError GetError()
-			{
-				return Err;
-			}
-		}
-
-		protected class ActionRecord<TResult> : IImpunityAction
-		{
-			IGameStateResultHandler ReportTo;
-			Func<TResult> Work;
-
-			TResult Result;
-			ImpunityError Err;
-
-			ImpunityCallback<TResult> ResultsCallback;
-
-			public ActionRecord(IGameStateResultHandler reportTo, ImpunityCallback<TResult> onComplete, Func<TResult> work)
-			{
-				ReportTo = reportTo;
-				Work = work;
-				ResultsCallback = onComplete;
-			}
-
-
-			public void InvokeAction()
-			{
-				try
-				{
-					Result = Work();
-				}
-				catch (Exception e)
-				{
-					Err = new ImpunityError(e);
-				}
-
-				if (ResultsCallback != null)
-				{
-					OnActionComplete();
-				}
-			}
-
-			public void OnActionComplete()
-			{
-				ReportTo.OnActionComplete(this);
-			}
-
-			public void InvokeResultsCallback()
-			{
-				ResultsCallback.Invoke(Err, Result);
-			}
-
-
-			public bool HasResult() { return true; }
-
-			public BsonDocument GetResult()
-			{
-				return null;
-			}
-
-			public ImpunityError GetError()
-			{
-				return Err;
-			}
-		}
-
 		GameStateLogic State;
 
-		BlockingCollection<IImpunityAction> PendingActions;
+		BlockingCollection<GameStateActionBase> ActionQueue;
 		Thread WorkerThread;
 		bool Running;
 
@@ -152,7 +20,7 @@ namespace Impunity.GameState
 		{
 			State = gameState;
 
-			PendingActions = new BlockingCollection<IImpunityAction>();
+			ActionQueue = new BlockingCollection<GameStateActionBase>();
 
 			Running = true;
 			WorkerThread = new Thread(new ThreadStart(WorkThead));
@@ -174,14 +42,15 @@ namespace Impunity.GameState
 		public void Dispose()
 		{
 			Running = false;
-			PendingActions.CompleteAdding();
+
+			ActionQueue.CompleteAdding();
 
 			WorkerThread.Join();
 		}
 
 		private void Shutdown()
 		{
-			PendingActions.Dispose();
+			ActionQueue.Dispose();
 
 			if (State != null)
 			{
@@ -194,11 +63,11 @@ namespace Impunity.GameState
 		{
 			while (Running)
 			{
-				IImpunityAction action = null;
+				GameStateActionBase action = null;
 
 				try
 				{
-					action = PendingActions.Take();
+					action = ActionQueue.Take();
 				}
 				catch (InvalidOperationException)
 				{
@@ -207,101 +76,42 @@ namespace Impunity.GameState
 					return;
 				}
 
-				// Invoke catches exceptions in the action
-				action.InvokeAction();
+				// Run catches exceptions in the action
+				action.Run(State);
+
+				try
+                {
+					action.OnCompleteHandler?.Invoke(action);
+                }
+				catch(Exception e)
+                {
+					ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+                }
 			}
 		}
 
-		protected void CallGameState(IGameStateResultHandler handler, ImpunityCallback onComplete, Action call)
+
+		public BsonDocument GetGameSummary()
 		{
-			PendingActions.Add(new VoidActionRecord(handler, onComplete, call));
+			return State.GetGameSummary();
 		}
 
+		public void AddListener(IGameStateListener listener)
+        {
+			State.AddListener(listener);
+        }
 
-		protected void CallGameState<TReturn>(IGameStateResultHandler handler, ImpunityCallback<TReturn> onComplete, Func<TReturn> call)
+		public void RemoveListener(IGameStateListener listener)
 		{
-			PendingActions.Add(new ActionRecord<TReturn>(handler, onComplete, call));
+			State.RemoveListener(listener);
 		}
 
-		public BsonDocument GetSummary()
-		{
-			return State.GetSummary();
+		public void QueueAction(GameStateActionBase action)
+        {
+			ActionQueue.Add(action);
+
 		}
 
-		// -----------------------------
-
-		public void SetGameSummary(IGameStateResultHandler handler, BsonDocument summary, ImpunityCallback onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				State.SetGameSummary(summary);
-			}
-			);
-		}
-
-		public void GetSummary(IGameStateResultHandler handler, ImpunityCallback<BsonDocument> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				return State.GetSummary();
-			}
-			);
-		}
-
-
-		public void EnsureFormat(IGameStateResultHandler handler, GameStateFormat format, ImpunityCallback onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				State.EnsureFormat(format);
-			}
-			);
-		}
-
-		public void InsertDocument(IGameStateResultHandler handler, int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				return State.InsertDocument(collectionId, doc);
-			}
-			);
-		}
-
-		public void UpdateDocument(IGameStateResultHandler handler, int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				return State.UpdateDocument(collectionId, doc);
-			}
-			);
-		}
-
-		public void UpsertDocument(IGameStateResultHandler handler, int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				return State.UpsertDocument(collectionId, doc);
-			}
-			);
-		}
-
-		public void FindDocumentById(IGameStateResultHandler handler, int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			{
-				return State.FindDocumentById(collectionId, id);
-			}
-			);
-		}
-
-		public void DeleteDocument(IGameStateResultHandler handler, int collectionId, BsonValue id, ImpunityCallback<bool> onComplete)
-		{
-			CallGameState(handler, onComplete, () =>
-			 {
-				 return State.DeleteDocument(collectionId, id);
-			 }
-			);
-		}
 	}
 
 }

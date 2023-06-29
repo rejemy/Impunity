@@ -1,130 +1,72 @@
 ﻿using System;
 using System.Collections.Concurrent;
 
-using Impunity.GameState;
-
 using UltraLiteDB;
 
+using Impunity.GameState;
 
 namespace Impunity.Connection
 {
 
-	public class LocalGameConnection : IGameStateConnection, IGameStateResultHandler, IDisposable
+	public class LocalGameConnection : BaseGameConnection, IGameStateListener
 	{
 
-		protected class ConnectActionRecord : IImpunityAction
-		{
-			ImpunityCallback ResultsCallback;
-
-			public ConnectActionRecord(ImpunityCallback onComplete)
-			{
-				ResultsCallback = onComplete;
-			}
-
-			public void InvokeAction()
-			{
-				
-			}
-
-			public void InvokeResultsCallback()
-			{
-				ResultsCallback?.Invoke(null);
-			}
-
-			public bool HasResult() { return false; }
-
-			public BsonDocument GetResult()
-			{
-				return null;
-			}
-
-			public ImpunityError GetError()
-			{
-				return null;
-			}
-		}
-
-		GameStateServer State;
-		ConcurrentQueue<IImpunityAction> PendingCallbacks;
+        GameStateServer State;
+		ConcurrentQueue<GameStateActionBase> CompletedActions;
 
 		public LocalGameConnection(GameStateServer gameState, ImpunityOptions options = null)
 		{
 			State = gameState;
-			PendingCallbacks = new ConcurrentQueue<IImpunityAction>();
+			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
+			State.AddListener(this);
 		}
 
-		public void Connect(ImpunityCallback onComplete)
+		public override void Connect(ImpunityCallback onComplete)
 		{
-			PendingCallbacks.Enqueue(new ConnectActionRecord(onComplete));
+			CompletedActions.Enqueue(new NoOpAction(onComplete));
 		}
 
-		public void Update()
+		public override void Update()
 		{
-			while (PendingCallbacks.TryDequeue(out IImpunityAction action))
+
+			while (CompletedActions.TryDequeue(out GameStateActionBase action))
 			{
 				try
 				{
-					action.InvokeResultsCallback();
+					action.InvokeOnCompleteCallback();
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in gamestate callback");
+					ImpunityLogger.LogError(e, "Exception in action results callback");
 				}
 			}
 		}
 
-		public void Dispose()
-		{
+		public void OnGameSummaryChanged(BsonDocument summary)
+        {
 
+        }
+
+		public override void Dispose()
+		{
+			State.RemoveListener(this);
 		}
 
 		// Called on background thread
-		public void OnActionComplete(IImpunityAction action)
+		public void OnActionComplete(GameStateActionBase action)
 		{
-			PendingCallbacks.Enqueue(action);
+			CompletedActions.Enqueue(action);
 		}
 
-		// -------- API Calls
+		public override void DoAction(GameStateActionBase action)
+        {
+			if (action.HasCallback())
+			{
+				action.OnCompleteHandler = this.OnActionComplete;
+			}
+			State.QueueAction(action);
+        }
 
-		public void SetGameSummary(BsonDocument summary, ImpunityCallback onComplete)
-		{
-			State.SetGameSummary(this, summary, onComplete);
-		}
-
-		public void GetSummary(ImpunityCallback<BsonDocument> onComplete)
-		{
-			State.GetSummary(this, onComplete);
-		}
-
-		public void EnsureFormat(GameStateFormat format, ImpunityCallback onComplete)
-		{
-			State.EnsureFormat(this, format, onComplete);
-		}
-
-		public void InsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete)
-		{
-			State.InsertDocument(this, collectionId, doc, onComplete);
-		}
-
-		public void UpdateDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
-		{
-			State.UpdateDocument(this, collectionId, doc, onComplete);
-		}
-
-		public void UpsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
-		{
-			State.UpsertDocument(this, collectionId, doc, onComplete);
-		}
-
-		public void FindDocumentById(int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete)
-		{
-			State.FindDocumentById(this, collectionId, id, onComplete);
-		}
-
-		public void DeleteDocument(int collectionId, BsonValue id, ImpunityCallback<bool> onComplete)
-		{
-			State.DeleteDocument(this, collectionId, id, onComplete);
-		}
 	}
 
 }
