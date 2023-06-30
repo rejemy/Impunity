@@ -4,6 +4,8 @@ using System.Buffers.Binary;
 
 using UltraLiteDB;
 
+using Impunity.GameState;
+
 namespace Impunity.Networking
 {
 
@@ -29,7 +31,14 @@ namespace Impunity.Networking
 
 			Mapper = new BsonMapper();
 			Mapper.IncludeFields = true;
-			
+			Mapper.IncludeFullType = false;
+
+			foreach (GameStateActionType actionTypeId in Enum.GetValues(typeof(GameStateActionType)))
+            {
+				Type actionType = GameActionFactory.GetActionClassType(actionTypeId);
+				Mapper.RegisterTypeId(actionType, (int)actionTypeId);
+			}
+
 			return Mapper;
 		}
 

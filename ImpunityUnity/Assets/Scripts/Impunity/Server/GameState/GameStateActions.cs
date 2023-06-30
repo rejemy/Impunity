@@ -24,6 +24,22 @@ namespace Impunity.GameState
 
     public static class GameActionFactory
     {
+        public static Type GetActionClassType(int type)
+        {
+            GameStateActionType typeEnum;
+
+            try
+            {
+                typeEnum = (GameStateActionType)type;
+            }
+            catch
+            {
+                throw new Exception("Unknown action type id: " + type);
+            }
+
+            return GetActionClassType(typeEnum);
+        }
+
         public static Type GetActionClassType(GameStateActionType type)
         {
             switch (type)
@@ -50,7 +66,7 @@ namespace Impunity.GameState
                     return typeof(CompoundAction);
             }
 
-            throw new Exception("Unknown type id: " + type);
+            throw new Exception("Action type id with no entry in factory: " + type);
         }
     }
 

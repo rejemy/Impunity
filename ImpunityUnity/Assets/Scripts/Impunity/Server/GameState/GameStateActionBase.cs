@@ -36,6 +36,18 @@ namespace Impunity.GameState
         public abstract ushort GetActionType();
         public abstract bool HasCallback();
 
+
+        public virtual BsonDocument SerializeRequest()
+        {
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            BsonDocument requestBson = mapper.ToDocument(GetType(), this);
+
+            return requestBson;
+        }
+
+
+        // Executing the action
+
         public void Run(GameStateLogic game)
         {
             try
@@ -50,6 +62,8 @@ namespace Impunity.GameState
 
         protected abstract void DoAction(GameStateLogic game);
 
+
+        // Results stuff
         public abstract ActionResult GetResult();
 
         public abstract Type GetResultType();
@@ -63,6 +77,7 @@ namespace Impunity.GameState
 
         public abstract void DeserializeResults(BsonDocument resultBody);
 
+        // Final callback
         public abstract void InvokeOnCompleteCallback();
     }
 

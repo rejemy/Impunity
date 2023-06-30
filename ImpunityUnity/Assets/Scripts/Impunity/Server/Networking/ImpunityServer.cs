@@ -168,9 +168,7 @@ namespace Impunity.Networking
 
             ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
 
-            GameStateActionType actionType = (GameStateActionType)msg.MessageType;
-
-            Type messageActionClassType = GameActionFactory.GetActionClassType(actionType);
+            Type messageActionClassType = GameActionFactory.GetActionClassType(msg.MessageType);
 
             BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
             GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);

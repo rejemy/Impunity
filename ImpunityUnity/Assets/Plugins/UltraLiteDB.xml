@@ -2034,6 +2034,11 @@
             Get/Set that mapper must include non public (private, protected and internal) (default: false)
             </summary>
         </member>
+        <member name="P:UltraLiteDB.BsonMapper.IncludeFullType">
+            <summary>
+            Whether the serializer should include full typename data when the object type is a derived type (default: true)
+            </summary>
+        </member>
         <member name="F:UltraLiteDB.BsonMapper.ResolveMember">
             <summary>
             A custom callback to change MemberInfo behavior when converting to MemberMapper.

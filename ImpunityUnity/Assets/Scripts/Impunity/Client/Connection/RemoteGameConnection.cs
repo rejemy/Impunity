@@ -121,8 +121,7 @@ namespace Impunity.Connection
 
 		private void SendMessage(GameStateActionBase action)
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
-			BsonDocument requestBson = mapper.ToDocument(action.GetType(), action);
+			BsonDocument requestBson = action.SerializeRequest();
 
 			ushort flags = 0;
 			if (!action.HasCallback())
