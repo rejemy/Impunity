@@ -22,7 +22,7 @@ namespace Impunity.GameState
 		public UltraLiteCollection<BsonDocument> Collection;
 	}
 
-	public class GameStateLogic : IDisposable
+	public class GameStateDB : IDisposable
 	{
 		private const string GameDBFile = "Game.db";
 		private const string GameSummaryFile = "Summary.dat";
@@ -37,7 +37,7 @@ namespace Impunity.GameState
 
 		ConcurrentDictionary<int,IGameStateListener> Listeners;
 
-		private GameStateLogic(string path)
+		private GameStateDB(string path)
 		{
 			RootDirectory = path;
 			DBFilename = Path.Combine(RootDirectory, GameDBFile);
@@ -45,9 +45,9 @@ namespace Impunity.GameState
 
 		}
 
-		public static GameStateLogic Open(string path, GameStateFormat format = null, string password = null)
+		public static GameStateDB Open(string path, GameStateFormat format = null, string password = null)
 		{
-			GameStateLogic game = new GameStateLogic(path);
+			GameStateDB game = new GameStateDB(path);
 
 			if (!File.Exists(game.DBFilename))
 			{
@@ -63,9 +63,9 @@ namespace Impunity.GameState
 			return game;
 		}
 
-		public static GameStateLogic Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
+		public static GameStateDB Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
 		{
-			GameStateLogic game = new GameStateLogic(path);
+			GameStateDB game = new GameStateDB(path);
 
 			if (File.Exists(game.DBFilename))
 			{
@@ -166,11 +166,6 @@ namespace Impunity.GameState
 			metadataCollection.Upsert(Metadata);
 		}
 
-
-		public void RunAction(GameStateActionBase action)
-        {
-			action.Run(this);
-        }
 
 		public void AddListener(IGameStateListener listener)
 		{

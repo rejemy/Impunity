@@ -169,7 +169,6 @@ namespace Impunity.Networking
     public class ImpunityTCPServer : IImpunityNetworkServer
     {
         public ImpunityServerClientContextCallback OnClientConnected { get; set; }
-        public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 
         ImpunityOptions Options;
 
@@ -297,6 +296,7 @@ namespace Impunity.Networking
                 return;
             }
 
+            /*
             try
             {
                 OnClientDisconnected?.Invoke(context);
@@ -304,7 +304,7 @@ namespace Impunity.Networking
             catch (Exception e)
             {
                 ImpunityLogger.LogError(e, "Exception in TCP client disconnected callback");
-            }
+            }*/
         }
 
         private void StartBroadcastListen()

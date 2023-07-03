@@ -240,7 +240,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundAction(new GameStateActionBase[] {
 			new UpsertDocumentAction(1, char1),
 			new UpsertDocumentAction(1, char2),
-			new ListDocumentActions(1),
+			new ListDocumentsAction(1),
 		});
 		yield return compoundAction;
 		if (compoundAction.Error != null)

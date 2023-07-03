@@ -12,28 +12,63 @@ namespace Impunity.Networking
 {
 
 
-    public class ClientContextInfo
+    public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
     {
+        IImpunityNetworkServerClientContext ClientContext;
+        ImpunityServer Server;
         byte[] SendBuffer;
         Semaphore SendLock;
 
-        public ClientContextInfo()
+        public string ConnectionId { get { return "NetworkConnection_" + ClientContext.GetAddress(); } }
+
+        public bool SupportsUnguaranteed()
         {
+            return ClientContext.SupportsUnguaranteed();
+        }
+
+        public ServerSideNetworkConnectionProxy(ImpunityServer server, IImpunityNetworkServerClientContext clientContext)
+        {
+            Server = server;
+            ClientContext = clientContext;
             SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
             SendLock = new Semaphore(1, 1);
+
+            clientContext.OnMessageRecieved = ClientMessageReceived;
+            clientContext.OnNetworkError = ClientNetworkError;
+            clientContext.OnClientDisconnected = ClientDisconnected;
+
+        }
+
+        // Called on socket thread
+        private void ClientMessageReceived(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
+        {
+            MessageStruct msg;
+
+            ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
+
+            Type messageActionClassType = GameActionFactory.GetActionClassType(msg.MessageType);
+
+            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+            GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
+
+            action.Origin = this;
+
+            action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
+
+            Server.GameState.QueueAction(action);
         }
 
         // Called on writer thread
-        public void SendActionResults(IImpunityNetworkServerClientContext clientContext, BsonDocument results)
+        public void SendMessage(ushort messageType, BsonDocument results)
         {
             ArraySegment<byte> encodedMessage;
 
             // Lock send buffer (or wait for it to be available)
             SendLock.WaitOne();
 
-            encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBuffer, 0, 0, ServerMessageTypes.REPLY, results);
+            encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBuffer, 0, 0, messageType, results);
 
-            clientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+            ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
         }
 
         // Called on TCP socket thread
@@ -54,6 +89,42 @@ namespace Impunity.Networking
             // Unlock send buffer
             SendLock.Release();
         }
+
+        // Called on server thread
+        public void ReportActionResult(GameStateActionBase action)
+        {
+            // Don't send on server thread, queue for send on network writer thread
+            Server.ActionCompleted(action);
+        }
+
+        // Called on server thread
+        public void SendGuaranteedMessage()
+        {
+
+        }
+
+        // Called on server thread
+        public void SendUnguaranteedMessage()
+        {
+
+        }
+
+        // Called on socket thread
+        private void ClientNetworkError(IImpunityNetworkServerClientContext client, ImpunityError err)
+        {
+            ImpunityLogger.LogError("client network error: " + err.Message);
+        }
+
+        // Called on socket thread
+        private void ClientDisconnected(IImpunityNetworkServerClientContext client)
+        {
+            //ImpunityServerClientContext context;
+            //if (!Clients.TryRemove(client.GetAddress(), out context))
+            //{
+            //    ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + client.GetAddress());
+            //    return;
+            //}
+        }
     }
 
     public class ImpunityServer : IDisposable, IGameStateListener
@@ -66,19 +137,16 @@ namespace Impunity.Networking
         Thread NetworkWriterThread;
         bool Running;
 
-        //ConcurrentDictionary<string, ImpunityServerClientContext> Clients;
 
         public ImpunityServer(GameStateServer gameState, IImpunityNetworkServer networkServer)
         {
             GameState = gameState;
             NetworkServer = networkServer;
             PendingWrite = new BlockingCollection<GameStateActionBase>();
-            //Clients = new ConcurrentDictionary<string, ImpunityServerClientContext>();
 
             OnGameSummaryChanged(GameState.GetGameSummary());
 
             NetworkServer.OnClientConnected = ClientConnected;
-            NetworkServer.OnClientDisconnected = ClientDisconnected;
 
             GameState.AddListener(this);
 
@@ -143,68 +211,27 @@ namespace Impunity.Networking
 
         private void SendActionResults(GameStateActionBase action)
         {
-            IImpunityNetworkServerClientContext clientContext = (IImpunityNetworkServerClientContext)action.Context;
-            ClientContextInfo clientInfo = (ClientContextInfo)clientContext.ClientInfo;
+            ServerSideNetworkConnectionProxy clientInfo = (ServerSideNetworkConnectionProxy)action.Origin;
 
             BsonDocument results = action.SerializeResults();
-            clientInfo.SendActionResults(clientContext, results);
+            clientInfo.SendMessage(ServerMessageTypes.REPLY, results);
         }
 
         // Called on socket thread
         private void ClientConnected(IImpunityNetworkServerClientContext client)
         {
-            client.OnMessageRecieved = ClientMessageReceived;
-            client.OnNetworkError = ClientNetworkError;
-            client.ClientInfo = new ClientContextInfo();
-
-            //ImpunityServerClientContext context = new ImpunityServerClientContext(client);
-            //Clients[context.Address] = context;
+            client.ClientInfo = new ServerSideNetworkConnectionProxy(this, client);
         }
 
-        // Called on socket thread
-        private void ClientMessageReceived(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
-        {
-            MessageStruct msg;
-
-            ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
-
-            Type messageActionClassType = GameActionFactory.GetActionClassType(msg.MessageType);
-
-            BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
-            GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
-            action.Context = context;
-
-            if ((msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0)
-            {
-                // Reply expected
-                action.OnCompleteHandler = ActionCompleted;
-            }
-
-            GameState.QueueAction(action);
-        }
+        
 
         // called on game server thread
-        private void ActionCompleted(GameStateActionBase action)
+        internal void ActionCompleted(GameStateActionBase action)
         {
             PendingWrite.Add(action);
         }
 
-        // Called on socket thread
-        private void ClientNetworkError(IImpunityNetworkServerClientContext client, ImpunityError err)
-        {
-            ImpunityLogger.LogError("client network error: " + err.Message);
-        }
-
-        // Called on socket thread
-        private void ClientDisconnected(IImpunityNetworkServerClientContext client)
-        {
-            //ImpunityServerClientContext context;
-            //if (!Clients.TryRemove(client.GetAddress(), out context))
-            //{
-            //    ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + client.GetAddress());
-            //    return;
-            //}
-        }
+        
 
         public void Dispose()
         {

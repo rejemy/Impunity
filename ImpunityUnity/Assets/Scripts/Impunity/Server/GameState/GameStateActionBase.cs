@@ -28,10 +28,10 @@ namespace Impunity.GameState
         public ImpunityError Error;
 
         [BsonIgnore]
-        internal ImpunityActionCallback OnCompleteHandler;
+        public IServerSideConnectionProxy Origin { get; set; }
 
         [BsonIgnore]
-        public object Context { get; set; }
+        public bool ResultsExpected { get; set; }
 
         public abstract ushort GetActionType();
         public abstract bool HasCallback();
@@ -48,11 +48,11 @@ namespace Impunity.GameState
 
         // Executing the action
 
-        public void Run(GameStateLogic game)
+        public void Run(GameStateEntities entities, GameStateDB db)
         {
             try
             {
-                DoAction(game);
+                DoAction(entities, db);
             }
             catch(Exception e)
             {
@@ -60,7 +60,7 @@ namespace Impunity.GameState
             }
         }
 
-        protected abstract void DoAction(GameStateLogic game);
+        protected abstract void DoAction(GameStateEntities entities, GameStateDB db);
 
 
         // Results stuff

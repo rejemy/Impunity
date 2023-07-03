@@ -44,7 +44,6 @@ namespace Impunity.Networking
     public interface IImpunityNetworkServer : IDisposable
     {
         ImpunityServerClientContextCallback OnClientConnected { get; set; }
-        ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 
         void SetGameSummaryBytes(ArraySegment<byte> summaryBytes);
 

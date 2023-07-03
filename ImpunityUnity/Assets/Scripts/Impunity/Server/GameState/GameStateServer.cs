@@ -8,17 +8,30 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	public interface IServerSideConnectionProxy
+    {
+		string ConnectionId { get; }
+
+		void ReportActionResult(GameStateActionBase action);
+
+		bool SupportsUnguaranteed();
+		void SendGuaranteedMessage();
+		void SendUnguaranteedMessage();
+	}
+
 	public class GameStateServer
 	{
-		GameStateLogic State;
+		GameStateDB GameDatabase;
+		GameStateEntities GameEntities;
 
 		BlockingCollection<GameStateActionBase> ActionQueue;
 		Thread WorkerThread;
 		bool Running;
 
-		private GameStateServer(GameStateLogic gameState)
+		private GameStateServer(GameStateDB gameDatabase)
 		{
-			State = gameState;
+			GameDatabase = gameDatabase;
+			GameEntities = new GameStateEntities(GameDatabase);
 
 			ActionQueue = new BlockingCollection<GameStateActionBase>();
 
@@ -31,12 +44,12 @@ namespace Impunity.GameState
 
 		public static GameStateServer Open(string path, GameStateFormat format = null, string password = null)
 		{
-			return new GameStateServer(GameStateLogic.Open(path, format, password));
+			return new GameStateServer(GameStateDB.Open(path, format, password));
 		}
 
 		public static GameStateServer Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
 		{
-			return new GameStateServer(GameStateLogic.Create(path, summary, format, password));
+			return new GameStateServer(GameStateDB.Create(path, summary, format, password));
 		}
 
 		public void Dispose()
@@ -52,10 +65,10 @@ namespace Impunity.GameState
 		{
 			ActionQueue.Dispose();
 
-			if (State != null)
+			if (GameDatabase != null)
 			{
-				State.Dispose();
-				State = null;
+				GameDatabase.Dispose();
+				GameDatabase = null;
 			}
 		}
 
@@ -77,33 +90,36 @@ namespace Impunity.GameState
 				}
 
 				// Run catches exceptions in the action
-				action.Run(State);
+				action.Run(GameEntities, GameDatabase);
 
-				try
-                {
-					action.OnCompleteHandler?.Invoke(action);
-                }
-				catch(Exception e)
-                {
-					ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
-                }
+				if (action.ResultsExpected)
+				{
+					try
+					{
+						action.Origin.ReportActionResult(action);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+					}
+				}
 			}
 		}
 
 
 		public BsonDocument GetGameSummary()
 		{
-			return State.GetGameSummary();
+			return GameDatabase.GetGameSummary();
 		}
 
 		public void AddListener(IGameStateListener listener)
         {
-			State.AddListener(listener);
+			GameDatabase.AddListener(listener);
         }
 
 		public void RemoveListener(IGameStateListener listener)
 		{
-			State.RemoveListener(listener);
+			GameDatabase.RemoveListener(listener);
 		}
 
 		public void QueueAction(GameStateActionBase action)

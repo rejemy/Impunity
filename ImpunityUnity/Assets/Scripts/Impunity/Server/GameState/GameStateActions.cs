@@ -9,17 +9,20 @@ namespace Impunity.GameState
 {
     public enum GameStateActionType
     {
-        SET_SUMMARY = 1,
-        GET_SUMMARY = 2,
-        ENSURE_FORMAT = 3,
-        INSERT_DOCUMENT = 4,
-        UPDATE_DOCUMENT = 5,
-        UPSERT_DOCUMENT = 6,
-        FIND_DOCUMENT_BY_ID = 7,
-        DELETE_DOCUMENT = 8,
-        LIST_DOCUMENTS = 9,
+        COMPOUND = 1,
 
-        COMPOUND = 100,
+        SET_SUMMARY = 101,
+        GET_SUMMARY = 102,
+        ENSURE_FORMAT = 103,
+        INSERT_DOCUMENT = 104,
+        UPDATE_DOCUMENT = 105,
+        UPSERT_DOCUMENT = 106,
+        FIND_DOCUMENT_BY_ID = 107,
+        DELETE_DOCUMENT = 108,
+        LIST_DOCUMENTS = 109,
+
+        TRY_TO_LOCK = 201,
+        UNLOCK = 202,
     }
 
     public static class GameActionFactory
@@ -44,6 +47,9 @@ namespace Impunity.GameState
         {
             switch (type)
             {
+                case GameStateActionType.COMPOUND:
+                    return typeof(CompoundAction);
+
                 case GameStateActionType.SET_SUMMARY:
                     return typeof(SetGameSummaryAction);
                 case GameStateActionType.GET_SUMMARY:
@@ -61,9 +67,12 @@ namespace Impunity.GameState
                 case GameStateActionType.DELETE_DOCUMENT:
                     return typeof(DeleteDocumentAction);
                 case GameStateActionType.LIST_DOCUMENTS:
-                    return typeof(ListDocumentActions);
-                case GameStateActionType.COMPOUND:
-                    return typeof(CompoundAction);
+                    return typeof(ListDocumentsAction);
+
+                case GameStateActionType.TRY_TO_LOCK:
+                    return typeof(TryToLockAction);
+                case GameStateActionType.UNLOCK:
+                    return typeof(UnlockAction);
             }
 
             throw new Exception("Action type id with no entry in factory: " + type);
@@ -83,7 +92,7 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return 0; }
         public override bool HasCallback() { return true; }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
             // Is actually a no-op
             throw new NotImplementedException();
@@ -105,9 +114,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            game.SetGameSummary(Summary);
+            db.SetGameSummary(Summary);
         }
     }
 
@@ -122,9 +131,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.GetGameSummary();
+            Result = db.GetGameSummary();
         }
     }
 
@@ -143,9 +152,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            game.EnsureFormat(Format);
+            db.EnsureFormat(Format);
         }
     }
 
@@ -167,9 +176,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.InsertDocument(CollectionId, Doc);
+            Result = db.InsertDocument(CollectionId, Doc);
         }
     }
 
@@ -191,9 +200,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.UpdateDocument(CollectionId, Doc);
+            Result = db.UpdateDocument(CollectionId, Doc);
         }
     }
 
@@ -215,9 +224,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.UpsertDocument(CollectionId, Doc);
+            Result = db.UpsertDocument(CollectionId, Doc);
         }
     }
 
@@ -239,9 +248,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.FindDocumentById(CollectionId, Id);
+            Result = db.FindDocumentById(CollectionId, Id);
         }
     }
 
@@ -263,30 +272,30 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.DeleteDocument(CollectionId, Id);
+            Result = db.DeleteDocument(CollectionId, Id);
         }
     }
 
-    public class ListDocumentActions : GameStateActionResultBase<List<BsonDocument>>
+    public class ListDocumentsAction : GameStateActionResultBase<List<BsonDocument>>
     {
         [BsonField("cid")]
         public int CollectionId;
 
         public override ushort GetActionType() { return (ushort)GameStateActionType.LIST_DOCUMENTS; }
 
-        public ListDocumentActions() { }
+        public ListDocumentsAction() { }
 
-        public ListDocumentActions(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
+        public ListDocumentsAction(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
         {
             CollectionId = collectionId;
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
-            Result = game.ListDocuments(CollectionId);
+            Result = db.ListDocuments(CollectionId);
         }
     }
 
@@ -305,14 +314,14 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLogic game)
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
         {
             Result = new List<ActionResult>();
 
             bool error = false;
             foreach (GameStateActionBase action in Actions)
             {
-                action.Run(game);
+                action.Run(entities, db);
 
                 Result.Add(action.GetResult());
 
@@ -329,7 +338,7 @@ namespace Impunity.GameState
         }
 
 
-        // Custom deserializer so that we know what to expect for each result type in the list
+        // Custom deserializer so that we know what generic type to expect for each result nin the list
         public override void DeserializeResults(BsonDocument resultBody)
         {
             BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
@@ -353,6 +362,51 @@ namespace Impunity.GameState
 
                 Result.Add((ActionResult)mapper.ToObject(resultType, resultVal));
             }
+        }
+
+    }
+
+    // Entity actions
+
+    public class TryToLockAction : GameStateActionResultBase<bool>
+    {
+        [BsonField("lm")]
+        public string Name;
+
+        public override ushort GetActionType() { return (ushort)GameStateActionType.TRY_TO_LOCK; }
+
+        public TryToLockAction() { }
+
+        public TryToLockAction(string lockName, ImpunityCallback<bool> onComplete = null)
+        {
+            Name = lockName;
+            OnCompleteCallback = onComplete;
+        }
+
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        {
+            Result = entities.TryToLock(null, Name);
+        }
+    }
+
+    public class UnlockAction : GameStateActionResultBase<bool>
+    {
+        [BsonField("lm")]
+        public string Name;
+
+        public override ushort GetActionType() { return (ushort)GameStateActionType.UNLOCK; }
+
+        public UnlockAction() { }
+
+        public UnlockAction(string lockName, ImpunityCallback<bool> onComplete = null)
+        {
+            Name = lockName;
+            OnCompleteCallback = onComplete;
+        }
+
+        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        {
+            Result = entities.Unlock(null, Name);
         }
     }
 

@@ -63,7 +63,7 @@ namespace Impunity.Connection
 
 		public void ListDocuments(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete)
 		{
-			DoAction(new ListDocumentActions(collectionId, onComplete));
+			DoAction(new ListDocumentsAction(collectionId, onComplete));
 		}
 
 		public void CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
