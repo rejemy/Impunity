@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 using UltraLiteDB;
 
-using Impunity.Networking;
 
 namespace Impunity.GameState
 {

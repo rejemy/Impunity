@@ -9,6 +9,17 @@ using Impunity.GameState;
 namespace Impunity.Networking
 {
 
+	public static class ImpunityMessageFlags
+	{
+		public const ushort NO_REPLY = 1;
+	}
+
+	public class ServerAnnounceMessage
+	{
+		[BsonField("gn")]
+		public string GameName;
+	}
+
 	public struct MessageStruct
 	{
 		public int Length;
