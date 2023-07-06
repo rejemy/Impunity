@@ -21,6 +21,7 @@ namespace Impunity.Networking
 	public static class ImpunityNetworkingUtil
 	{
 		private static BsonMapper Mapper = null;
+		private const int SERVER_ACTION_ID_OFFSET = 20000;
 
 		public static BsonMapper GetBsonMapper()
 		{
@@ -33,10 +34,21 @@ namespace Impunity.Networking
 			Mapper.IncludeFields = true;
 			Mapper.IncludeFullType = false;
 
-			foreach (GameStateActionType actionTypeId in Enum.GetValues(typeof(GameStateActionType)))
+			foreach (ClientActionType actionTypeId in Enum.GetValues(typeof(ClientActionType)))
             {
-				Type actionType = GameActionFactory.GetActionClassType(actionTypeId);
+				Type actionType = ClientActionFactory.GetActionClassType(actionTypeId);
 				Mapper.RegisterTypeId(actionType, (int)actionTypeId);
+			}
+
+			foreach (ServerActionType actionTypeId in Enum.GetValues(typeof(ServerActionType)))
+			{
+				// Not a real server action type
+				if (actionTypeId == ServerActionType.CLIENT_REPLY)
+					continue;
+
+				int intActionId = (int)actionTypeId + SERVER_ACTION_ID_OFFSET;
+				Type actionType = ServerActionFactory.GetActionClassType(actionTypeId);
+				Mapper.RegisterTypeId(actionType, intActionId);
 			}
 
 			return Mapper;

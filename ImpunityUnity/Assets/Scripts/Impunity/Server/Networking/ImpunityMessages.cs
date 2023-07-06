@@ -4,10 +4,13 @@ using UltraLiteDB;
 
 namespace Impunity.Networking
 {
+	/*
 	public static class ServerMessageTypes
 	{
 		public const ushort REPLY = 1;
+		public const ushort BROADCAST_MESSAGE = 2;
 	}
+	*/
 
 	public static class ImpunityMessageFlags
 	{
@@ -20,6 +23,6 @@ namespace Impunity.Networking
 		public string GameName;
 	}
 
-	
+
 
 }

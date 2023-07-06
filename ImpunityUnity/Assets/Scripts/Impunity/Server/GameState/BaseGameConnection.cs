@@ -1,25 +1,72 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 
 using UltraLiteDB;
 
 using Impunity.GameState;
 
+
 namespace Impunity.Connection
 {
 
+	public delegate void BroadcastMessageHandler(int messageType, BsonValue messageBody, string sender);
+
+
+
 	public abstract class BaseGameConnection : IDisposable
 	{
+		protected ConcurrentQueue<GameStateActionBase> CompletedActions;
+
 		public abstract void Connect(ImpunityCallback onComplete);
 
-		public abstract void Update();
+		public void Update()
+		{
+			while (CompletedActions.TryDequeue(out GameStateActionBase action))
+			{
+				try
+				{
+					if (action is ServerActionBase)
+                    {
+						((ServerActionBase)action).DoAction(this);
+                    }
+					else
+                    {
+						action.InvokeOnCompleteCallback();
+					}
+					
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in action results callback");
+				}
+			}
+
+		}
 
 		public abstract void Dispose();
 
 		public abstract void DoAction(GameStateActionBase action);
 
+		// ------- Server message handling
+
+		protected void OnServerMessage(ServerActionBase action)
+        {
+			CompletedActions.Enqueue(action);
+		}
+
+		// Handler delegates
+		public BroadcastMessageHandler OnBroadcastMessage {get; set;}
+
 
 		// -------- API Calls
+
+		public void CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
+		{
+			DoAction(new CompoundAction(actions, onComplete));
+		}
+
+		// -------- DB actions
 
 		public void SetGameSummary(BsonDocument summary, ImpunityCallback onComplete)
 		{
@@ -66,10 +113,14 @@ namespace Impunity.Connection
 			DoAction(new ListDocumentsAction(collectionId, onComplete));
 		}
 
-		public void CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
+		
+		// -------- Broadcast
+
+		public void SendBroadcastMessage(int messageType, BsonValue msgBody)
         {
-			DoAction(new CompoundAction(actions, onComplete));
+			DoAction(new SendBroadcastMessageAction(messageType, msgBody));
         }
+
 	}
 
 }

@@ -7,7 +7,7 @@ using Impunity.Networking;
 
 namespace Impunity.GameState
 {
-    public enum GameStateActionType
+    public enum ClientActionType
     {
         COMPOUND = 1,
 
@@ -23,17 +23,19 @@ namespace Impunity.GameState
 
         TRY_TO_LOCK = 201,
         UNLOCK = 202,
+
+        BROADCAST_MESSAGE = 301,
     }
 
-    public static class GameActionFactory
+    public static class ClientActionFactory
     {
         public static Type GetActionClassType(int type)
         {
-            GameStateActionType typeEnum;
+            ClientActionType typeEnum;
 
             try
             {
-                typeEnum = (GameStateActionType)type;
+                typeEnum = (ClientActionType)type;
             }
             catch
             {
@@ -43,36 +45,39 @@ namespace Impunity.GameState
             return GetActionClassType(typeEnum);
         }
 
-        public static Type GetActionClassType(GameStateActionType type)
+        public static Type GetActionClassType(ClientActionType type)
         {
             switch (type)
             {
-                case GameStateActionType.COMPOUND:
+                case ClientActionType.COMPOUND:
                     return typeof(CompoundAction);
 
-                case GameStateActionType.SET_SUMMARY:
+                case ClientActionType.SET_SUMMARY:
                     return typeof(SetGameSummaryAction);
-                case GameStateActionType.GET_SUMMARY:
+                case ClientActionType.GET_SUMMARY:
                     return typeof(GetGameSummaryAction);
-                case GameStateActionType.ENSURE_FORMAT:
+                case ClientActionType.ENSURE_FORMAT:
                     return typeof(EnsureFormatAction);
-                case GameStateActionType.INSERT_DOCUMENT:
+                case ClientActionType.INSERT_DOCUMENT:
                     return typeof(InsertDocumentAction);
-                case GameStateActionType.UPDATE_DOCUMENT:
+                case ClientActionType.UPDATE_DOCUMENT:
                     return typeof(UpdateDocumentAction);
-                case GameStateActionType.UPSERT_DOCUMENT:
+                case ClientActionType.UPSERT_DOCUMENT:
                     return typeof(UpsertDocumentAction);
-                case GameStateActionType.FIND_DOCUMENT_BY_ID:
+                case ClientActionType.FIND_DOCUMENT_BY_ID:
                     return typeof(FindDocumentByIdAction);
-                case GameStateActionType.DELETE_DOCUMENT:
+                case ClientActionType.DELETE_DOCUMENT:
                     return typeof(DeleteDocumentAction);
-                case GameStateActionType.LIST_DOCUMENTS:
+                case ClientActionType.LIST_DOCUMENTS:
                     return typeof(ListDocumentsAction);
 
-                case GameStateActionType.TRY_TO_LOCK:
+                case ClientActionType.TRY_TO_LOCK:
                     return typeof(TryToLockAction);
-                case GameStateActionType.UNLOCK:
+                case ClientActionType.UNLOCK:
                     return typeof(UnlockAction);
+
+                case ClientActionType.BROADCAST_MESSAGE:
+                    return typeof(SendBroadcastMessageAction);
             }
 
             throw new Exception("Action type id with no entry in factory: " + type);
@@ -80,7 +85,7 @@ namespace Impunity.GameState
     }
 
 
-    public class NoOpAction : GameStateActionResultlessBase
+    public class NoOpAction : ClientActionResultlessBase
     {
         public NoOpAction() { }
 
@@ -92,19 +97,19 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return 0; }
         public override bool HasCallback() { return true; }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             // Is actually a no-op
             throw new NotImplementedException();
         }
     }
 
-    public class SetGameSummaryAction : GameStateActionResultlessBase
+    public class SetGameSummaryAction : ClientActionResultlessBase
     {
         [BsonField("s")]
         public BsonDocument Summary;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.SET_SUMMARY; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.SET_SUMMARY; }
 
         public SetGameSummaryAction() { }
 
@@ -114,15 +119,15 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             db.SetGameSummary(Summary);
         }
     }
 
-    public class GetGameSummaryAction : GameStateActionResultBase<BsonDocument>
+    public class GetGameSummaryAction : ClientActionResultBase<BsonDocument>
     {
-        public override ushort GetActionType() { return (ushort)GameStateActionType.GET_SUMMARY; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.GET_SUMMARY; }
 
         public GetGameSummaryAction() { }
 
@@ -131,18 +136,18 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.GetGameSummary();
         }
     }
 
-    public class EnsureFormatAction : GameStateActionResultlessBase
+    public class EnsureFormatAction : ClientActionResultlessBase
     {
         [BsonField("f")]
         public GameStateFormat Format;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.ENSURE_FORMAT; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.ENSURE_FORMAT; }
 
         public EnsureFormatAction() { }
 
@@ -152,20 +157,20 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             db.EnsureFormat(Format);
         }
     }
 
-    public class InsertDocumentAction : GameStateActionResultBase<BsonValue>
+    public class InsertDocumentAction : ClientActionResultBase<BsonValue>
     {
         [BsonField("cid")]
         public int CollectionId;
         [BsonField("d")]
         public BsonDocument Doc;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.INSERT_DOCUMENT; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.INSERT_DOCUMENT; }
 
         public InsertDocumentAction() { }
 
@@ -176,20 +181,20 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.InsertDocument(CollectionId, Doc);
         }
     }
 
-    public class UpdateDocumentAction : GameStateActionResultBase<bool>
+    public class UpdateDocumentAction : ClientActionResultBase<bool>
     {
         [BsonField("cid")]
         public int CollectionId;
         [BsonField("d")]
         public BsonDocument Doc;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.UPDATE_DOCUMENT; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_DOCUMENT; }
 
         public UpdateDocumentAction() { }
 
@@ -200,20 +205,20 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.UpdateDocument(CollectionId, Doc);
         }
     }
 
-    public class UpsertDocumentAction : GameStateActionResultBase<bool>
+    public class UpsertDocumentAction : ClientActionResultBase<bool>
     {
         [BsonField("cid")]
         public int CollectionId;
         [BsonField("d")]
         public BsonDocument Doc;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.UPSERT_DOCUMENT; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.UPSERT_DOCUMENT; }
 
         public UpsertDocumentAction() { }
 
@@ -224,20 +229,20 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.UpsertDocument(CollectionId, Doc);
         }
     }
 
-    public class FindDocumentByIdAction : GameStateActionResultBase<BsonDocument>
+    public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument>
     {
         [BsonField("cid")]
         public int CollectionId;
         [BsonField("did")]
         public BsonValue Id;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.FIND_DOCUMENT_BY_ID; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.FIND_DOCUMENT_BY_ID; }
 
         public FindDocumentByIdAction() { }
 
@@ -248,20 +253,20 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.FindDocumentById(CollectionId, Id);
         }
     }
 
-    public class DeleteDocumentAction : GameStateActionResultBase<bool>
+    public class DeleteDocumentAction : ClientActionResultBase<bool>
     {
         [BsonField("cid")]
         public int CollectionId;
         [BsonField("did")]
         public BsonValue Id;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.DELETE_DOCUMENT; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_DOCUMENT; }
 
         public DeleteDocumentAction() { }
 
@@ -272,18 +277,18 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.DeleteDocument(CollectionId, Id);
         }
     }
 
-    public class ListDocumentsAction : GameStateActionResultBase<List<BsonDocument>>
+    public class ListDocumentsAction : ClientActionResultBase<List<BsonDocument>>
     {
         [BsonField("cid")]
         public int CollectionId;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.LIST_DOCUMENTS; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.LIST_DOCUMENTS; }
 
         public ListDocumentsAction() { }
 
@@ -293,18 +298,18 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = db.ListDocuments(CollectionId);
         }
     }
 
-    public class CompoundAction : GameStateActionResultBase<List<ActionResult>>
+    public class CompoundAction : ClientActionResultBase<List<ActionResult>>
     {
         [BsonField("as")]
         public List<GameStateActionBase> Actions;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.COMPOUND; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.COMPOUND; }
 
         public CompoundAction() { }
 
@@ -314,14 +319,14 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
             Result = new List<ActionResult>();
 
             bool error = false;
             foreach (GameStateActionBase action in Actions)
             {
-                action.Run(entities, db);
+                action.Run(livestate, db);
 
                 Result.Add(action.GetResult());
 
@@ -368,12 +373,15 @@ namespace Impunity.GameState
 
     // Entity actions
 
-    public class TryToLockAction : GameStateActionResultBase<bool>
+    public class TryToLockAction : ClientActionResultBase<bool>
     {
-        [BsonField("lm")]
+        [BsonField("ln")]
         public string Name;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.TRY_TO_LOCK; }
+        [BsonField("k")]
+        public string Key;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.TRY_TO_LOCK; }
 
         public TryToLockAction() { }
 
@@ -383,18 +391,21 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
-            Result = entities.TryToLock(null, Name);
+            Result = livestate.TryToLock(Origin.ConnectionReplicant, Name, Key);
         }
     }
 
-    public class UnlockAction : GameStateActionResultBase<bool>
+    public class UnlockAction : ClientActionResultBase<bool>
     {
-        [BsonField("lm")]
+        [BsonField("ln")]
         public string Name;
 
-        public override ushort GetActionType() { return (ushort)GameStateActionType.UNLOCK; }
+        [BsonField("k")]
+        public string Key;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK; }
 
         public UnlockAction() { }
 
@@ -404,9 +415,34 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateEntities entities, GameStateDB db)
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
         {
-            Result = entities.Unlock(null, Name);
+            Result = livestate.Unlock(Origin.ConnectionReplicant, Name, Key);
+        }
+    }
+
+    public class SendBroadcastMessageAction : ClientActionResultlessBase
+    {
+        [BsonField("mt")]
+        public int MessageType;
+
+        [BsonField("mb")]
+        public BsonValue MessageBody;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.BROADCAST_MESSAGE; }
+
+
+        public SendBroadcastMessageAction() { }
+
+        public SendBroadcastMessageAction(int messageType, BsonValue message)
+        {
+            MessageType = messageType;
+            MessageBody = message;
+        }
+
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        {
+            livestate.SendBroadcastMessage(MessageType, MessageBody, Origin.ConnectionId);
         }
     }
 

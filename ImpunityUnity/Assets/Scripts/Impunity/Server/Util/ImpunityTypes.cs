@@ -57,7 +57,7 @@ namespace Impunity
 
 	}
 
-	public interface IGameStateListener
+	internal interface IGameStateListener
     {
 		void OnGameSummaryChanged(BsonDocument summary);
     }

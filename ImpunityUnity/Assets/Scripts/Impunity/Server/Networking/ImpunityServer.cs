@@ -20,6 +20,7 @@ namespace Impunity.Networking
         Semaphore SendLock;
 
         public string ConnectionId { get { return "NetworkConnection_" + ClientContext.GetAddress(); } }
+        public GameStateReplicant ConnectionReplicant { get; set; }
 
         public bool SupportsUnguaranteed()
         {
@@ -46,7 +47,7 @@ namespace Impunity.Networking
 
             ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
 
-            Type messageActionClassType = GameActionFactory.GetActionClassType(msg.MessageType);
+            Type messageActionClassType = ClientActionFactory.GetActionClassType(msg.MessageType);
 
             BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
             GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
@@ -59,7 +60,7 @@ namespace Impunity.Networking
         }
 
         // Called on writer thread
-        public void SendMessage(ushort messageType, BsonDocument results)
+        public void SendMessage(ushort messageType, bool guaranteed, BsonDocument results)
         {
             ArraySegment<byte> encodedMessage;
 
@@ -68,7 +69,15 @@ namespace Impunity.Networking
 
             encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBuffer, 0, 0, messageType, results);
 
-            ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+            if (guaranteed)
+            {
+                ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+            }
+            else
+            {
+                ClientContext.SendUnguaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+            }
+            
         }
 
         // Called on TCP socket thread
@@ -98,32 +107,25 @@ namespace Impunity.Networking
         }
 
         // Called on server thread
-        public void SendGuaranteedMessage()
+        public void SendMessageToClient(ServerActionBase message)
         {
-
-        }
-
-        // Called on server thread
-        public void SendUnguaranteedMessage()
-        {
-
+            // Don't send on server thread, queue for send on network writer thread
+            message.Origin = this;
+            Server.ActionCompleted(message);
         }
 
         // Called on socket thread
         private void ClientNetworkError(IImpunityNetworkServerClientContext client, ImpunityError err)
         {
             ImpunityLogger.LogError("client network error: " + err.Message);
+
+            // Todo - close connection?
         }
 
         // Called on socket thread
         private void ClientDisconnected(IImpunityNetworkServerClientContext client)
         {
-            //ImpunityServerClientContext context;
-            //if (!Clients.TryRemove(client.GetAddress(), out context))
-            //{
-            //    ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + client.GetAddress());
-            //    return;
-            //}
+            Server.GameState.ConnectionClosed(this);
         }
     }
 
@@ -213,14 +215,29 @@ namespace Impunity.Networking
         {
             ServerSideNetworkConnectionProxy clientInfo = (ServerSideNetworkConnectionProxy)action.Origin;
 
-            BsonDocument results = action.SerializeResults();
-            clientInfo.SendMessage(ServerMessageTypes.REPLY, results);
+            
+            if (action is ServerActionBase)
+            {
+                // Server originated message
+                BsonDocument message = action.SerializeRequest();
+                clientInfo.SendMessage(action.GetActionType(), ((ServerActionBase)action).Guaranteed, message);
+            }
+            else
+            {
+                // Reply to client action
+                BsonDocument results = action.SerializeResults();
+                clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, results);
+            }
+
+            
         }
 
         // Called on socket thread
         private void ClientConnected(IImpunityNetworkServerClientContext client)
         {
-            client.ClientInfo = new ServerSideNetworkConnectionProxy(this, client);
+            ServerSideNetworkConnectionProxy proxy = new ServerSideNetworkConnectionProxy(this, client);
+            client.ClientInfo = proxy;
+            GameState.ConnectionOpened(proxy);
         }
 
         

@@ -1,10 +1,9 @@
-using System;
-using System.IO;
+
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 
 using UltraLiteDB;
 
+using Impunity.Networking;
 
 namespace Impunity.GameState
 {
@@ -13,14 +12,32 @@ namespace Impunity.GameState
     // Not necessarily a single player/user
     public class GameStateReplicant
     {
-        Dictionary<uint, GameStateEntityBase> LocksHeld;
+        public IServerSideConnectionProxy ConnectionProxy;
+        public Dictionary<string, GameStateEntityBase> LocksHeld;
 
-        public GameStateReplicant()
+        public GameStateReplicant(IServerSideConnectionProxy proxy)
         {
+            ConnectionProxy = proxy;
+            LocksHeld = new Dictionary<string, GameStateEntityBase>();
+        }
 
+        public void Cleanup()
+        {
+            foreach (GameStateEntityBase entity in LocksHeld.Values)
+            {
+                entity.Unlock();
+            }
+
+            LocksHeld.Clear();
+        }
+
+        public void SendMessageViaConnection(ServerActionBase message)
+        {
+            ConnectionProxy.SendMessageToClient(message);
         }
     }
 
+    // Base for all live entities
     public abstract class GameStateEntityBase
     {
         public uint Id { get; internal set; }
@@ -53,6 +70,12 @@ namespace Impunity.GameState
             LockedBy = null;
             return true;
         }
+
+        public void Unlock()
+        {
+            LockedBy = null;
+        }
+
     }
 
     // Entity that exists only to be a lock, will be deleted when lock is released
@@ -64,20 +87,33 @@ namespace Impunity.GameState
         }
     }
 
-    // One "universe" of game state entities
-    public class GameStateEntities
+    // Live gamestate in memory
+    public class GameStateLive
     {
         GameStateDB DB;
         Dictionary<uint, GameStateEntityBase> AllEntities;
         Dictionary<string, GameStateEntityBase> NamedEntities;
 
+        HashSet<GameStateReplicant> ConnectedReplicas;
+
         uint NextId;
 
-        public GameStateEntities(GameStateDB db)
+        public GameStateLive(GameStateDB db)
         {
             DB = db;
             AllEntities = new Dictionary<uint, GameStateEntityBase>();
             NamedEntities = new Dictionary<string, GameStateEntityBase>();
+            ConnectedReplicas = new HashSet<GameStateReplicant>();
+        }
+
+        public void AddGameStateReplicant(GameStateReplicant replica)
+        {
+            ConnectedReplicas.Add(replica);
+        }
+
+        public void RemoveGameStateReplicant(GameStateReplicant replica)
+        {
+            ConnectedReplicas.Remove(replica);
         }
 
         uint FindAvailableEntityId()
@@ -105,7 +141,7 @@ namespace Impunity.GameState
             }
         }
 
-        public bool TryToLock(string key, string name)
+        public bool TryToLock(GameStateReplicant origin, string name, string key)
         {
             GameStateEntityBase entity = NamedEntities[name];
             if (entity == null)
@@ -114,10 +150,16 @@ namespace Impunity.GameState
                 RegisterEntity(entity);
             }
 
-            return entity.Lock(key);
+            bool locked = entity.Lock(key);
+            if (locked)
+            {
+                origin.LocksHeld[name] = entity;
+            }
+
+            return locked;
         }
 
-        public bool Unlock(string key, string name)
+        public bool Unlock(GameStateReplicant origin, string name, string key)
         {
             GameStateEntityBase entity = NamedEntities[name];
             if (entity == null)
@@ -126,12 +168,31 @@ namespace Impunity.GameState
             }
 
             bool unlocked = entity.Unlock(key);
-            if (unlocked && entity is GameStateEntityLock)
+            if (unlocked)
             {
-                UnregisterEntity(entity);
+                if (entity is GameStateEntityLock)
+                {
+                    UnregisterEntity(entity);
+                }
+
+                origin.LocksHeld.Remove(name);
             }
 
             return unlocked;
+        }
+
+        public void SendBroadcastMessage(int messageType, BsonValue message, string fromConnectionId)
+        {
+            BroadcastMessageAction broadcastAction = new BroadcastMessageAction();
+
+            broadcastAction.MessageType = messageType;
+            broadcastAction.MessageBody = message;
+            broadcastAction.SentBy = fromConnectionId;
+
+            foreach (GameStateReplicant replica in ConnectedReplicas)
+            {
+                replica.SendMessageViaConnection(broadcastAction);
+            }
         }
     }
 }

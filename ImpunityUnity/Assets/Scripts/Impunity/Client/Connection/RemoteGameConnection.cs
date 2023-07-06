@@ -13,17 +13,17 @@ namespace Impunity.Connection
 
 	public class RemoteGameConnection : BaseGameConnection
 	{
-		BlockingCollection<GameStateActionBase> PendingSend;
-		ConcurrentQueue<GameStateActionBase> AwaitingReceive;
-		ConcurrentQueue<GameStateActionBase> CompletedActions;
-
 		public ImpunityCallback OnNetworkError { get; set; }
 
-		IImpunityClient NetworkClient;
-		Thread NetworkWriterThread;
-		bool Running;
+		private BlockingCollection<GameStateActionBase> PendingSend;
+		private ConcurrentQueue<GameStateActionBase> AwaitingReceive;
+		
 
-		byte[] SendBuffer;
+		private IImpunityClient NetworkClient;
+		private Thread NetworkWriterThread;
+		private bool Running;
+
+		private byte[] SendBuffer;
 
 		public RemoteGameConnection(IImpunityClient networkClient)
 		{
@@ -74,21 +74,7 @@ namespace Impunity.Connection
 			NetworkClient.Dispose();
 		}
 
-		public override void Update()
-		{
-			while (CompletedActions.TryDequeue(out GameStateActionBase action))
-			{
-				try
-				{
-					action.InvokeOnCompleteCallback();
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError(e, "Exception in action results callback");
-				}
-			}
-
-		}
+		
 
 		private void NetworkWriterThreadMain()
 		{
@@ -146,19 +132,21 @@ namespace Impunity.Connection
 
 			ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
 
-			switch (msg.MessageType)
-			{
-				case ServerMessageTypes.REPLY:
-					{
-						OnReplyMessage(msg.MessageId, msg.Body);
-						break;
-					}
-				default:
-					{
-						ImpunityLogger.LogError("Got unknown message type: " + msg.MessageType);
-						break;
-					}
+			// Reply message
+			if (msg.MessageType == (ushort)ServerActionType.CLIENT_REPLY)
+            {
+				HandleReplyMessage(msg.MessageId, msg.Body);
+				return;
 			}
+
+			// Server message
+			Type messageActionClassType = ServerActionFactory.GetActionClassType(msg.MessageType);
+
+			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			ServerActionBase action = (ServerActionBase)mapper.ToObject(messageActionClassType, msg.Body);
+
+			// Ready for callback!
+			CompletedActions.Enqueue(action);
 		}
 
 
@@ -169,7 +157,7 @@ namespace Impunity.Connection
 		}
 
 
-		private void OnReplyMessage(ushort messageId, BsonDocument replyBody)
+		private void HandleReplyMessage(ushort messageId, BsonDocument replyBody)
 		{
 			GameStateActionBase action;
 			if (!AwaitingReceive.TryDequeue(out action))
@@ -197,7 +185,6 @@ namespace Impunity.Connection
 			// Ready for callback!
 			CompletedActions.Enqueue(action);
 		}
-
 
 
 		public override void DoAction(GameStateActionBase action)

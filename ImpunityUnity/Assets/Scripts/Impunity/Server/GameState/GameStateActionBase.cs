@@ -3,6 +3,7 @@ using System;
 using UltraLiteDB;
 
 using Impunity.Networking;
+using Impunity.Connection;
 
 namespace Impunity.GameState
 {
@@ -48,19 +49,19 @@ namespace Impunity.GameState
 
         // Executing the action
 
-        public void Run(GameStateEntities entities, GameStateDB db)
+        public void Run(GameStateLive livestate, GameStateDB db)
         {
             try
             {
-                DoAction(entities, db);
+                DoAction(livestate, db);
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Error = new ImpunityError(e);
             }
         }
 
-        protected abstract void DoAction(GameStateEntities entities, GameStateDB db);
+        protected abstract void DoAction(GameStateLive livestate, GameStateDB db);
 
 
         // Results stuff
@@ -81,7 +82,7 @@ namespace Impunity.GameState
         public abstract void InvokeOnCompleteCallback();
     }
 
-    public abstract class GameStateActionResultlessBase : GameStateActionBase
+    public abstract class ClientActionResultlessBase : GameStateActionBase
     {
         [BsonIgnore]
         public ImpunityCallback OnCompleteCallback;
@@ -116,7 +117,7 @@ namespace Impunity.GameState
         }
     }
 
-    public abstract class GameStateActionResultBase<TResult> : GameStateActionBase
+    public abstract class ClientActionResultBase<TResult> : GameStateActionBase
     {
         [BsonIgnore]
         public TResult Result;
@@ -154,6 +155,47 @@ namespace Impunity.GameState
         {
             OnCompleteCallback?.Invoke(Error, Result);
         }
+    }
+
+
+    public abstract class ServerActionBase : GameStateActionBase
+    {
+
+        [BsonIgnore]
+        public bool Guaranteed { get; set; } = true;
+
+        public override void DeserializeResults(BsonDocument resultBody)
+        {
+            throw new NotImplementedException();
+        }
+
+        public override ActionResult GetResult()
+        {
+            throw new NotImplementedException();
+        }
+
+        public override Type GetResultType()
+        {
+            throw new NotImplementedException();
+        }
+
+        public override bool HasCallback()
+        {
+            return true;
+        }
+
+        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        {
+            throw new NotImplementedException();
+        }
+
+        public override void InvokeOnCompleteCallback()
+        {
+            throw new NotImplementedException();
+        }
+
+        public abstract void DoAction(BaseGameConnection connection);
+
     }
 
 

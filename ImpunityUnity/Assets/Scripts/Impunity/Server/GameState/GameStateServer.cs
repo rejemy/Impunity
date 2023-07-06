@@ -11,18 +11,75 @@ namespace Impunity.GameState
 	public interface IServerSideConnectionProxy
     {
 		string ConnectionId { get; }
+		GameStateReplicant ConnectionReplicant { get; set; }
 
 		void ReportActionResult(GameStateActionBase action);
+		void SendMessageToClient(ServerActionBase message);
 
 		bool SupportsUnguaranteed();
-		void SendGuaranteedMessage();
-		void SendUnguaranteedMessage();
+		
 	}
+
+	// Action that originates from neither the server nor client
+	public abstract class GameStateAction : GameStateActionBase
+	{
+		public override void DeserializeResults(BsonDocument resultBody)
+		{
+			throw new NotImplementedException();
+		}
+
+		public override ushort GetActionType()
+		{
+			throw new NotImplementedException();
+		}
+
+		public override ActionResult GetResult()
+		{
+			throw new NotImplementedException();
+		}
+
+		public override Type GetResultType()
+		{
+			throw new NotImplementedException();
+		}
+
+		public override bool HasCallback()
+		{
+			return false;
+		}
+
+		public override void InvokeOnCompleteCallback()
+		{
+			throw new NotImplementedException();
+		}
+	}
+
+    public class ConnectionOpenedAction : GameStateAction
+	{
+		protected override void DoAction(GameStateLive livestate, GameStateDB db)
+		{
+			GameStateReplicant replicant = new GameStateReplicant(Origin);
+			Origin.ConnectionReplicant = replicant;
+
+			livestate.AddGameStateReplicant(replicant);
+		}
+	}
+
+	public class ConnectionClosedAction : GameStateAction
+	{
+		protected override void DoAction(GameStateLive livestate, GameStateDB db)
+		{
+			GameStateReplicant replicant = Origin.ConnectionReplicant;
+			replicant.Cleanup();
+			Origin.ConnectionReplicant = null;
+		}
+	}
+
 
 	public class GameStateServer
 	{
 		GameStateDB GameDatabase;
-		GameStateEntities GameEntities;
+		GameStateLive GameEntities;
 
 		BlockingCollection<GameStateActionBase> ActionQueue;
 		Thread WorkerThread;
@@ -31,7 +88,7 @@ namespace Impunity.GameState
 		private GameStateServer(GameStateDB gameDatabase)
 		{
 			GameDatabase = gameDatabase;
-			GameEntities = new GameStateEntities(GameDatabase);
+			GameEntities = new GameStateLive(GameDatabase);
 
 			ActionQueue = new BlockingCollection<GameStateActionBase>();
 
@@ -106,18 +163,20 @@ namespace Impunity.GameState
 			}
 		}
 
-
+		// Called by connection threads
 		public BsonDocument GetGameSummary()
 		{
 			return GameDatabase.GetGameSummary();
 		}
 
-		public void AddListener(IGameStateListener listener)
+		// Called by connection threads
+		internal void AddListener(IGameStateListener listener)
         {
 			GameDatabase.AddListener(listener);
         }
 
-		public void RemoveListener(IGameStateListener listener)
+		// Called by connection threads
+		internal void RemoveListener(IGameStateListener listener)
 		{
 			GameDatabase.RemoveListener(listener);
 		}
@@ -127,6 +186,25 @@ namespace Impunity.GameState
 			ActionQueue.Add(action);
 
 		}
+
+		// Called by connection threads
+		public void ConnectionOpened(IServerSideConnectionProxy connectionProxy)
+        {
+			ConnectionOpenedAction action = new ConnectionOpenedAction();
+			action.Origin = connectionProxy;
+			action.ResultsExpected = false;
+			ActionQueue.Add(action);
+		}
+
+		// Called by connection threads
+		public void ConnectionClosed(IServerSideConnectionProxy connectionProxy)
+		{
+			ConnectionClosedAction action = new ConnectionClosedAction();
+			action.Origin = connectionProxy;
+			action.ResultsExpected = false;
+			ActionQueue.Add(action);
+		}
+
 
 	}
 

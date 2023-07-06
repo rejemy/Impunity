@@ -7,18 +7,18 @@ namespace Impunity.Networking
 {
 	public class ImpunityTCPClient : IImpunityClient
 	{
-		IPEndPoint ServerEndpoint;
-		ImpunityOptions Options;
-
-		TcpClient ClientSocket;
-		Thread ClientSocketThread;
-
-		NetworkStream SocketStream;
-
-		ImpunityCallback OnConnectCallback;
-
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		public ImpunityCallback OnNetworkError { get; set; }
+
+		private IPEndPoint ServerEndpoint;
+		private ImpunityOptions Options;
+
+		private TcpClient ClientSocket;
+		private Thread ClientSocketThread;
+
+		private NetworkStream SocketStream;
+
+		private ImpunityCallback OnConnectCallback;
 
 		public static IImpunityClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{

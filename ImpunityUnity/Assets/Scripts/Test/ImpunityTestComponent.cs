@@ -152,6 +152,11 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	IEnumerator GenericConnectionTest(BaseGameConnection connection)
     {
+		connection.OnBroadcastMessage = (messageType, message, sentBy) =>
+		{
+			Debug.Log("Got broadcast message " + message.AsString + " from " + sentBy);
+		};
+
 		ImpunityYield connectAction = connection.Connect();
 		yield return connectAction;
 		if (connectAction.Error != null)
@@ -250,6 +255,11 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("Compound action results " + compoundAction.Value.Count);
+
+		connection.SendBroadcastMessage(1, "Yo yo yo");
+
+		yield return new WaitForSeconds(0.1f);
+
 	}
 
 	void OnNetworkError(ImpunityError err)

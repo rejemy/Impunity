@@ -166,13 +166,14 @@ namespace Impunity.GameState
 			metadataCollection.Upsert(Metadata);
 		}
 
-
-		public void AddListener(IGameStateListener listener)
+		// Called by connection threads
+		internal void AddListener(IGameStateListener listener)
 		{
 			Listeners[listener.GetHashCode()] = listener;
 		}
 
-		public void RemoveListener(IGameStateListener listener)
+		// Called by connection threads
+		internal void RemoveListener(IGameStateListener listener)
 		{
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}

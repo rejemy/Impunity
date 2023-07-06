@@ -10,44 +10,30 @@ namespace Impunity.Connection
 
 	public class LocalGameConnection : BaseGameConnection, IGameStateListener, IServerSideConnectionProxy
 	{
+		public string ConnectionId { get; private set; }
+		public GameStateReplicant ConnectionReplicant { get; set; }
+
 		private static int NextLocalConnectionId = 1;
 
-		string LocalConnectionId;
-        GameStateServer State;
-		ConcurrentQueue<GameStateActionBase> CompletedActions;
+        private GameStateServer State;
 
-		public string ConnectionId { get { return LocalConnectionId; } }
 
 		public LocalGameConnection(GameStateServer gameState, ImpunityOptions options = null)
 		{
 			State = gameState;
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
 			int id = NextLocalConnectionId++;
-			LocalConnectionId = "LocalConnection_" + id;
-
-			State.AddListener(this);
+			ConnectionId = "LocalConnection_" + id;
 		}
 
 		public override void Connect(ImpunityCallback onComplete)
 		{
+			State.AddListener(this);
+			State.ConnectionOpened(this);
+
 			CompletedActions.Enqueue(new NoOpAction(onComplete));
 		}
 
-		public override void Update()
-		{
-
-			while (CompletedActions.TryDequeue(out GameStateActionBase action))
-			{
-				try
-				{
-					action.InvokeOnCompleteCallback();
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError(e, "Exception in action results callback");
-				}
-			}
-		}
 
 		public void OnGameSummaryChanged(BsonDocument summary)
         {
@@ -57,6 +43,7 @@ namespace Impunity.Connection
 		public override void Dispose()
 		{
 			State.RemoveListener(this);
+			State.ConnectionClosed(this);
 		}
 
 		// Called on background thread
@@ -67,16 +54,11 @@ namespace Impunity.Connection
 
 		public bool SupportsUnguaranteed() { return false; }
 
-		// Called on background thread
-		public void SendGuaranteedMessage()
-        {
 
-        }
-
-		// Called on background thread
-		public void SendUnguaranteedMessage()
+		// Called on background thread, this is a message to us, the local client
+		public void SendMessageToClient(ServerActionBase message)
         {
-			SendGuaranteedMessage();
+			OnServerMessage(message);
 		}
 
 		public override void DoAction(GameStateActionBase action)
