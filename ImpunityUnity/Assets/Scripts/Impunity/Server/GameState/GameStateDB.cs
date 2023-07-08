@@ -221,24 +221,21 @@ namespace Impunity.GameState
 				throw new Exception("Can't set savegame to earlier version");
 			}
 
-			if (format.Collections == null || format.Collections.Length <= 1)
+			if (format.Collections == null || format.Collections.Length < 1)
 			{
 				return;
 			}
 
-			if (format.Collections[0] != null)
-			{
-				throw new Exception("Collection element 0 must be null");
-			}
+			int highestIndex = format.Collections[format.Collections.Length - 1].Index;
 
-			Collections = new CollectionData[format.Collections.Length];
-			for (int i = 1; i < format.Collections.Length; i++)
+			Collections = new CollectionData[highestIndex + 1];
+			for (int i = 0; i < format.Collections.Length; i++)
 			{
 				GameStateCollection collectionInfo = format.Collections[i];
 				CollectionData collection = new CollectionData();
 				collection.Name = collectionInfo.Name;
 				collection.Collection = GameDB.GetCollection<BsonDocument>(collection.Name);
-				Collections[i] = collection;
+				Collections[collectionInfo.Index] = collection;
 			}
 
 			Metadata.Version = format.Version;

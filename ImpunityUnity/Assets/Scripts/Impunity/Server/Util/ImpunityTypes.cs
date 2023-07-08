@@ -43,6 +43,8 @@ namespace Impunity
 		[BsonField("stk")]
 		public string Stacktrace { get; private set; }
 
+		public ImpunityError() {}
+
 		public ImpunityError(string message, string stackTrace = null)
 		{
 			Message = message;
@@ -69,13 +71,44 @@ namespace Impunity
 
 		[BsonField("cs")]
 		public GameStateCollection[] Collections;
+
+		public GameStateFormat()
+		{
+		}
+
+		public GameStateFormat(int version, GameStateCollection[] collections)
+		{
+			Version = version;
+			Collections = collections;
+			if (Collections != null && Collections.Length > 0)
+			{
+				Array.Sort<GameStateCollection>(Collections,
+					(c1, c2) =>
+					{
+						return c1.Index - c2.Index;
+					}
+				);
+
+				if (Collections[0].Index == 0)
+                {
+					throw new Exception("Can't use 0 as a collection index");
+                }
+			}
+			
+		}
 	}
 
 	public class GameStateCollection
 	{
+		[BsonField("i")]
+		public int Index;
+
 		[BsonField("n")]
 		public string Name;
+
 	}
+
+
 
 
 }

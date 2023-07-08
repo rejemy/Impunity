@@ -13,6 +13,12 @@ using Impunity.Networking;
 
 using UltraLiteDB;
 
+public static class CollectionTypes
+{
+	// 0 is reserved
+	public const int CHARACTERS = 1;
+}
+
 public class ImpunityTestComponent : MonoBehaviour
 {
 	ImpunityOptions Options;
@@ -51,17 +57,17 @@ public class ImpunityTestComponent : MonoBehaviour
 		};
 
 		CurrFormat = new GameStateFormat
-		{
-			Version = 1,
-			Collections = new GameStateCollection[]
+		(
+			1,
+			new GameStateCollection[]
 			{
-				null, //First entry is always null
 				new GameStateCollection
 				{
+					Index = CollectionTypes.CHARACTERS,
 					Name = "Characters"
 				}
 			}
-		};
+		); ;
 
 		yield return Setup();
 
@@ -182,7 +188,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char1["level"] = 1;
 
 		Debug.Log("Calling InsertDocument");
-		ImpunityYield<BsonValue> insertAction = connection.InsertDocument(1, char1);
+		ImpunityYield<BsonValue> insertAction = connection.InsertDocument(CollectionTypes.CHARACTERS, char1);
 		yield return insertAction;
 		if (insertAction.Error != null)
 		{
@@ -193,7 +199,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char1["level"] = 2;
 
 		Debug.Log("Calling UpsertDocument");
-		ImpunityYield<bool> upsertAction = connection.UpsertDocument(1, char1);
+		ImpunityYield<bool> upsertAction = connection.UpsertDocument(CollectionTypes.CHARACTERS, char1);
 		yield return upsertAction;
 		if (upsertAction.Error != null)
 		{
@@ -202,7 +208,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("Calling FindDocumentById");
-		ImpunityYield<BsonDocument> findAction = connection.FindDocumentById(1, "char1");
+		ImpunityYield<BsonDocument> findAction = connection.FindDocumentById(CollectionTypes.CHARACTERS, "char1");
 		yield return findAction;
 		if (findAction.Error != null)
 		{
@@ -219,7 +225,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char2["level"] = 1;
 
 		Debug.Log("Calling InsertDocument for char 2");
-		ImpunityYield<BsonValue> insert2Action = connection.InsertDocument(1, char2);
+		ImpunityYield<BsonValue> insert2Action = connection.InsertDocument(CollectionTypes.CHARACTERS, char2);
 		yield return insert2Action;
 		if (insert2Action.Error != null)
 		{
@@ -228,7 +234,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("Calling ListDocuments");
-		ImpunityYield<List<BsonDocument>> listAction = connection.ListDocuments(1);
+		ImpunityYield<List<BsonDocument>> listAction = connection.ListDocuments(CollectionTypes.CHARACTERS);
 		yield return listAction;
 		if (listAction.Error != null)
 		{
@@ -243,9 +249,9 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("Compound upsert");
 		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundAction(new GameStateActionBase[] {
-			new UpsertDocumentAction(1, char1),
-			new UpsertDocumentAction(1, char2),
-			new ListDocumentsAction(1),
+			new UpsertDocumentAction(CollectionTypes.CHARACTERS, char1),
+			new UpsertDocumentAction(CollectionTypes.CHARACTERS, char2),
+			new ListDocumentsAction(CollectionTypes.CHARACTERS),
 		});
 		yield return compoundAction;
 		if (compoundAction.Error != null)
