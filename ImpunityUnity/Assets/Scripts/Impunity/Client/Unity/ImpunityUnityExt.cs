@@ -56,12 +56,23 @@ namespace Impunity.Unity
 
 	public static class ConnectionCoroutines
 	{
+		// ---------- API
+
+		public static ImpunityYield<List<ActionResult>> CompoundAction(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
+		{
+			ImpunityYield<List<ActionResult>> action = new ImpunityYield<List<ActionResult>>();
+			connection.CompoundAction(actions, action.OnComplete);
+			return action;
+		}
+
 		public static ImpunityYield Connect(this BaseGameConnection connection)
 		{
 			ImpunityYield action = new ImpunityYield();
 			connection.Connect(action.OnComplete);
 			return action;
 		}
+
+		// -------- DB actions
 
 		public static ImpunityYield SetGameSummary(this BaseGameConnection connection, BsonDocument summary)
 		{
@@ -126,10 +137,19 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<List<ActionResult>> CompoundAction(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
+		// -------- Live game
+
+		public static ImpunityYield<bool> TryToLock(this BaseGameConnection connection, string lockName, string key)
 		{
-			ImpunityYield<List<ActionResult>> action = new ImpunityYield<List<ActionResult>>();
-			connection.CompoundAction(actions, action.OnComplete);
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			connection.TryToLock(lockName, key, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> Unlock(this BaseGameConnection connection, string lockName, string key)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			connection.Unlock(lockName, key, action.OnComplete);
 			return action;
 		}
 

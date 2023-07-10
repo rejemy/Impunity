@@ -59,6 +59,16 @@ namespace Impunity
 
 	}
 
+	public class ImpuntyErrorException : Exception
+	{
+		string Stacktrace;
+
+		public ImpuntyErrorException(ImpunityError err) : base(err.Message)
+		{
+			Stacktrace = err.Stacktrace;	
+		}
+	}
+
 	internal interface IGameStateListener
     {
 		void OnGameSummaryChanged(BsonDocument summary);

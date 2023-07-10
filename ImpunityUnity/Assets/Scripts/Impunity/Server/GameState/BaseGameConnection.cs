@@ -113,7 +113,19 @@ namespace Impunity.Connection
 			DoAction(new ListDocumentsAction(collectionId, onComplete));
 		}
 
-		
+		// -------- Live game
+
+		public void TryToLock(string lockName, string key, ImpunityCallback<bool> onComplete)
+        {
+			DoAction(new TryToLockAction(lockName, key, onComplete));
+        }
+
+		public void Unlock(string lockName, string key, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new UnlockAction(lockName, key, onComplete));
+		}
+
+
 		// -------- Broadcast
 
 		public void SendBroadcastMessage(int messageType, BsonValue msgBody)

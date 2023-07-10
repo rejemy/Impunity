@@ -2,6 +2,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Net;
 using System.IO;
+using System;
+using System.Threading.Tasks;
 
 using UnityEngine;
 
@@ -77,7 +79,16 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		yield return TCPConnectionTest();
 
-		Cleanup();
+		yield return Setup();
+
+		AsyncConnectionTest().ContinueWith((t)=>
+		{
+			Debug.Log("Done with tests");
+
+			Cleanup();
+		});
+
+		
 	}
 
 	IEnumerator Setup()
@@ -121,6 +132,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		LocalGame.Dispose();
 		LocalGame = null;
+
+		Debug.Log("Done with local connection test");
 	}
 
 	IEnumerator TCPConnectionTest()
@@ -154,6 +167,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		RemoteGame.Dispose();
 		RemoteGame = null;
+
+		Debug.Log("Done with TCP connection test");
 	}
 
 	IEnumerator GenericConnectionTest(BaseGameConnection connection)
@@ -266,6 +281,37 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		yield return new WaitForSeconds(0.1f);
 
+	}
+
+	async Task AsyncConnectionTest()
+    {
+		Debug.Log("Running async local connection test");
+
+		LocalGame = new LocalGameConnection(GameServer);
+
+		try
+        {
+			BsonDocument char1 = new BsonDocument();
+			char1["_id"] = "char1";
+			char1["name"] = "Hogstorm";
+			char1["level"] = 1;
+
+			await LocalGame.ConnectAsync();
+			await LocalGame.EnsureFormatAsync(CurrFormat);
+			await LocalGame.InsertDocumentAsync(CollectionTypes.CHARACTERS, char1);
+			List<BsonDocument> chars = await LocalGame.ListDocumentsAsync(CollectionTypes.CHARACTERS);
+
+			Debug.Log("characters found " + chars.Count);
+		}
+		catch(Exception e)
+        {
+			Debug.Log("Got exception in async test: " + e.Message);
+        }
+
+		LocalGame.Dispose();
+		LocalGame = null;
+
+		Debug.Log("Done with async local connection test");
 	}
 
 	void OnNetworkError(ImpunityError err)

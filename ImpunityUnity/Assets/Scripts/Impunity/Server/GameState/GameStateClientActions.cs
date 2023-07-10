@@ -385,9 +385,10 @@ namespace Impunity.GameState
 
         public TryToLockAction() { }
 
-        public TryToLockAction(string lockName, ImpunityCallback<bool> onComplete = null)
+        public TryToLockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
         {
             Name = lockName;
+            Key = key;
             OnCompleteCallback = onComplete;
         }
 
@@ -409,9 +410,10 @@ namespace Impunity.GameState
 
         public UnlockAction() { }
 
-        public UnlockAction(string lockName, ImpunityCallback<bool> onComplete = null)
+        public UnlockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
         {
             Name = lockName;
+            Key = key;
             OnCompleteCallback = onComplete;
         }
 
