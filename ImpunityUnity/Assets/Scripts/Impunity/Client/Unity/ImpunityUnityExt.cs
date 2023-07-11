@@ -155,4 +155,49 @@ namespace Impunity.Unity
 
 	}
 
+	public static class GameStateDBCollectionCoroutines
+	{
+
+		public static ImpunityYield<BsonValue> InsertDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+        {
+			ImpunityYield<BsonValue> action = new ImpunityYield<BsonValue>();
+			collection.InsertDocument(doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> UpdateDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			collection.UpdateDocument(doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> UpsertDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			collection.UpsertDocument(doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<DTYPE> FindDocumentById<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		{
+			ImpunityYield<DTYPE> action = new ImpunityYield<DTYPE>();
+			collection.FindDocumentById(id, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> DeleteDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			collection.DeleteDocument(id, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<List<DTYPE>> ListDocuments<DTYPE>(this GameStateDBCollection<DTYPE> collection)
+		{
+			ImpunityYield<List<DTYPE>> action = new ImpunityYield<List<DTYPE>>();
+			collection.ListDocuments(action.OnComplete);
+			return action;
+		}
+	}
 }
