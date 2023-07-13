@@ -15,10 +15,16 @@ using Impunity.Networking;
 
 using UltraLiteDB;
 
-public static class CollectionTypes
+public static class TestCollectionTypes
 {
 	// 0 is reserved
 	public const int CHARACTERS = 1;
+}
+
+public static class TestEntityTypes
+{
+	// 0 is reserved
+	public const int PLAYER = 1;
 }
 
 public class ImpunityTestComponent : MonoBehaviour
@@ -61,14 +67,34 @@ public class ImpunityTestComponent : MonoBehaviour
 		CurrFormat = new GameStateFormat
 		(
 			1,
+
 			new GameStateCollection[]
 			{
 				new GameStateCollection
 				{
-					Index = CollectionTypes.CHARACTERS,
+					Index = TestCollectionTypes.CHARACTERS,
 					Name = "Characters"
 				}
-			}
+			},
+
+			new GameStateEntityType[]
+            {
+				new GameStateEntityType
+                {
+					Index = TestEntityTypes.PLAYER,
+					Name = "Player",
+					Properties = new GameStateEntityPropertyDef[]
+                    {
+						new GameStateEntityPropertyDef
+                        {
+							Name = "Name",
+							PropValueType = (byte)GameStateEntityPropertyValueType.String
+						}
+
+					}
+				}
+            }
+
 		); ;
 
 		yield return Setup();
@@ -203,7 +229,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char1["level"] = 1;
 
 		Debug.Log("Calling InsertDocument");
-		ImpunityYield<BsonValue> insertAction = connection.InsertDocument(CollectionTypes.CHARACTERS, char1);
+		ImpunityYield<BsonValue> insertAction = connection.InsertDocument(TestCollectionTypes.CHARACTERS, char1);
 		yield return insertAction;
 		if (insertAction.Error != null)
 		{
@@ -214,7 +240,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char1["level"] = 2;
 
 		Debug.Log("Calling UpsertDocument");
-		ImpunityYield<bool> upsertAction = connection.UpsertDocument(CollectionTypes.CHARACTERS, char1);
+		ImpunityYield<bool> upsertAction = connection.UpsertDocument(TestCollectionTypes.CHARACTERS, char1);
 		yield return upsertAction;
 		if (upsertAction.Error != null)
 		{
@@ -223,7 +249,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("Calling FindDocumentById");
-		ImpunityYield<BsonDocument> findAction = connection.FindDocumentById(CollectionTypes.CHARACTERS, "char1");
+		ImpunityYield<BsonDocument> findAction = connection.FindDocumentById(TestCollectionTypes.CHARACTERS, "char1");
 		yield return findAction;
 		if (findAction.Error != null)
 		{
@@ -240,7 +266,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char2["level"] = 1;
 
 		Debug.Log("Calling InsertDocument for char 2");
-		ImpunityYield<BsonValue> insert2Action = connection.InsertDocument(CollectionTypes.CHARACTERS, char2);
+		ImpunityYield<BsonValue> insert2Action = connection.InsertDocument(TestCollectionTypes.CHARACTERS, char2);
 		yield return insert2Action;
 		if (insert2Action.Error != null)
 		{
@@ -249,7 +275,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("Calling ListDocuments");
-		ImpunityYield<List<BsonDocument>> listAction = connection.ListDocuments(CollectionTypes.CHARACTERS);
+		ImpunityYield<List<BsonDocument>> listAction = connection.ListDocuments(TestCollectionTypes.CHARACTERS);
 		yield return listAction;
 		if (listAction.Error != null)
 		{
@@ -264,9 +290,9 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("Compound upsert");
 		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundAction(new GameStateActionBase[] {
-			new UpsertDocumentAction(CollectionTypes.CHARACTERS, char1),
-			new UpsertDocumentAction(CollectionTypes.CHARACTERS, char2),
-			new ListDocumentsAction(CollectionTypes.CHARACTERS),
+			new UpsertDocumentAction(TestCollectionTypes.CHARACTERS, char1),
+			new UpsertDocumentAction(TestCollectionTypes.CHARACTERS, char2),
+			new ListDocumentsAction(TestCollectionTypes.CHARACTERS),
 		});
 		yield return compoundAction;
 		if (compoundAction.Error != null)
@@ -298,8 +324,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 			await LocalGame.ConnectAsync();
 			await LocalGame.EnsureFormatAsync(CurrFormat);
-			await LocalGame.InsertDocumentAsync(CollectionTypes.CHARACTERS, char1);
-			List<BsonDocument> chars = await LocalGame.ListDocumentsAsync(CollectionTypes.CHARACTERS);
+			await LocalGame.InsertDocumentAsync(TestCollectionTypes.CHARACTERS, char1);
+			List<BsonDocument> chars = await LocalGame.ListDocumentsAsync(TestCollectionTypes.CHARACTERS);
 
 			Debug.Log("characters found " + chars.Count);
 		}

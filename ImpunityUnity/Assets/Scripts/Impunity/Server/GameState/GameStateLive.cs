@@ -41,7 +41,7 @@ namespace Impunity.GameState
     {
         public uint Id { get; internal set; }
         public string Name { get; private set; } // Not all entities have names
-        string LockedBy;
+        string LockedWith;
 
         public GameStateEntityBase(string name)
         {
@@ -50,29 +50,29 @@ namespace Impunity.GameState
 
         public bool Lock(string key)
         {
-            if (LockedBy != null && LockedBy != key)
+            if (LockedWith != null && LockedWith != key)
             {
                 return false;
             }
 
-            LockedBy = key;
+            LockedWith = key;
             return true;
         }
 
         public bool Unlock(string key)
         {
-            if (LockedBy != key)
+            if (LockedWith != key)
             {
                 return false;
             }
 
-            LockedBy = null;
+            LockedWith = null;
             return true;
         }
 
         public void Unlock()
         {
-            LockedBy = null;
+            LockedWith = null;
         }
 
     }
@@ -90,6 +90,9 @@ namespace Impunity.GameState
     public class GameStateLive
     {
         GameStateDB DB;
+
+        GameStateEntityType[] EntityTypes;
+
         Dictionary<uint, GameStateEntityBase> AllEntities;
         Dictionary<string, GameStateEntityBase> NamedEntities;
 
@@ -105,6 +108,23 @@ namespace Impunity.GameState
             ConnectedReplicas = new HashSet<GameStateReplicant>();
         }
 
+        public void EnsureFormat(GameStateFormat format)
+        {
+            if (format.EntityTypes == null || format.EntityTypes.Length < 1)
+            {
+                return;
+            }
+
+            int highestIndex = format.EntityTypes[format.EntityTypes.Length - 1].Index;
+
+            EntityTypes = new GameStateEntityType[highestIndex + 1];
+            for (int i = 0; i < format.EntityTypes.Length; i++)
+            {
+                GameStateEntityType typeInfo = format.EntityTypes[i];
+                EntityTypes[typeInfo.Index] = typeInfo;
+            }
+        }
+
         public void AddGameStateReplicant(GameStateReplicant replica)
         {
             ConnectedReplicas.Add(replica);
@@ -113,6 +133,7 @@ namespace Impunity.GameState
         public void RemoveGameStateReplicant(GameStateReplicant replica)
         {
             ConnectedReplicas.Remove(replica);
+            replica.Cleanup();
         }
 
         uint FindAvailableEntityId()

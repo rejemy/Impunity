@@ -1,14 +1,14 @@
 ﻿using System;
 using System.IO;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
+
 
 using UltraLiteDB;
 
 
 namespace Impunity.GameState
 {
-	class GameMetadata
+	public class GameMetadata
 	{
 		[BsonId]
 		public string Id;
@@ -30,22 +30,20 @@ namespace Impunity.GameState
 
 		string RootDirectory;
 		string DBFilename;
-		BsonDocument Summary;
+		
 		UltraLiteDatabase GameDB;
-		GameMetadata Metadata;
 		CollectionData[] Collections;
 
-		ConcurrentDictionary<int,IGameStateListener> Listeners;
+		
 
 		private GameStateDB(string path)
 		{
 			RootDirectory = path;
 			DBFilename = Path.Combine(RootDirectory, GameDBFile);
-			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
 		}
 
-		public static GameStateDB Open(string path, GameStateFormat format = null, string password = null)
+		public static GameStateDB Open(string path, string password = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -57,13 +55,12 @@ namespace Impunity.GameState
 
 			ImpunityLogger.LogInformation("Opening game database at " + game.DBFilename);
 
-			game.Init(format, password);
-			game.Summary = LoadSummary(path);
+			game.OpenDatabase(password);
 
 			return game;
 		}
 
-		public static GameStateDB Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
+		public static GameStateDB Create(string path, BsonDocument summary, string password = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -77,22 +74,9 @@ namespace Impunity.GameState
 
 			Directory.CreateDirectory(path);
 
-			game.Init(format, password);
-
-			game.SetGameSummary(summary);
+			game.OpenDatabase(password);
 
 			return game;
-		}
-
-		private void Init(GameStateFormat format, string password)
-		{
-			OpenDatabase(password);
-			LoadMetadata();
-
-			if (format != null)
-			{
-				EnsureFormat(format);
-			}
 		}
 
 		private void OpenDatabase(string password)
@@ -128,7 +112,7 @@ namespace Impunity.GameState
 		}
 
 
-		public static BsonDocument LoadSummary(string path)
+		public static BsonDocument LoadGameSummary(string path)
 		{
 			string summaryFile = Path.Combine(path, GameSummaryFile);
 			if (!File.Exists(summaryFile))
@@ -148,79 +132,46 @@ namespace Impunity.GameState
 			}
 		}
 
+		public BsonDocument LoadGameSummary()
+        {
+			return LoadGameSummary(RootDirectory);
+        }
 
-		private void LoadMetadata()
+
+		public GameMetadata LoadMetadata()
 		{
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
-			Metadata = metadataCollection.FindById(MetadataCollection);
-			if (Metadata == null)
+			GameMetadata metadata = metadataCollection.FindById(MetadataCollection);
+			if (metadata == null)
 			{
-				Metadata = new GameMetadata() { Id = MetadataCollection, Version = 0 };
+				metadata = new GameMetadata() { Id = MetadataCollection, Version = 0 };
 			}
 
+			return metadata;
 		}
 
-		private void SaveMetadata()
+		public void SaveMetadata(GameMetadata metadata)
 		{
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
-			metadataCollection.Upsert(Metadata);
+			metadataCollection.Upsert(metadata);
 		}
 
-		// Called by connection threads
-		internal void AddListener(IGameStateListener listener)
-		{
-			Listeners[listener.GetHashCode()] = listener;
-		}
-
-		// Called by connection threads
-		internal void RemoveListener(IGameStateListener listener)
-		{
-			Listeners.TryRemove(listener.GetHashCode(), out _);
-		}
+		
 
 		// ------------ API -----------------
-
-		// NOTE - sometimes called from external thread
-		public BsonDocument GetGameSummary()
-		{
-			return Summary;
-		}
 
 
 		public void SetGameSummary(BsonDocument summary)
 		{
-			Summary = summary;
-
 			byte[] summaryBytes = BsonSerializer.Serialize(summary);
 			string summaryFile = Path.Combine(RootDirectory, GameSummaryFile);
 			File.WriteAllBytes(summaryFile, summaryBytes);
 
-			foreach (IGameStateListener listener in Listeners.Values)
-            {
-				try
-                {
-					listener.OnGameSummaryChanged(summary);
-				}
-				catch(Exception e)
-                {
-					ImpunityLogger.LogError(e, "Exception in OnGameSummaryChanged handler");
-                }
-            }
 		}
 
 
 		public void EnsureFormat(GameStateFormat format)
 		{
-			if (format.Version == Metadata.Version)
-			{
-				return;
-			}
-
-			if (format.Version < Metadata.Version)
-			{
-				throw new Exception("Can't set savegame to earlier version");
-			}
-
 			if (format.Collections == null || format.Collections.Length < 1)
 			{
 				return;
@@ -237,10 +188,6 @@ namespace Impunity.GameState
 				collection.Collection = GameDB.GetCollection<BsonDocument>(collection.Name);
 				Collections[collectionInfo.Index] = collection;
 			}
-
-			Metadata.Version = format.Version;
-			SaveMetadata();
-
 		}
 
 		public BsonValue InsertDocument(int collectionId, BsonDocument doc)

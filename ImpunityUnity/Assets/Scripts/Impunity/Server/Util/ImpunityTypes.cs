@@ -82,17 +82,21 @@ namespace Impunity
 		[BsonField("cs")]
 		public GameStateCollection[] Collections;
 
+		[BsonField("es")]
+		public GameStateEntityType[] EntityTypes;
+
 		public GameStateFormat()
 		{
 		}
 
-		public GameStateFormat(int version, GameStateCollection[] collections)
+		public GameStateFormat(int version, GameStateCollection[] collections, GameStateEntityType[] entityTypes)
 		{
 			Version = version;
+
 			Collections = collections;
 			if (Collections != null && Collections.Length > 0)
 			{
-				Array.Sort<GameStateCollection>(Collections,
+				Array.Sort(Collections,
 					(c1, c2) =>
 					{
 						return c1.Index - c2.Index;
@@ -104,7 +108,23 @@ namespace Impunity
 					throw new Exception("Can't use 0 as a collection index");
                 }
 			}
-			
+
+
+			EntityTypes = entityTypes;
+			if (EntityTypes != null && EntityTypes.Length > 0)
+			{
+				Array.Sort(EntityTypes,
+					(e1, e2) =>
+					{
+						return e1.Index - e2.Index;
+					}
+				);
+
+				if (EntityTypes[0].Index == 0)
+				{
+					throw new Exception("Can't use 0 as a entity type Id");
+				}
+			}
 		}
 	}
 
@@ -118,7 +138,60 @@ namespace Impunity
 
 	}
 
+	public enum GameStateEntityPropertyValueType
+	{
+		Boolean = 1,
 
+		Int8 = 2,
+		Int16 = 3,
+		Int32 = 4,
+		Int64 = 5,
+
+		Float = 6,
+		Double = 7,
+
+		String = 8,
+		Binary = 9,
+
+		Vector2 = 10,
+		Vector3 = 11,
+		Vector4 = 12,
+		Quaternion = 13,
+
+		Color3 = 14,
+		Color4 = 15
+	}
+
+	public enum GameStateEntityPropertyType
+	{
+		Value = 1,
+		Array = 2,
+		Queue = 3
+	}
+
+	public class GameStateEntityPropertyDef
+    {
+		[BsonField("n")]
+		public string Name;
+
+		[BsonField("pt")]
+		public byte PropType = (byte)GameStateEntityPropertyType.Value;
+
+		[BsonField("v")]
+		public byte PropValueType;
+	}
+
+	public class GameStateEntityType
+    {
+		[BsonField("id")]
+		public int Index;
+
+		[BsonField("n")]
+		public string Name;
+
+		[BsonField("ps")]
+		public GameStateEntityPropertyDef[] Properties;
+	}
 
 
 }

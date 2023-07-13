@@ -7,9 +7,8 @@ using Impunity.GameState;
 
 namespace Impunity.Connection
 {
-	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
+	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
 	{
-
 		public void CompleteTask(ImpunityError err)
 		{
 			if (err != null)
@@ -18,9 +17,14 @@ namespace Impunity.Connection
 			}
 			else
 			{
-				SetResult(default(TResult));
+				SetResult(true);
 			}
 		}
+
+	}
+
+	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
+	{
 
 		public void CompleteTask(ImpunityError err, TResult result)
         {
@@ -43,7 +47,7 @@ namespace Impunity.Connection
 
 		public static Task ConnectAsync(this BaseGameConnection connection)
 		{
-			var t = new ImpunityTaskCompletionSource<bool>();
+			var t = new ImpunityTaskCompletionSource();
 			connection.Connect(t.CompleteTask);
 			return t.Task;
 		}
@@ -59,7 +63,7 @@ namespace Impunity.Connection
 
 		public static Task SetGameSummaryAsync(this BaseGameConnection connection, BsonDocument summary)
 		{
-			var t = new ImpunityTaskCompletionSource<bool>();
+			var t = new ImpunityTaskCompletionSource();
 			connection.SetGameSummary(summary, t.CompleteTask);
 			return t.Task;
 		}
@@ -73,7 +77,7 @@ namespace Impunity.Connection
 
 		public static Task EnsureFormatAsync(this BaseGameConnection connection, GameStateFormat format)
 		{
-			var t = new ImpunityTaskCompletionSource<bool>();
+			var t = new ImpunityTaskCompletionSource();
 			connection.EnsureFormat(format, t.CompleteTask);
 			return t.Task;
 		}

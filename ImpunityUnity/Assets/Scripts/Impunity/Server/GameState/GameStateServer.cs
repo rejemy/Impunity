@@ -56,21 +56,21 @@ namespace Impunity.GameState
 
     public class ConnectionOpenedAction : GameStateAction
 	{
-		protected override void DoAction(GameStateLive livestate, GameStateDB db)
+		protected override void DoAction(GameStateServer game)
 		{
 			GameStateReplicant replicant = new GameStateReplicant(Origin);
 			Origin.ConnectionReplicant = replicant;
 
-			livestate.AddGameStateReplicant(replicant);
+			game.Live.AddGameStateReplicant(replicant);
 		}
 	}
 
 	public class ConnectionClosedAction : GameStateAction
 	{
-		protected override void DoAction(GameStateLive livestate, GameStateDB db)
+		protected override void DoAction(GameStateServer game)
 		{
 			GameStateReplicant replicant = Origin.ConnectionReplicant;
-			replicant.Cleanup();
+			game.Live.RemoveGameStateReplicant(replicant);
 			Origin.ConnectionReplicant = null;
 		}
 	}
@@ -78,17 +78,32 @@ namespace Impunity.GameState
 
 	public class GameStateServer
 	{
-		GameStateDB GameDatabase;
-		GameStateLive GameEntities;
+		public GameStateDB DB;
+		public GameStateLive Live;
+
+		BsonDocument Summary;
+		GameMetadata Metadata;
 
 		BlockingCollection<GameStateActionBase> ActionQueue;
 		Thread WorkerThread;
 		bool Running;
 
-		private GameStateServer(GameStateDB gameDatabase)
+		ConcurrentDictionary<int, IGameStateListener> Listeners;
+
+		private GameStateServer(GameStateDB gameDatabase, GameStateFormat format = null)
 		{
-			GameDatabase = gameDatabase;
-			GameEntities = new GameStateLive(GameDatabase);
+			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
+
+			DB = gameDatabase;
+			Live = new GameStateLive(DB);
+
+			Summary = DB.LoadGameSummary();
+			Metadata = DB.LoadMetadata();
+
+			if (format != null)
+			{
+				EnsureFormat(format);
+			}
 
 			ActionQueue = new BlockingCollection<GameStateActionBase>();
 
@@ -101,12 +116,67 @@ namespace Impunity.GameState
 
 		public static GameStateServer Open(string path, GameStateFormat format = null, string password = null)
 		{
-			return new GameStateServer(GameStateDB.Open(path, format, password));
+			return new GameStateServer(GameStateDB.Open(path, password), format);
 		}
 
 		public static GameStateServer Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
 		{
-			return new GameStateServer(GameStateDB.Create(path, summary, format, password));
+			return new GameStateServer(GameStateDB.Create(path, summary, password), format);
+		}
+
+		// Called by connection threads
+		internal void AddListener(IGameStateListener listener)
+		{
+			Listeners[listener.GetHashCode()] = listener;
+		}
+
+		// Called by connection threads
+		internal void RemoveListener(IGameStateListener listener)
+		{
+			Listeners.TryRemove(listener.GetHashCode(), out _);
+		}
+
+		public void EnsureFormat(GameStateFormat format)
+		{
+			if (format.Version == Metadata.Version)
+			{
+				return;
+			}
+
+			if (format.Version < Metadata.Version)
+			{
+				throw new Exception("Can't set savegame to earlier version");
+			}
+
+			DB.EnsureFormat(format);
+			Live.EnsureFormat(format);
+
+			Metadata.Version = format.Version;
+			DB.SaveMetadata(Metadata);
+
+		}
+
+		public BsonDocument GetGameSummary()
+        {
+			return Summary;
+        }
+
+		public void SetGameSummary(BsonDocument summary)
+		{
+			Summary = summary;
+			DB.SetGameSummary(summary);
+
+			foreach (IGameStateListener listener in Listeners.Values)
+			{
+				try
+				{
+					listener.OnGameSummaryChanged(summary);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in OnGameSummaryChanged handler");
+				}
+			}
 		}
 
 		public void Dispose()
@@ -122,10 +192,10 @@ namespace Impunity.GameState
 		{
 			ActionQueue.Dispose();
 
-			if (GameDatabase != null)
+			if (DB != null)
 			{
-				GameDatabase.Dispose();
-				GameDatabase = null;
+				DB.Dispose();
+				DB = null;
 			}
 		}
 
@@ -147,7 +217,7 @@ namespace Impunity.GameState
 				}
 
 				// Run catches exceptions in the action
-				action.Run(GameEntities, GameDatabase);
+				action.Run(this);
 
 				if (action.ResultsExpected)
 				{
@@ -163,23 +233,6 @@ namespace Impunity.GameState
 			}
 		}
 
-		// Called by connection threads
-		public BsonDocument GetGameSummary()
-		{
-			return GameDatabase.GetGameSummary();
-		}
-
-		// Called by connection threads
-		internal void AddListener(IGameStateListener listener)
-        {
-			GameDatabase.AddListener(listener);
-        }
-
-		// Called by connection threads
-		internal void RemoveListener(IGameStateListener listener)
-		{
-			GameDatabase.RemoveListener(listener);
-		}
 
 		public void QueueAction(GameStateActionBase action)
         {

@@ -49,11 +49,11 @@ namespace Impunity.GameState
 
         // Executing the action
 
-        public void Run(GameStateLive livestate, GameStateDB db)
+        public void Run(GameStateServer game)
         {
             try
             {
-                DoAction(livestate, db);
+                DoAction(game);
             }
             catch (Exception e)
             {
@@ -61,7 +61,7 @@ namespace Impunity.GameState
             }
         }
 
-        protected abstract void DoAction(GameStateLive livestate, GameStateDB db);
+        protected abstract void DoAction(GameStateServer game);
 
 
         // Results stuff
@@ -184,7 +184,7 @@ namespace Impunity.GameState
             return true;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
             throw new NotImplementedException();
         }

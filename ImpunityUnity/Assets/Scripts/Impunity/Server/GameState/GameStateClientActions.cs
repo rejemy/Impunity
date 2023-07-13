@@ -97,7 +97,7 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return 0; }
         public override bool HasCallback() { return true; }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
             // Is actually a no-op
             throw new NotImplementedException();
@@ -119,9 +119,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            db.SetGameSummary(Summary);
+            game.SetGameSummary(Summary);
         }
     }
 
@@ -136,9 +136,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.GetGameSummary();
+            Result = game.GetGameSummary();
         }
     }
 
@@ -157,9 +157,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            db.EnsureFormat(Format);
+            game.EnsureFormat(Format);
         }
     }
 
@@ -181,9 +181,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.InsertDocument(CollectionId, Doc);
+            Result = game.DB.InsertDocument(CollectionId, Doc);
         }
     }
 
@@ -205,9 +205,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.UpdateDocument(CollectionId, Doc);
+            Result = game.DB.UpdateDocument(CollectionId, Doc);
         }
     }
 
@@ -229,9 +229,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.UpsertDocument(CollectionId, Doc);
+            Result = game.DB.UpsertDocument(CollectionId, Doc);
         }
     }
 
@@ -253,9 +253,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.FindDocumentById(CollectionId, Id);
+            Result = game.DB.FindDocumentById(CollectionId, Id);
         }
     }
 
@@ -277,9 +277,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.DeleteDocument(CollectionId, Id);
+            Result = game.DB.DeleteDocument(CollectionId, Id);
         }
     }
 
@@ -298,9 +298,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = db.ListDocuments(CollectionId);
+            Result = game.DB.ListDocuments(CollectionId);
         }
     }
 
@@ -319,14 +319,14 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
             Result = new List<ActionResult>();
 
             bool error = false;
             foreach (GameStateActionBase action in Actions)
             {
-                action.Run(livestate, db);
+                action.Run(game);
 
                 Result.Add(action.GetResult());
 
@@ -392,9 +392,9 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = livestate.TryToLock(Origin.ConnectionReplicant, Name, Key);
+            Result = game.Live.TryToLock(Origin.ConnectionReplicant, Name, Key);
         }
     }
 
@@ -417,10 +417,17 @@ namespace Impunity.GameState
             OnCompleteCallback = onComplete;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            Result = livestate.Unlock(Origin.ConnectionReplicant, Name, Key);
+            Result = game.Live.Unlock(Origin.ConnectionReplicant, Name, Key);
         }
+    }
+
+    public class EntityUpdate
+    {
+        public int EntityId;
+        bool Create;
+
     }
 
     public class SendBroadcastMessageAction : ClientActionResultlessBase
@@ -442,9 +449,9 @@ namespace Impunity.GameState
             MessageBody = message;
         }
 
-        protected override void DoAction(GameStateLive livestate, GameStateDB db)
+        protected override void DoAction(GameStateServer game)
         {
-            livestate.SendBroadcastMessage(MessageType, MessageBody, Origin.ConnectionId);
+            game.Live.SendBroadcastMessage(MessageType, MessageBody, Origin.ConnectionId);
         }
     }
 
