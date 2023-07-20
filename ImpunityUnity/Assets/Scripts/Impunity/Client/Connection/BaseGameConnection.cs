@@ -14,7 +14,7 @@ namespace Impunity.Connection
 
 
 
-	public abstract class BaseGameConnection : IDisposable
+	public abstract class BaseGameConnection : IServerMessageHandler, IDisposable
 	{
 		protected ConcurrentQueue<GameStateActionBase> CompletedActions;
 
@@ -58,6 +58,45 @@ namespace Impunity.Connection
 		// Handler delegates
 		public BroadcastMessageHandler OnBroadcastMessage {get; set;}
 
+
+		// Server message handlers
+
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType)
+        {
+
+        }
+
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType)
+        {
+
+        }
+
+		public void HandleEntityUpdate(uint entityId)
+        {
+
+        }
+
+		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
+        {
+
+        }
+
+		public void HandleEntityDelete(uint entityId)
+        {
+
+        }
+
+		public void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy)
+        {
+			try
+			{
+				OnBroadcastMessage?.Invoke(messageType, messageBody, sentBy);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError(e, "Exception in OnBroadcastMessage handler");
+			}
+		}
 
 		// -------- API Calls
 

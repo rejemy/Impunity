@@ -3,7 +3,6 @@ using System;
 
 using UltraLiteDB;
 
-using Impunity.Connection;
 
 namespace Impunity.GameState
 {
@@ -85,9 +84,13 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.CHANNEL_CREATE_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-            
+            handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType);
+            foreach (ObjectCreateMessageAction objCreate in ObjectsInChannel)
+            {
+                handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType);
+            }
         }
     }
 
@@ -105,9 +108,9 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-
+            handler.HandleCreateObject(ObjectId, ChannelId, ObjectType);
         }
     }
 
@@ -119,9 +122,9 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-
+            handler.HandleEntityUpdate(EntityId);
         }
     }
 
@@ -139,9 +142,9 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_EVENT_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-
+            handler.HandleEntityEvent(EntityId, EventType, EventData);
         }
     }
 
@@ -153,9 +156,9 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_DELETE_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-
+            handler.HandleEntityDelete(EntityId);
         }
     }
 
@@ -175,18 +178,10 @@ namespace Impunity.GameState
         public override ushort GetActionType() { return (ushort)ServerActionType.BROADCAST_MESSAGE; }
 
         // Called in client main thread
-        public override void DoAction(BaseGameConnection connection)
+        public override void DoAction(IServerMessageHandler handler)
         {
-            try
-            {
-                connection.OnBroadcastMessage?.Invoke(MessageType, MessageBody, SentBy);
-            }
-            catch (Exception e)
-            {
-                ImpunityLogger.LogError(e, "Exception in OnBroadcastMessage handler");
-            }
+            handler.HandleBroadcastMessage(MessageType, MessageBody, SentBy);
         }
-
 
     }
 }

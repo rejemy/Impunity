@@ -3,7 +3,7 @@ using System;
 using UltraLiteDB;
 
 using Impunity.Networking;
-using Impunity.Connection;
+
 
 namespace Impunity.GameState
 {
@@ -194,7 +194,7 @@ namespace Impunity.GameState
             throw new NotImplementedException();
         }
 
-        public abstract void DoAction(BaseGameConnection connection);
+        public abstract void DoAction(IServerMessageHandler handler);
 
     }
 
