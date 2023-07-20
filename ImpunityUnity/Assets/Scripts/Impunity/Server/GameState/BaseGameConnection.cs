@@ -66,7 +66,7 @@ namespace Impunity.Connection
 			DoAction(new CompoundAction(actions, onComplete));
 		}
 
-		// -------- DB actions
+		// -------- Server Setup
 
 		public void SetGameSummary(BsonDocument summary, ImpunityCallback onComplete)
 		{
@@ -82,6 +82,8 @@ namespace Impunity.Connection
 		{
 			DoAction(new EnsureFormatAction(format, onComplete));
 		}
+
+		// -------- DB actions
 
 		public void InsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete)
 		{
@@ -117,12 +119,12 @@ namespace Impunity.Connection
 
 		public void TryToLock(string lockName, string key, ImpunityCallback<bool> onComplete)
         {
-			DoAction(new TryToLockAction(lockName, key, onComplete));
+			DoAction(new LockNamedLockAction(lockName, key, onComplete));
         }
 
 		public void Unlock(string lockName, string key, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new UnlockAction(lockName, key, onComplete));
+			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
 

@@ -11,20 +11,30 @@ namespace Impunity.GameState
     {
         COMPOUND = 1,
 
-        SET_SUMMARY = 101,
-        GET_SUMMARY = 102,
-        ENSURE_FORMAT = 103,
-        INSERT_DOCUMENT = 104,
-        UPDATE_DOCUMENT = 105,
-        UPSERT_DOCUMENT = 106,
-        FIND_DOCUMENT_BY_ID = 107,
-        DELETE_DOCUMENT = 108,
-        LIST_DOCUMENTS = 109,
+        SET_SUMMARY = 100,
+        GET_SUMMARY = 101,
+        ENSURE_FORMAT = 102,
 
-        TRY_TO_LOCK = 201,
-        UNLOCK = 202,
+        INSERT_DOCUMENT = 200,
+        UPDATE_DOCUMENT = 201,
+        UPSERT_DOCUMENT = 202,
+        FIND_DOCUMENT_BY_ID = 203,
+        DELETE_DOCUMENT = 204,
+        LIST_DOCUMENTS = 205,
 
-        BROADCAST_MESSAGE = 301,
+        CREATE_CHANNEL = 300,
+        CREATE_OBJECT = 301,
+        UPDATE_ENTITY = 302,
+        DELETE_ENTITY = 303,
+        EVENT_ENTITY = 304,
+        LOCK_ENTITY = 305,
+        UNLOCK_ENTITY = 306,
+        LOCK_NAMED_LOCK = 307,
+        UNLOCK_NAMED_LOCK = 308,
+
+        SUBSCRIBE_CHANNEL = 400,
+        UNSUBSCRIBE_CHANNEL = 401,
+        BROADCAST_MESSAGE = 402,
     }
 
     public static class ClientActionFactory
@@ -58,6 +68,7 @@ namespace Impunity.GameState
                     return typeof(GetGameSummaryAction);
                 case ClientActionType.ENSURE_FORMAT:
                     return typeof(EnsureFormatAction);
+
                 case ClientActionType.INSERT_DOCUMENT:
                     return typeof(InsertDocumentAction);
                 case ClientActionType.UPDATE_DOCUMENT:
@@ -71,11 +82,29 @@ namespace Impunity.GameState
                 case ClientActionType.LIST_DOCUMENTS:
                     return typeof(ListDocumentsAction);
 
-                case ClientActionType.TRY_TO_LOCK:
-                    return typeof(TryToLockAction);
-                case ClientActionType.UNLOCK:
-                    return typeof(UnlockAction);
+                case ClientActionType.CREATE_CHANNEL:
+                    return typeof(CreateChannelAction);
+                case ClientActionType.CREATE_OBJECT:
+                    return typeof(CreateObjectAction);
+                case ClientActionType.UPDATE_ENTITY:
+                    return typeof(UpdateEntityAction);
+                case ClientActionType.DELETE_ENTITY:
+                    return typeof(DeleteEntityAction);
+                case ClientActionType.EVENT_ENTITY:
+                    return typeof(EventEntityAction);
+                case ClientActionType.LOCK_ENTITY:
+                    return typeof(LockEntityAction);
+                case ClientActionType.UNLOCK_ENTITY:
+                    return typeof(UnlockEntityAction);
+                case ClientActionType.LOCK_NAMED_LOCK:
+                    return typeof(LockNamedLockAction);
+                case ClientActionType.UNLOCK_NAMED_LOCK:
+                    return typeof(UnlockNamedLockAction);
 
+                case ClientActionType.SUBSCRIBE_CHANNEL:
+                    return typeof(SubscribeChannelAction);
+                case ClientActionType.UNSUBSCRIBE_CHANNEL:
+                    return typeof(UnsubscribeChannelAction);
                 case ClientActionType.BROADCAST_MESSAGE:
                     return typeof(SendBroadcastMessageAction);
             }
@@ -373,7 +402,170 @@ namespace Impunity.GameState
 
     // Entity actions
 
-    public class TryToLockAction : ClientActionResultBase<bool>
+    public class CreateChannelAction : ClientActionResultBase<uint>
+    {
+        [BsonField("t")]
+        public int EntityTypeId;
+
+        [BsonField("n")]
+        public string Name;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
+
+        public CreateChannelAction() { }
+
+        public CreateChannelAction(int entityTypeId, string channelName)
+        {
+            EntityTypeId = entityTypeId;
+            Name = channelName;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, Name);
+        }
+    }
+
+    public class CreateObjectAction : ClientActionResultBase<uint>
+    {
+        [BsonField("t")]
+        public int EntityTypeId;
+
+        [BsonField("c")]
+        public uint ChannelId;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
+
+        public CreateObjectAction() { }
+
+        public CreateObjectAction(int entityTypeId, uint ChannelId)
+        {
+            EntityTypeId = entityTypeId;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, ChannelId);
+        }
+    }
+
+    public class UpdateEntityAction : ClientActionResultBase<bool>
+    {
+        [BsonField("id")]
+        public uint EntityId;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
+
+        public UpdateEntityAction() { }
+
+        public UpdateEntityAction(uint entityId)
+        {
+            EntityId = entityId;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            Result = game.Live.UpdateEntity(EntityId);
+        }
+    }
+
+    public class DeleteEntityAction : ClientActionResultBase<bool>
+    {
+        [BsonField("id")]
+        public uint EntityId;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
+
+        public DeleteEntityAction() { }
+
+        public DeleteEntityAction(uint entityId)
+        {
+            EntityId = entityId;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            Result = game.Live.DeleteEntity(EntityId);
+        }
+    }
+
+    public class EventEntityAction : ClientActionResultlessBase
+    {
+        [BsonField("id")]
+        public uint EntityId;
+
+        [BsonField("mt")]
+        public int EventType;
+
+        [BsonField("mb")]
+        public BsonValue EventData;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.EVENT_ENTITY; }
+
+        public EventEntityAction() { }
+
+        public EventEntityAction(uint entityId)
+        {
+            EntityId = entityId;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            game.Live.SendEntityEvent(EntityId, EventType, EventData);
+        }
+    }
+
+    public class LockEntityAction : ClientActionResultBase<bool>
+    {
+        [BsonField("id")]
+        public uint EntityId;
+
+        [BsonField("k")]
+        public string Key;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_ENTITY; }
+
+        public LockEntityAction() { }
+
+        public LockEntityAction(uint entityId, string key, ImpunityCallback<bool> onComplete = null)
+        {
+            EntityId = entityId;
+            Key = key;
+            OnCompleteCallback = onComplete;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            game.Live.LockEntity(Origin.ConnectionReplicant, EntityId, Key);
+        }
+    }
+
+    public class UnlockEntityAction : ClientActionResultBase<bool>
+    {
+        [BsonField("id")]
+        public uint EntityId;
+
+        [BsonField("k")]
+        public string Key;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_ENTITY; }
+
+        public UnlockEntityAction() { }
+
+        public UnlockEntityAction(uint entityId, string key, ImpunityCallback<bool> onComplete = null)
+        {
+            EntityId = entityId;
+            Key = key;
+            OnCompleteCallback = onComplete;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            game.Live.UnlockEntity(Origin.ConnectionReplicant, EntityId, Key);
+        }
+    }
+
+    public class LockNamedLockAction : ClientActionResultBase<bool>
     {
         [BsonField("ln")]
         public string Name;
@@ -381,11 +573,11 @@ namespace Impunity.GameState
         [BsonField("k")]
         public string Key;
 
-        public override ushort GetActionType() { return (ushort)ClientActionType.TRY_TO_LOCK; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_NAMED_LOCK; }
 
-        public TryToLockAction() { }
+        public LockNamedLockAction() { }
 
-        public TryToLockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
+        public LockNamedLockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
         {
             Name = lockName;
             Key = key;
@@ -394,11 +586,11 @@ namespace Impunity.GameState
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.TryToLock(Origin.ConnectionReplicant, Name, Key);
+            Result = game.Live.TryToLockNamedLock(Origin.ConnectionReplicant, Name, Key);
         }
     }
 
-    public class UnlockAction : ClientActionResultBase<bool>
+    public class UnlockNamedLockAction : ClientActionResultBase<bool>
     {
         [BsonField("ln")]
         public string Name;
@@ -406,11 +598,11 @@ namespace Impunity.GameState
         [BsonField("k")]
         public string Key;
 
-        public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK; }
+        public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_NAMED_LOCK; }
 
-        public UnlockAction() { }
+        public UnlockNamedLockAction() { }
 
-        public UnlockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
+        public UnlockNamedLockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
         {
             Name = lockName;
             Key = key;
@@ -419,16 +611,52 @@ namespace Impunity.GameState
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.Unlock(Origin.ConnectionReplicant, Name, Key);
+            Result = game.Live.UnlockNamedLock(Origin.ConnectionReplicant, Name, Key);
         }
     }
 
-    public class EntityUpdate
-    {
-        public int EntityId;
-        bool Create;
 
+
+    public class SubscribeChannelAction : ClientActionResultBase<uint>
+    {
+        [BsonField("cn")]
+        public string Name;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.SUBSCRIBE_CHANNEL; }
+
+        public SubscribeChannelAction() { }
+
+        public SubscribeChannelAction(string lockName)
+        {
+            Name = lockName;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            Result = game.Live.SubscribeToChannel(Origin.ConnectionReplicant, Name);
+        }
     }
+
+    public class UnsubscribeChannelAction : ClientActionResultlessBase
+    {
+        [BsonField("cid")]
+        public uint ID;
+
+        public override ushort GetActionType() { return (ushort)ClientActionType.UNSUBSCRIBE_CHANNEL; }
+
+        public UnsubscribeChannelAction() { }
+
+        public UnsubscribeChannelAction(uint channelId)
+        {
+            ID = channelId;
+        }
+
+        protected override void DoAction(GameStateServer game)
+        {
+            game.Live.UnsubscribeFromChannel(Origin.ConnectionReplicant, ID);
+        }
+    }
+
 
     public class SendBroadcastMessageAction : ClientActionResultlessBase
     {
