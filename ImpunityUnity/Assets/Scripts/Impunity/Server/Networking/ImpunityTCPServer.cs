@@ -185,6 +185,8 @@ namespace Impunity.Networking
 
         ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext> Clients;
 
+        public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
+
         public ImpunityTCPServer(ImpunityOptions options = null)
         {
             if (options == null)
@@ -212,18 +214,22 @@ namespace Impunity.Networking
             return Clients.Values;
         }
 
-        public void Listen()
+        public IPEndPoint Listen()
         {
+            TCPSocket = new TcpListener(IPAddress.Any, Options.ServerPort);
+            //TCPSocket.AllowNatTraversal(true);
+            TCPSocket.Start();
+
             StartTcpListener();
 
             if (Options.LANDiscoverable)
             {
                 SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
 
-                
-
                 StartBroadcastListen();
             }
+
+            return new IPEndPoint(IPAddress.Loopback, Options.ServerPort);
         }
 
         private void StartTcpListener()
@@ -236,14 +242,9 @@ namespace Impunity.Networking
 
         private void TCPListener()
         {
-            TCPSocket = null;
 
             try
             {
-                TCPSocket = new TcpListener(IPAddress.Any, Options.ServerPort);
-                //TCPSocket.AllowNatTraversal(true);
-                TCPSocket.Start();
-
                 ImpunityLogger.LogInformation("Server TCP Socket listener started");
 
                 while (TCPSocket != null)
@@ -404,7 +405,7 @@ namespace Impunity.Networking
 
             TcpListener listener = TCPSocket;
             TCPSocket = null;
-            listener.Stop();
+            listener?.Stop();
         }
     }
 

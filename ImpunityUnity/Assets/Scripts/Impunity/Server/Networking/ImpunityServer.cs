@@ -6,13 +6,13 @@ using System.Threading.Tasks;
 using UltraLiteDB;
 
 using Impunity.GameState;
-
+using System.Net;
 
 namespace Impunity.Networking
 {
 
 
-    public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
+    internal class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
     {
         IImpunityNetworkServerClientContext ClientContext;
         ImpunityServer Server;
@@ -139,6 +139,7 @@ namespace Impunity.Networking
         Thread NetworkWriterThread;
         bool Running;
 
+        public IPEndPoint TCPEndpoint { get; private set; }
 
         public ImpunityServer(GameStateServer gameState, IImpunityNetworkServer networkServer)
         {
@@ -156,7 +157,10 @@ namespace Impunity.Networking
 
         public static ImpunityServer MakeTCPServer(GameStateServer gameState, ImpunityOptions options = null)
         {
-            return new ImpunityServer(gameState, new ImpunityTCPServer(options));
+            ImpunityTCPServer tcpserver = new ImpunityTCPServer(options);
+            ImpunityServer server = new ImpunityServer(gameState, tcpserver);
+ 
+            return server;
         }
 
         public void OnGameSummaryChanged(BsonDocument summary)
@@ -177,7 +181,7 @@ namespace Impunity.Networking
             NetworkWriterThread.Name = "Network write";
             NetworkWriterThread.Start();
 
-            NetworkServer.Listen();
+            TCPEndpoint = NetworkServer.Listen();
         }
 
         private void WriterThreadMain()

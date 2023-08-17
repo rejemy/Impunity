@@ -79,7 +79,7 @@ namespace Impunity.GameState
 	public class GameStateServer
 	{
 		public GameStateDB DB;
-		public GameStateLive Live;
+		internal GameStateLive Live;
 
 		BsonDocument Summary;
 		GameMetadata Metadata;
@@ -241,7 +241,7 @@ namespace Impunity.GameState
 		}
 
 		// Called by connection threads
-		public void ConnectionOpened(IServerSideConnectionProxy connectionProxy)
+		internal void ConnectionOpened(IServerSideConnectionProxy connectionProxy)
         {
 			ConnectionOpenedAction action = new ConnectionOpenedAction();
 			action.Origin = connectionProxy;
@@ -250,7 +250,7 @@ namespace Impunity.GameState
 		}
 
 		// Called by connection threads
-		public void ConnectionClosed(IServerSideConnectionProxy connectionProxy)
+		internal void ConnectionClosed(IServerSideConnectionProxy connectionProxy)
 		{
 			ConnectionClosedAction action = new ConnectionClosedAction();
 			action.Origin = connectionProxy;

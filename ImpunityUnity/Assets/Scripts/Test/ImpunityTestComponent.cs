@@ -3,9 +3,14 @@ using System.Collections.Generic;
 using System.Net;
 using System.IO;
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 using UnityEngine;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 using Impunity;
 using Impunity.GameState;
@@ -45,13 +50,14 @@ public class ImpunityTestComponent : MonoBehaviour
 	bool FoundServer;
 	IPEndPoint ServerEndpoint;
 
+	bool TestsDone = false;
+
+
 	void Start()
 	{
 		ImpunityUnityLogger.Setup(ImpunityLogLevel.INFO);
 
-
 		StartCoroutine(ComboTest());
-
 	}
 
 	IEnumerator ComboTest()
@@ -95,8 +101,9 @@ public class ImpunityTestComponent : MonoBehaviour
 				}
             }
 
-		); ;
+		);
 
+		
 		yield return Setup();
 
 		yield return LocalConnectionTest();
@@ -107,11 +114,13 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		yield return Setup();
 
+		yield return LiveDataTest();
+
+		yield return Setup();
+
 		AsyncConnectionTest().ContinueWith((t)=>
 		{
-			Debug.Log("Done with tests");
-
-			Cleanup();
+			TestsDone = true;
 		});
 
 		
@@ -194,6 +203,9 @@ public class ImpunityTestComponent : MonoBehaviour
 		RemoteGame.Dispose();
 		RemoteGame = null;
 
+		TCPServer.Dispose();
+		TCPServer = null;
+
 		Debug.Log("Done with TCP connection test");
 	}
 
@@ -208,7 +220,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		yield return connectAction;
 		if (connectAction.Error != null)
 		{
-			Debug.Log("Error connecting: " + connectAction.Error.Message);
+			Debug.LogError("Error connecting: " + connectAction.Error.Message);
 			yield break;
 		}
 
@@ -340,6 +352,126 @@ public class ImpunityTestComponent : MonoBehaviour
 		Debug.Log("Done with async local connection test");
 	}
 
+	IEnumerator LiveDataTest()
+    {
+		Debug.Log("Running live data test");
+
+		LocalGame = new LocalGameConnection(GameServer);
+
+		ImpunityYield localConnectAction = LocalGame.Connect();
+		yield return localConnectAction;
+		if (localConnectAction.Error != null)
+		{
+			Debug.LogError("Error connecting local: " + localConnectAction.Error.Message);
+			yield break;
+		}
+
+		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+		TCPServer.Start();
+
+		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, Options);
+		RemoteGame.OnNetworkError = OnNetworkError;
+		
+
+		ImpunityYield connectAction = RemoteGame.Connect();
+		yield return connectAction;
+		if (connectAction.Error != null)
+		{
+			Debug.LogError("Error connecting TCP: " + connectAction.Error.Message);
+			yield break;
+		}
+
+		yield return LiveBroadcastTests(LocalGame, RemoteGame);
+
+		yield return LiveLocktTests(LocalGame, RemoteGame);
+
+		RemoteGame.Dispose();
+		RemoteGame = null;
+
+		yield return new WaitForSeconds(0.1f);
+
+		TCPServer.Dispose();
+		TCPServer = null;
+
+		LocalGame.Dispose();
+		LocalGame = null;
+
+
+		Debug.Log("Done with live data test");
+	}
+
+	IEnumerator LiveBroadcastTests(BaseGameConnection c1, BaseGameConnection c2)
+    {
+		Debug.Log("Doing broadcast test");
+
+		bool gotMessage = false;
+
+		c1.OnBroadcastMessage = (int messageType, BsonValue messageBody, string sender) =>
+		{
+			Debug.Log("Got broadcase message type: " + messageType + " body: " + messageBody.ToString() + " from: " + sender);
+			gotMessage = true;
+		};
+
+		c2.SendBroadcastMessage(22, "Hiya buddy!");
+
+		while (!gotMessage)
+		{
+			yield return new WaitForEndOfFrame();
+		}
+
+		Debug.Log("Broadcase test complete");
+	}
+
+	IEnumerator LiveLocktTests(BaseGameConnection c1, BaseGameConnection c2)
+	{
+		Debug.Log("Doing lock tests");
+
+		ImpunityYield<bool> localLockAction = c1.TryToLock("tempLock", "xyz");
+		yield return localLockAction;
+		if (localLockAction.Error != null)
+		{
+			Debug.LogError("Error locking temp lock: " + localLockAction.Error.Message);
+			yield break;
+		}
+
+		if (localLockAction.Value != true)
+		{
+			Debug.LogError("Unable to lock temp lock");
+			yield break;
+		}
+
+
+		ImpunityYield<bool> remoteLockAction = c2.TryToLock("tempLock", "snad");
+		yield return remoteLockAction;
+		if (remoteLockAction.Error != null)
+		{
+			Debug.LogError("Error locking temp lock: " + remoteLockAction.Error.Message);
+			yield break;
+		}
+
+		if (remoteLockAction.Value != false)
+		{
+			Debug.LogError("Was able to get lock that should be held");
+			yield break;
+		}
+
+		ImpunityYield<bool> localUnlockAction = c1.Unlock("tempLock", "xyz");
+		yield return localUnlockAction;
+		if (localUnlockAction.Error != null)
+		{
+			Debug.LogError("Error unlocking temp lock: " + localUnlockAction.Error.Message);
+			yield break;
+		}
+
+		if (localLockAction.Value != true)
+		{
+			Debug.LogError("Unable to unlock temp lock");
+			yield break;
+		}
+
+		Debug.Log("Lock tests complete");
+	}
+
 	void OnNetworkError(ImpunityError err)
     {
 		Debug.Log("Got network error: " + err.Message);
@@ -366,6 +498,19 @@ public class ImpunityTestComponent : MonoBehaviour
 		LocalGame?.Update();
 		Finder?.Update();
 		RemoteGame?.Update();
+
+		if(TestsDone)
+        {
+			Debug.Log("Done with tests");
+
+			Cleanup();
+
+#if UNITY_EDITOR
+			EditorApplication.ExitPlaymode();
+#else
+			Application.Quit();
+#endif
+		}
 	}
 
 	void OnApplicationQuit()

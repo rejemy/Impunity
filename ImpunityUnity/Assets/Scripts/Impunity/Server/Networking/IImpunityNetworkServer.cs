@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-
+using System.Net;
 using System.Threading.Tasks;
 
 
@@ -41,7 +41,7 @@ namespace Impunity.Networking
 
         IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients();
 
-        void Listen();
+        IPEndPoint Listen();
     }
 
 }

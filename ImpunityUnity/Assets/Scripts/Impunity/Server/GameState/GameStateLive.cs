@@ -319,7 +319,7 @@ namespace Impunity.GameState
     }
 
     // Entity that exists only to be a lock, will be deleted when lock is released
-    public class GameStateNamedLock : GameStateEntity
+    internal class GameStateNamedLock : GameStateEntity
     {
         public GameStateNamedLock(string name) : base (null, name)
         {
@@ -328,7 +328,7 @@ namespace Impunity.GameState
     }
 
     // Live gamestate in memory
-    public class GameStateLive
+    internal class GameStateLive
     {
         GameStateDB DB;
 
@@ -457,7 +457,7 @@ namespace Impunity.GameState
         {
             GameStateEntityType typeInfo = GetEntityType(typeId);
 
-            GameStateChannel channel = AllEntities[channelId] as GameStateChannel;
+            GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
             if (channel == null)
             {
                 throw new Exception("No channel with ID " + channelId);
@@ -494,7 +494,7 @@ namespace Impunity.GameState
 
         public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData)
         {
-            GameStateEntity entity = AllEntities[entityId];
+            GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
             {
                 throw new Exception("No entity with ID " + entityId);
@@ -504,7 +504,7 @@ namespace Impunity.GameState
 
         public bool DeleteEntity(uint entityId)
         {
-            GameStateEntity entity = AllEntities[entityId];
+            GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
             {
                 throw new Exception("No entity with ID " + entityId);
@@ -523,7 +523,7 @@ namespace Impunity.GameState
 
         public bool LockEntity(GameStateReplicant origin, uint entityId, string key)
         {
-            GameStateEntity entity = AllEntities[entityId];
+            GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
             {
                 throw new Exception("No entity with ID " + entityId);
@@ -542,7 +542,7 @@ namespace Impunity.GameState
 
         public bool UnlockEntity(GameStateReplicant origin, uint entityId, string key)
         {
-            GameStateEntity entity = AllEntities[entityId];
+            GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
             {
                 throw new Exception("No entity with ID " + entityId);
@@ -553,7 +553,7 @@ namespace Impunity.GameState
 
         public bool TryToLockNamedLock(GameStateReplicant origin, string name, string key)
         {
-            GameStateEntity entity = NamedEntities[name];
+            GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
             if (entity == null)
             {
                 // Create placeholder named lock object if no entity with that name exists
@@ -569,7 +569,7 @@ namespace Impunity.GameState
 
         public bool UnlockNamedLock(GameStateReplicant origin, string name, string key)
         {
-            GameStateEntity entity = NamedEntities[name];
+            GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
             if (entity == null)
             {
                 return false;
@@ -589,7 +589,7 @@ namespace Impunity.GameState
 
         public uint SubscribeToChannel(GameStateReplicant origin, string channelName)
         {
-            GameStateChannel channel = NamedEntities[channelName] as GameStateChannel;
+            GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
             if (channel == null)
             {
                 throw new Exception("No channel with name " + channelName);
@@ -602,7 +602,7 @@ namespace Impunity.GameState
 
         public void UnsubscribeFromChannel(GameStateReplicant origin, uint channelId)
         {
-            GameStateChannel channel = AllEntities[channelId] as GameStateChannel;
+            GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
             if (channel == null)
             {
                 throw new Exception("No channel with id " + channelId);

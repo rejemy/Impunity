@@ -29,7 +29,7 @@ namespace Impunity.GameState
         public ImpunityError Error;
 
         [BsonIgnore]
-        public IServerSideConnectionProxy Origin { get; set; }
+        internal IServerSideConnectionProxy Origin { get; set; }
 
         [BsonIgnore]
         public bool ResultsExpected { get; set; }
