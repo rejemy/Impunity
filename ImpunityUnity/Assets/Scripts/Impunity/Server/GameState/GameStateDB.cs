@@ -14,6 +14,8 @@ namespace Impunity.GameState
 		public string Id;
 		[BsonField("Version")]
 		public int Version;
+		[BsonField("DataFormatChecksum")]
+		public string DataFormatChecksum;
 	}
 
 	class CollectionData
@@ -170,7 +172,7 @@ namespace Impunity.GameState
 		}
 
 
-		public void EnsureFormat(GameStateFormat format)
+		public void EnsureFormat(GameStateFormatData format)
 		{
 			if (format.Collections == null || format.Collections.Length < 1)
 			{

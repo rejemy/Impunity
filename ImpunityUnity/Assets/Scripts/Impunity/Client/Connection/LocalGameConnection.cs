@@ -18,7 +18,8 @@ namespace Impunity.Connection
         private GameStateServer State;
 
 
-		public LocalGameConnection(GameStateServer gameState, ImpunityOptions options = null)
+		public LocalGameConnection(GameStateServer gameState, GameStateFormat format, ClientEntityManager em = null)
+			: base(format, em)
 		{
 			State = gameState;
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
@@ -31,7 +32,7 @@ namespace Impunity.Connection
 			State.AddListener(this);
 			State.ConnectionOpened(this);
 
-			CompletedActions.Enqueue(new NoOpAction(onComplete));
+			EnsureFormat(LocalFormat, onComplete);
 		}
 
 
@@ -49,6 +50,13 @@ namespace Impunity.Connection
 		// Called on background thread
 		public void ReportActionResult(GameStateActionBase action)
         {
+			action.OnSendComplete();
+
+			if (!action.ResultsExpected)
+			{
+				return;
+			}
+
 			CompletedActions.Enqueue(action);
 		}
 

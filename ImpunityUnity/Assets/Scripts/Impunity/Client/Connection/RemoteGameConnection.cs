@@ -25,7 +25,7 @@ namespace Impunity.Connection
 
 		private byte[] SendBuffer;
 
-		public RemoteGameConnection(IImpunityClient networkClient)
+		public RemoteGameConnection(IImpunityClient networkClient, GameStateFormat format, ClientEntityManager em) : base(format, em)
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
 			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
@@ -38,19 +38,20 @@ namespace Impunity.Connection
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 		}
 
-		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
 		{
-			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(serverEndpoint, options));
+			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(serverEndpoint, options), format, em);
 		}
 
 		public override void Connect(ImpunityCallback onComplete)
 		{
 			NetworkClient.Connect((ImpunityError err) =>
 			{
-				NoOpAction connectAction = new NoOpAction(onComplete);
+				//NoOpAction connectAction = new NoOpAction(onComplete);
 
 				if (err != null)
 				{
+					NoOpAction connectAction = new NoOpAction(onComplete);
 					connectAction.Error = err;
 					CompletedActions.Enqueue(connectAction);
 					return;
@@ -62,7 +63,8 @@ namespace Impunity.Connection
 				NetworkWriterThread.Name = "Network writer";
 				NetworkWriterThread.Start();
 
-				CompletedActions.Enqueue(connectAction);
+				EnsureFormat(LocalFormat, onComplete);
+				//CompletedActions.Enqueue(connectAction);
 			});
 		}
 
@@ -123,6 +125,7 @@ namespace Impunity.Connection
 
 			NetworkClient.SendGuaranteedMessage(encodedMessage);
 
+			action.OnSendComplete();
 		}
 
 		// On dotnet internal socket thread

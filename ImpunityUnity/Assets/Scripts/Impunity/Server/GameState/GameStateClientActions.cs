@@ -174,13 +174,13 @@ namespace Impunity.GameState
     public class EnsureFormatAction : ClientActionResultlessBase
     {
         [BsonField("f")]
-        public GameStateFormat Format;
+        public GameStateFormatData Format;
 
         public override ushort GetActionType() { return (ushort)ClientActionType.ENSURE_FORMAT; }
 
         public EnsureFormatAction() { }
 
-        public EnsureFormatAction(GameStateFormat format, ImpunityCallback onComplete = null)
+        public EnsureFormatAction(GameStateFormatData format, ImpunityCallback onComplete = null)
         {
             Format = format;
             OnCompleteCallback = onComplete;
@@ -414,10 +414,11 @@ namespace Impunity.GameState
 
         public CreateChannelAction() { }
 
-        public CreateChannelAction(int entityTypeId, string channelName)
+        public CreateChannelAction(int entityTypeId, string channelName, ImpunityCallback<uint> onComplete = null)
         {
             EntityTypeId = entityTypeId;
             Name = channelName;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
@@ -438,9 +439,11 @@ namespace Impunity.GameState
 
         public CreateObjectAction() { }
 
-        public CreateObjectAction(int entityTypeId, uint ChannelId)
+        public CreateObjectAction(int entityTypeId, uint channelId, ImpunityCallback<uint> onComplete = null)
         {
             EntityTypeId = entityTypeId;
+            ChannelId = channelId;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
@@ -454,18 +457,27 @@ namespace Impunity.GameState
         [BsonField("id")]
         public uint EntityId;
 
+        [BsonField("k")]
+        public string Key;
+
+        [BsonField("ub")]
+        public byte[] UpdateBytes;
+
         public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
 
         public UpdateEntityAction() { }
 
-        public UpdateEntityAction(uint entityId)
+        public UpdateEntityAction(uint entityId, string key, byte[] updateBytes, ImpunityCallback<bool> onComplete = null)
         {
             EntityId = entityId;
+            Key = key;
+            UpdateBytes = updateBytes;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.UpdateEntity(EntityId);
+            Result = game.Live.UpdateEntity(EntityId, Key);
         }
     }
 
@@ -474,18 +486,23 @@ namespace Impunity.GameState
         [BsonField("id")]
         public uint EntityId;
 
+        [BsonField("k")]
+        public string Key;
+
         public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
 
         public DeleteEntityAction() { }
 
-        public DeleteEntityAction(uint entityId)
+        public DeleteEntityAction(uint entityId, string key, ImpunityCallback<bool> onComplete = null)
         {
             EntityId = entityId;
+            Key = key;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.DeleteEntity(EntityId);
+            Result = game.Live.DeleteEntity(EntityId, Key);
         }
     }
 
@@ -504,9 +521,10 @@ namespace Impunity.GameState
 
         public EventEntityAction() { }
 
-        public EventEntityAction(uint entityId)
+        public EventEntityAction(uint entityId, ImpunityCallback onComplete = null)
         {
             EntityId = entityId;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
@@ -626,9 +644,10 @@ namespace Impunity.GameState
 
         public SubscribeChannelAction() { }
 
-        public SubscribeChannelAction(string lockName)
+        public SubscribeChannelAction(string channelName, ImpunityCallback<uint> onComplete = null)
         {
-            Name = lockName;
+            Name = channelName;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
@@ -646,9 +665,10 @@ namespace Impunity.GameState
 
         public UnsubscribeChannelAction() { }
 
-        public UnsubscribeChannelAction(uint channelId)
+        public UnsubscribeChannelAction(uint channelId, ImpunityCallback onComplete = null)
         {
             ID = channelId;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
@@ -671,10 +691,11 @@ namespace Impunity.GameState
 
         public SendBroadcastMessageAction() { }
 
-        public SendBroadcastMessageAction(int messageType, BsonValue message)
+        public SendBroadcastMessageAction(int messageType, BsonValue message, ImpunityCallback onComplete = null)
         {
             MessageType = messageType;
             MessageBody = message;
+            OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)

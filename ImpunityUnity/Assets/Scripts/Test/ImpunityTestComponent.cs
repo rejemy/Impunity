@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Net;
 using System.IO;
 using System;
-using System.Threading;
 using System.Threading.Tasks;
+
 
 using UnityEngine;
 
@@ -30,7 +30,72 @@ public static class TestEntityTypes
 {
 	// 0 is reserved
 	public const int PLAYER = 1;
+	public const int ZONE = 2;
 }
+
+
+[DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "DistributedEntityFactory")]
+public class TestPlayer : DistributedEntityBase
+{
+	enum DistributedPropIds
+    {
+		NEWBOOL = 1
+    }
+
+	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
+
+	[Distributed((int)DistributedPropIds.NEWBOOL)]
+	private DistributedValue<DBool> NewBool;
+	public void SetNewBool(bool b)
+    {
+		NewBool.Set(b);
+		SetDirty((int)DistributedPropIds.NEWBOOL);
+	}
+	public bool GetNewBool()
+    {
+		return (DBool)NewBool;
+    }
+	private void OnNewBoolChanged(DBool oldValue, DBool newValue)
+    {
+
+    }
+
+}
+
+[DistributedEntity(TestEntityTypes.ZONE)]
+public class TestZone : DistributedChannelBase
+{
+	enum DistributedPropIds
+	{
+		THING = 1
+	}
+
+	[Distributed((int)DistributedPropIds.THING)]
+	private DistributedValue<DString> Thing;
+	public void SetThing(string b)
+	{
+		Thing.Set(b);
+		SetDirty((int)DistributedPropIds.THING);
+	}
+	public string GetThing()
+	{
+		return (DString)Thing;
+	}
+}
+
+/*
+public class ServerDistributedEntity
+{
+	internal IDistributedProperty[] Props;
+	
+
+	public ServerDistributedEntity()
+    {
+		Props = new IDistributedProperty[2];
+		Props[0] = new DistributedBool();
+	}
+}
+*/
 
 public class ImpunityTestComponent : MonoBehaviour
 {
@@ -57,11 +122,6 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		ImpunityUnityLogger.Setup(ImpunityLogLevel.INFO);
 
-		StartCoroutine(ComboTest());
-	}
-
-	IEnumerator ComboTest()
-	{
 		GameStatePath = Path.Join(Application.persistentDataPath, "ImpTest", "TestGame");
 
 		Options = new ImpunityOptions
@@ -83,27 +143,47 @@ public class ImpunityTestComponent : MonoBehaviour
 				}
 			},
 
-			new GameStateEntityType[]
-            {
-				new GameStateEntityType
-                {
-					Index = TestEntityTypes.PLAYER,
-					Name = "Player",
-					Properties = new GameStateEntityPropertyDef[]
-                    {
-						new GameStateEntityPropertyDef
-                        {
-							Name = "Name",
-							PropValueType = (byte)GameStateEntityPropertyValueType.String
-						}
-
-					}
-				}
-            }
-
+			new Type[]
+			{
+				typeof(TestPlayer),
+				typeof(TestZone)
+			}
 		);
 
-		
+
+		//TestPlayer p = new TestPlayer();
+
+		StartCoroutine(ComboTest());
+	}
+
+	/*
+	void RegisterClass(Type t, Player inst)
+	{
+		foreach (var fieldInfo in t.GetFields())
+		{
+			Type fieldType = fieldInfo.FieldType;
+			if (fieldType.GetInterface(nameof(IDistributedProperty)) != null)
+			{
+				IDistributedProperty fieldProp = (IDistributedProperty)fieldInfo.GetValue(inst);
+				fieldProp.UpdateFromRemote("BOris");
+				fieldInfo.SetValue(inst, fieldProp);
+
+				//MethodInfo[] methods = fieldType.GetMethods(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
+				//MethodInfo getMethod = fieldType.GetMethod("Impunity.Connection.IDistributedProperty.GetAndClear", BindingFlags.NonPublic | BindingFlags.Instance);
+				//MethodInfo updateMethod = fieldType.GetMethod("Impunity.Connection.IDistributedProperty.UpdateFromRemote", BindingFlags.NonPublic | BindingFlags.Instance);
+
+
+
+				//Delegate uDel = updateMethod.CreateDelegate(fieldType);
+
+				Debug.Log("Found distributed property " + fieldInfo.Name);
+			}
+		}
+	}
+	*/
+
+	IEnumerator ComboTest()
+	{
 		yield return Setup();
 
 		yield return LocalConnectionTest();
@@ -114,16 +194,10 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		yield return Setup();
 
-		yield return LiveDataTest();
-
-		yield return Setup();
-
-		AsyncConnectionTest().ContinueWith((t)=>
+		AsyncTests().ContinueWith((t)=>
 		{
 			TestsDone = true;
 		});
-
-		
 	}
 
 	IEnumerator Setup()
@@ -131,6 +205,20 @@ public class ImpunityTestComponent : MonoBehaviour
 		Cleanup();
 
 		yield return new WaitForSeconds(0.1f);
+
+		Debug.Log("Creating local game server");
+
+		BsonDocument summary = new BsonDocument();
+		summary["name"] = "Test Game";
+
+		GameServer = GameStateServer.Create(GameStatePath, summary);
+	}
+
+	async Task SetupAsync()
+    {
+		Cleanup();
+
+		await Task.Delay(100);
 
 		Debug.Log("Creating local game server");
 
@@ -161,7 +249,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		Debug.Log("Running local connection test");
 
-		LocalGame = new LocalGameConnection(GameServer);
+		LocalGame = new LocalGameConnection(GameServer, CurrFormat);
 
 		yield return GenericConnectionTest(LocalGame);
 
@@ -195,7 +283,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Finder.Dispose();
 		Finder = null;
 
-		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, Options);
+		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, CurrFormat, Options);
 		RemoteGame.OnNetworkError = OnNetworkError;
 
 		yield return GenericConnectionTest(RemoteGame);
@@ -226,6 +314,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("TCP Connected");
 
+		/*
 		Debug.Log("Calling EnsureFormat");
 		ImpunityYield ensureFormat = connection.EnsureFormat(CurrFormat);
 		yield return ensureFormat;
@@ -233,7 +322,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		{
 			Debug.LogError(ensureFormat.Error.Message);
 			yield break;
-		}
+		}*/
 
 		BsonDocument char1 = new BsonDocument();
 		char1["_id"] = "char1";
@@ -321,21 +410,34 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	}
 
+	async Task AsyncTests()
+    {
+		Debug.Log("Starting async tests");
+
+		await AsyncConnectionTest();
+
+		await SetupAsync();
+
+		await LiveDataTest();
+
+		Debug.Log("Completed async tests");
+	}
+
 	async Task AsyncConnectionTest()
     {
 		Debug.Log("Running async local connection test");
 
-		LocalGame = new LocalGameConnection(GameServer);
-
 		try
         {
+			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
+
 			BsonDocument char1 = new BsonDocument();
 			char1["_id"] = "char1";
 			char1["name"] = "Hogstorm";
 			char1["level"] = 1;
 
 			await LocalGame.ConnectAsync();
-			await LocalGame.EnsureFormatAsync(CurrFormat);
+			//await LocalGame.EnsureFormatAsync(CurrFormat);
 			await LocalGame.InsertDocumentAsync(TestCollectionTypes.CHARACTERS, char1);
 			List<BsonDocument> chars = await LocalGame.ListDocumentsAsync(TestCollectionTypes.CHARACTERS);
 
@@ -352,43 +454,44 @@ public class ImpunityTestComponent : MonoBehaviour
 		Debug.Log("Done with async local connection test");
 	}
 
-	IEnumerator LiveDataTest()
+	async Task LiveDataTest()
     {
 		Debug.Log("Running live data test");
 
-		LocalGame = new LocalGameConnection(GameServer);
-
-		ImpunityYield localConnectAction = LocalGame.Connect();
-		yield return localConnectAction;
-		if (localConnectAction.Error != null)
+		try
 		{
-			Debug.LogError("Error connecting local: " + localConnectAction.Error.Message);
-			yield break;
+			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
+
+			await LocalGame.ConnectAsync();
+			//await LocalGame.EnsureFormatAsync(CurrFormat);
+
+			TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+			TCPServer.Start();
+
+			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, CurrFormat, Options);
+			RemoteGame.OnNetworkError = OnNetworkError;
+
+			await Task.Delay(20);
+
+			await RemoteGame.ConnectAsync();
+			//await RemoteGame.EnsureFormatAsync(CurrFormat);
+
+			await LiveBroadcastTests(LocalGame, RemoteGame);
+
+			await LiveLockTests(LocalGame, RemoteGame);
+
+			await LiveChannelTests(LocalGame, RemoteGame);
+
 		}
-
-		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
-		TCPServer.Start();
-
-		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, Options);
-		RemoteGame.OnNetworkError = OnNetworkError;
-		
-
-		ImpunityYield connectAction = RemoteGame.Connect();
-		yield return connectAction;
-		if (connectAction.Error != null)
+		catch (Exception e)
 		{
-			Debug.LogError("Error connecting TCP: " + connectAction.Error.Message);
-			yield break;
+			Debug.LogError("Got exception in live data test: " + e.ToString());
 		}
-
-		yield return LiveBroadcastTests(LocalGame, RemoteGame);
-
-		yield return LiveLocktTests(LocalGame, RemoteGame);
 
 		RemoteGame.Dispose();
 		RemoteGame = null;
 
-		yield return new WaitForSeconds(0.1f);
+		await Task.Delay(100);
 
 		TCPServer.Dispose();
 		TCPServer = null;
@@ -400,7 +503,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Debug.Log("Done with live data test");
 	}
 
-	IEnumerator LiveBroadcastTests(BaseGameConnection c1, BaseGameConnection c2)
+	async Task LiveBroadcastTests(BaseGameConnection c1, BaseGameConnection c2)
     {
 		Debug.Log("Doing broadcast test");
 
@@ -416,61 +519,71 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		while (!gotMessage)
 		{
-			yield return new WaitForEndOfFrame();
+			await Task.Delay(20);
 		}
 
 		Debug.Log("Broadcase test complete");
 	}
 
-	IEnumerator LiveLocktTests(BaseGameConnection c1, BaseGameConnection c2)
+	async Task LiveLockTests(BaseGameConnection c1, BaseGameConnection c2)
 	{
 		Debug.Log("Doing lock tests");
 
-		ImpunityYield<bool> localLockAction = c1.TryToLock("tempLock", "xyz");
-		yield return localLockAction;
-		if (localLockAction.Error != null)
-		{
-			Debug.LogError("Error locking temp lock: " + localLockAction.Error.Message);
-			yield break;
-		}
-
-		if (localLockAction.Value != true)
+		bool localLocked = await c1.TryToLockAsync("tempLock", "xyz");
+		if (localLocked != true)
 		{
 			Debug.LogError("Unable to lock temp lock");
-			yield break;
+			return;
 		}
 
 
-		ImpunityYield<bool> remoteLockAction = c2.TryToLock("tempLock", "snad");
-		yield return remoteLockAction;
-		if (remoteLockAction.Error != null)
-		{
-			Debug.LogError("Error locking temp lock: " + remoteLockAction.Error.Message);
-			yield break;
-		}
-
-		if (remoteLockAction.Value != false)
+		bool remoteLocked = await c2.TryToLockAsync("tempLock", "snad");
+		if (remoteLocked != false)
 		{
 			Debug.LogError("Was able to get lock that should be held");
-			yield break;
+			return;
 		}
 
-		ImpunityYield<bool> localUnlockAction = c1.Unlock("tempLock", "xyz");
-		yield return localUnlockAction;
-		if (localUnlockAction.Error != null)
-		{
-			Debug.LogError("Error unlocking temp lock: " + localUnlockAction.Error.Message);
-			yield break;
-		}
-
-		if (localLockAction.Value != true)
+		bool localUnlocked = await c1.UnlockAsync("tempLock", "xyz");
+		if (localUnlocked != true)
 		{
 			Debug.LogError("Unable to unlock temp lock");
-			yield break;
+			return;
 		}
 
 		Debug.Log("Lock tests complete");
 	}
+
+	async Task LiveChannelTests(BaseGameConnection c1, BaseGameConnection c2)
+    {
+		Debug.Log("Doing live channel tests");
+
+		uint channelId = await c1.CreateChannelAsync(TestEntityTypes.ZONE, "testZone");
+		Debug.Log("Made channel " + channelId);
+
+		await c2.SubcribeToChannelAsync("testZone");
+		Debug.Log("C2 subscribed to channel");
+
+		uint playerId = await c1.CreateObjectAsync(TestEntityTypes.PLAYER, channelId);
+		Debug.Log("Made player: " + playerId);
+
+		await c1.TryToLockEntityAsync(playerId, "xyz");
+
+		bool updated = await c2.UpdateEntityAsync(playerId, null, null);
+		Debug.Log("Able to update locked entity: " + updated);
+
+		await c1.UnlockEntityAsync(playerId, "xyz");
+
+		await c1.UnsubscribeFromChannelAsync(channelId);
+		await c2.UnsubscribeFromChannelAsync(channelId);
+		Debug.Log("Unsubscribed from channel " + channelId);
+
+
+
+		await Task.Delay(100);
+
+		Debug.Log("Live channel tests complete");
+    }
 
 	void OnNetworkError(ImpunityError err)
     {
@@ -505,11 +618,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 			Cleanup();
 
-#if UNITY_EDITOR
-			EditorApplication.ExitPlaymode();
-#else
-			Application.Quit();
-#endif
+			Quit();
 		}
 	}
 
@@ -519,6 +628,15 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Cleanup();
 
+	}
+
+	void Quit()
+    {
+#if UNITY_EDITOR
+		EditorApplication.ExitPlaymode();
+#else
+			Application.Quit();
+#endif
 	}
 
 	public static void DeleteFolder(string path)

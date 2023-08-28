@@ -6,19 +6,39 @@ using UltraLiteDB;
 
 using Impunity.GameState;
 
-
 namespace Impunity.Connection
 {
 
 	public delegate void BroadcastMessageHandler(int messageType, BsonValue messageBody, string sender);
 
 
-
 	public abstract class BaseGameConnection : IServerMessageHandler, IDisposable
 	{
+		public ClientEntityManager EntityManager { get; private set; }
+		protected GameStateFormatData LocalFormat;
+
 		protected ConcurrentQueue<GameStateActionBase> CompletedActions;
 
 		public abstract void Connect(ImpunityCallback onComplete);
+
+		public BaseGameConnection(GameStateFormat format, ClientEntityManager em)
+        {
+			if (em == null)
+            {
+				em = new ClientEntityManager();
+			}
+			EntityManager = em;
+			EntityManager.Connection = this;
+			GameStateEntityType[] entityTypes = EntityManager.RegisterEntityTypes(format.EntityTypes);
+
+			LocalFormat = new GameStateFormatData(format, entityTypes);
+		}
+
+		protected void EnsureFormat(GameStateFormatData format, ImpunityCallback onComplete)
+		{
+			DoAction(new EnsureFormatAction(format, onComplete));
+		}
+
 
 		public void Update()
 		{
@@ -57,34 +77,34 @@ namespace Impunity.Connection
 
 		// Handler delegates
 		public BroadcastMessageHandler OnBroadcastMessage {get; set;}
-
+		
 
 		// Server message handlers
 
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType)
         {
-
-        }
+			EntityManager.HandleCreateChannel(channelId, channelName, channelType);
+		}
 
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType)
         {
-
-        }
+			EntityManager.HandleCreateObject(objectId, channelId, objectType);
+		}
 
 		public void HandleEntityUpdate(uint entityId)
         {
-
-        }
+			EntityManager.HandleEntityUpdate(entityId);
+		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
         {
-
-        }
+			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
+		}
 
 		public void HandleEntityDelete(uint entityId)
         {
-
-        }
+			EntityManager.HandleEntityDelete(entityId);
+		}
 
 		public void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy)
         {
@@ -105,7 +125,7 @@ namespace Impunity.Connection
 			DoAction(new CompoundAction(actions, onComplete));
 		}
 
-		// -------- Server Setup
+		// -------- Game Setup
 
 		public void SetGameSummary(BsonDocument summary, ImpunityCallback onComplete)
 		{
@@ -115,11 +135,6 @@ namespace Impunity.Connection
 		public void GetGameSummary(ImpunityCallback<BsonDocument> onComplete)
 		{
 			DoAction(new GetGameSummaryAction(onComplete));
-		}
-
-		public void EnsureFormat(GameStateFormat format, ImpunityCallback onComplete)
-		{
-			DoAction(new EnsureFormatAction(format, onComplete));
 		}
 
 		// -------- DB actions
@@ -166,6 +181,50 @@ namespace Impunity.Connection
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
+		public void CreateChannel(int entityTypeId, string channelName, ImpunityCallback<uint> onComplete)
+        {
+			DoAction(new CreateChannelAction(entityTypeId, channelName, onComplete));
+        }
+
+		public void CreateObject(int entityTypeId, uint channelId, ImpunityCallback<uint> onComplete)
+		{
+			DoAction(new CreateObjectAction(entityTypeId, channelId, onComplete));
+		}
+
+		public void UpdateEntity(uint entityId, string key, byte[] updateData, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new UpdateEntityAction(entityId, key, updateData, onComplete));
+		}
+
+		public void DeleteEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new DeleteEntityAction(entityId, key, onComplete));
+		}
+
+		public void TriggerEntityEvent(uint entityId, ImpunityCallback onComplete)
+		{
+			DoAction(new EventEntityAction(entityId, onComplete));
+		}
+
+		public void TryToLockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new LockEntityAction(entityId, key, onComplete));
+		}
+
+		public void UnlockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new UnlockEntityAction(entityId, key, onComplete));
+		}
+
+		public void SubcribeToChannel(string channelName, ImpunityCallback<uint> onComplete)
+		{
+			DoAction(new SubscribeChannelAction(channelName, onComplete));
+		}
+
+		public void UnsubscribeFromChannel(uint channelId, ImpunityCallback onComplete)
+		{
+			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
+		}
 
 		// -------- Broadcast
 

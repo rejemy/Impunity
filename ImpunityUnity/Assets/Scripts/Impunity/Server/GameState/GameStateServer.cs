@@ -90,7 +90,7 @@ namespace Impunity.GameState
 
 		ConcurrentDictionary<int, IGameStateListener> Listeners;
 
-		private GameStateServer(GameStateDB gameDatabase, GameStateFormat format = null)
+		private GameStateServer(GameStateDB gameDatabase)
 		{
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
@@ -99,11 +99,6 @@ namespace Impunity.GameState
 
 			Summary = DB.LoadGameSummary();
 			Metadata = DB.LoadMetadata();
-
-			if (format != null)
-			{
-				EnsureFormat(format);
-			}
 
 			ActionQueue = new BlockingCollection<GameStateActionBase>();
 
@@ -114,14 +109,14 @@ namespace Impunity.GameState
 			WorkerThread.Start();
 		}
 
-		public static GameStateServer Open(string path, GameStateFormat format = null, string password = null)
+		public static GameStateServer Open(string path, string password = null)
 		{
-			return new GameStateServer(GameStateDB.Open(path, password), format);
+			return new GameStateServer(GameStateDB.Open(path, password));
 		}
 
-		public static GameStateServer Create(string path, BsonDocument summary, GameStateFormat format = null, string password = null)
+		public static GameStateServer Create(string path, BsonDocument summary, string password = null)
 		{
-			return new GameStateServer(GameStateDB.Create(path, summary, password), format);
+			return new GameStateServer(GameStateDB.Create(path, summary, password));
 		}
 
 		// Called by connection threads
@@ -136,9 +131,9 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
-		public void EnsureFormat(GameStateFormat format)
+		public void EnsureFormat(GameStateFormatData format)
 		{
-			if (format.Version == Metadata.Version)
+			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
 			{
 				return;
 			}
@@ -152,6 +147,7 @@ namespace Impunity.GameState
 			Live.EnsureFormat(format);
 
 			Metadata.Version = format.Version;
+			Metadata.DataFormatChecksum = format.DataChecksum;
 			DB.SaveMetadata(Metadata);
 
 		}
@@ -219,16 +215,13 @@ namespace Impunity.GameState
 				// Run catches exceptions in the action
 				action.Run(this);
 
-				if (action.ResultsExpected)
+				try
 				{
-					try
-					{
-						action.Origin.ReportActionResult(action);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
-					}
+					action.Origin.ReportActionResult(action);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
 				}
 			}
 		}

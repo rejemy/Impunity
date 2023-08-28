@@ -46,6 +46,10 @@ namespace Impunity.GameState
             return requestBson;
         }
 
+        // Called from background thread
+        // Called when message has been encoded or processed and the input fields
+        // can be disposed of
+        public virtual void OnSendComplete() { }
 
         // Executing the action
 

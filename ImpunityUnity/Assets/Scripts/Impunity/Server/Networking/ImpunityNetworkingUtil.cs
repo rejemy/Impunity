@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Text;
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 
 using UltraLiteDB;
 
 using Impunity.GameState;
+using System.IO;
 
 namespace Impunity.Networking
 {
@@ -29,10 +31,68 @@ namespace Impunity.Networking
 		public BsonDocument Body;
 	}
 
+	public class TemporaryBuffer : IDisposable
+    {
+		public byte[] Bytes;
+		public int Length;
+		internal TemporaryBuffer NextBuffer;
+
+		public TemporaryBuffer()
+        {
+			Bytes = new byte[ImpunityConstants.MaxMessageSize];
+			Length = 0;
+			NextBuffer = null;
+		}
+
+		public void Dispose()
+        {
+			ImpunityNetworkingUtil.ReturnTemporaryBuffer(this);
+		}
+	}
+
 	public static class ImpunityNetworkingUtil
 	{
 		private static BsonMapper Mapper = null;
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
+
+		private static TemporaryBuffer BufferPool;
+		private static object BufferLock = new object();
+
+		public static TemporaryBuffer GetTemporaryBuffer()
+        {
+			TemporaryBuffer buff = null;
+
+			lock (BufferLock)
+            {
+				if (BufferPool != null)
+                {
+					buff = BufferPool;
+					BufferPool = buff.NextBuffer;
+				}
+            }
+
+			if (buff == null)
+            {
+				buff = new TemporaryBuffer();
+			}
+			else
+            {
+				buff.NextBuffer = null;
+			}
+
+			return buff;
+		}
+
+		public static void ReturnTemporaryBuffer(TemporaryBuffer b)
+		{
+			b.Length = 0;
+
+			lock (BufferLock)
+			{
+				b.NextBuffer = BufferPool;
+				BufferPool = b;
+			}
+		}
 
 		public static BsonMapper GetBsonMapper()
 		{
@@ -158,5 +218,29 @@ namespace Impunity.Networking
 			}
 			return true;
 		}
+
+		public static string MakeDataChecksum(object dataObject)
+		{
+			BsonMapper mapper = new BsonMapper();
+			mapper.TrimWhitespace = true;
+			mapper.IncludeFields = true;
+			byte[] dataBytes = BsonSerializer.Serialize(mapper.SerializeObject(dataObject));
+
+			StringBuilder sb = new StringBuilder();
+			using (MD5 md5 = MD5.Create())
+			{
+				// Compute the hash of the given string
+				byte[] hashValue = md5.ComputeHash(dataBytes);
+
+				// Convert the byte array to string format
+				foreach (byte b in hashValue)
+				{
+					sb.Append($"{b:X2}");
+				}
+			}
+
+			return sb.ToString();
+		}
+
 	}
 }

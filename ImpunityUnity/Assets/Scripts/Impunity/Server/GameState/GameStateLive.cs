@@ -177,6 +177,11 @@ namespace Impunity.GameState
             return LockedWith != null;
         }
 
+        public bool IsLockedBy(string key)
+        {
+            return LockedWith  == key;
+        }
+
         public virtual void UpdateProps()
         {
 
@@ -349,7 +354,7 @@ namespace Impunity.GameState
             ConnectedReplicas = new HashSet<GameStateReplicant>();
         }
 
-        public void EnsureFormat(GameStateFormat format)
+        public void EnsureFormat(GameStateFormatData format)
         {
             if (format.EntityTypes == null || format.EntityTypes.Length < 1)
             {
@@ -472,7 +477,7 @@ namespace Impunity.GameState
             return dobj.Id;
         }
 
-        public bool UpdateEntity(uint entityId)
+        public bool UpdateEntity(uint entityId, string key)
         {
             GameStateEntity entity = AllEntities[entityId];
             if (entity == null)
@@ -480,7 +485,7 @@ namespace Impunity.GameState
                 throw new Exception("No entity with ID " + entityId);
             }
 
-            if (entity.IsLocked())
+            if (!entity.IsLockedBy(key))
             {
                 // Can't update locked entity
                 return false;
@@ -502,7 +507,7 @@ namespace Impunity.GameState
 
         }
 
-        public bool DeleteEntity(uint entityId)
+        public bool DeleteEntity(uint entityId, string key)
         {
             GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
@@ -510,7 +515,7 @@ namespace Impunity.GameState
                 throw new Exception("No entity with ID " + entityId);
             }
 
-            if (entity.IsLocked())
+            if (!entity.IsLockedBy(key))
             {
                 // Can't delete locked entity
                 return false;

@@ -5,6 +5,7 @@ using UltraLiteDB;
 
 using Impunity.GameState;
 
+
 namespace Impunity.Connection
 {
 	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
@@ -75,12 +76,14 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/*
 		public static Task EnsureFormatAsync(this BaseGameConnection connection, GameStateFormat format)
 		{
 			var t = new ImpunityTaskCompletionSource();
 			connection.EnsureFormat(format, t.CompleteTask);
 			return t.Task;
 		}
+		*/
 
 		public static Task<BsonValue> InsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
@@ -140,47 +143,110 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName)
+		{
+			var t = new ImpunityTaskCompletionSource<uint>();
+			connection.CreateChannel(entityTypeId, channelName, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId)
+		{
+			var t = new ImpunityTaskCompletionSource<uint>();
+			connection.CreateObject(entityTypeId, channelId, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, string key, byte[] updateData)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.UpdateEntity(entityId, key, updateData, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.DeleteEntity(entityId, key, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.TriggerEntityEvent(entityId, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.TryToLockEntity(entityId, key, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.UnlockEntity(entityId, key, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName)
+		{
+			var t = new ImpunityTaskCompletionSource<uint>();
+			connection.SubcribeToChannel(channelName, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task UnsubscribeFromChannelAsync(this BaseGameConnection connection, uint channelId)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.UnsubscribeFromChannel(channelId, t.CompleteTask);
+			return t.Task;
+		}
+
 	}
 
 	public static class GameStateDBCollectionAsyncExtensions
 	{
 
-		public static Task<BsonValue> InsertDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+		public static Task<BsonValue> InsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonValue>();
 			collection.InsertDocument(doc, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<bool> UpdateDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+		public static Task<bool> UpdateDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			collection.UpdateDocument(doc, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<bool> UpsertDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
+		public static Task<bool> UpsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			collection.UpsertDocument(doc, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<DTYPE> FindDocumentById<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		public static Task<DTYPE> FindDocumentByIdAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<DTYPE>();
 			collection.FindDocumentById(id, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<bool> DeleteDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		public static Task<bool> DeleteDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			collection.DeleteDocument(id, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<List<DTYPE>> ListDocuments<DTYPE>(this GameStateDBCollection<DTYPE> collection)
+		public static Task<List<DTYPE>> ListDocumentsAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<DTYPE>>();
 			collection.ListDocuments(t.CompleteTask);
