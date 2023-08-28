@@ -5,6 +5,8 @@ using System.Reflection;
 
 using UltraLiteDB;
 
+using Impunity.GameState;
+
 namespace Impunity.Connection
 {
 	[AttributeUsage(AttributeTargets.Class)]
@@ -29,14 +31,6 @@ namespace Impunity.Connection
 		{
 			FieldId = fieldId;
 		}
-	}
-
-	public interface IDistributableValueType
-	{
-		GameStateEntityPropertyValueType ValueType { get; }
-
-		void WriteChangesTo(BinaryWriter w);
-		void ReadChangesFrom(BinaryReader r);
 	}
 
 	public interface IDistributedField

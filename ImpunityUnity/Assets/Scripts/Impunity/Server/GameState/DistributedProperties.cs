@@ -1,9 +1,18 @@
 ﻿
+using System;
 using System.IO;
 
 
-namespace Impunity.Connection
+namespace Impunity.GameState
 {
+
+	public interface IDistributableValueType
+	{
+		GameStateEntityPropertyValueType ValueType { get; }
+
+		void WriteChangesTo(BinaryWriter w);
+		void ReadChangesFrom(BinaryReader r);
+	}
 
 	// Single values
 
@@ -418,7 +427,287 @@ namespace Impunity.Connection
 		public static implicit operator DBlob(byte[] d) => new DBlob(d);
 	}
 
-	/*
+	public struct DDateTime : IDistributableValueType
+	{
+		private DateTime Value;
+
+		public DDateTime(DateTime v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			w.Write(Value.ToBinary());
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			Value = new DateTime(r.ReadInt64());
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
+
+		public static implicit operator DateTime(DDateTime d) => d.Value;
+		public static implicit operator DDateTime(DateTime d) => new DDateTime(d);
+	}
+
+	public struct DTimeSpan : IDistributableValueType
+	{
+		private TimeSpan Value;
+
+		public DTimeSpan(TimeSpan v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			w.Write(Value.Ticks);
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			Value = new TimeSpan(r.ReadInt64());
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
+
+		public static implicit operator TimeSpan(DTimeSpan d) => d.Value;
+		public static implicit operator DTimeSpan(TimeSpan d) => new DTimeSpan(d);
+	}
+
+	public struct DGuid : IDistributableValueType
+	{
+		private Guid Value;
+
+		public DGuid(Guid v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			w.Write(Value.ToByteArray());
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			Value = new Guid(r.ReadBytes(16));
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
+
+		public static implicit operator Guid(DGuid d) => d.Value;
+		public static implicit operator DGuid(Guid d) => new DGuid(d);
+	}
+
+
+	public struct DSmallCustom : IDistributableValueType
+	{
+		private byte[] Value;
+
+		public DSmallCustom(byte[] v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			w.Write((byte)Value.Length);
+			w.Write(Value);
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			int count = r.ReadByte();
+			Value = r.ReadBytes(count);
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+
+		public static implicit operator byte[](DSmallCustom d) => d.Value;
+		public static implicit operator DSmallCustom(byte[] d) => new DSmallCustom(d);
+	}
+
+	public struct DSmallNullableCustom : IDistributableValueType
+	{
+		private byte[] Value;
+
+		public DSmallNullableCustom(byte[] v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			if (Value == null)
+			{
+				w.Write(false);
+			}
+			else
+			{
+				w.Write(true);
+				w.Write((byte)Value.Length);
+				w.Write(Value);
+			}
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			bool hasValue = r.ReadBoolean();
+			if (hasValue)
+			{
+				int count = r.ReadByte();
+				Value = r.ReadBytes(count);
+			}
+			else
+			{
+				Value = null;
+			}
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
+
+		public static implicit operator byte[](DSmallNullableCustom d) => d.Value;
+		public static implicit operator DSmallNullableCustom(byte[] d) => new DSmallNullableCustom(d);
+	}
+
+	public struct DCustom : IDistributableValueType
+	{
+		private byte[] Value;
+
+		public DCustom(byte[] v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			w.Write((ushort)Value.Length);
+			w.Write(Value);
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			int count = r.ReadUInt16();
+			Value = r.ReadBytes(count);
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
+
+		public static implicit operator byte[](DCustom d) => d.Value;
+		public static implicit operator DCustom(byte[] d) => new DCustom(d);
+	}
+
+	public struct DNullableCustom : IDistributableValueType
+	{
+		private byte[] Value;
+
+		public DNullableCustom(byte[] v)
+		{
+			Value = v;
+		}
+
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			if (Value == null)
+			{
+				w.Write(false);
+			}
+			else
+			{
+				w.Write(true);
+				w.Write((ushort)Value.Length);
+				w.Write(Value);
+			}
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			bool hasValue = r.ReadBoolean();
+			if (hasValue)
+			{
+				int count = r.ReadUInt16();
+				Value = r.ReadBytes(count);
+			}
+			else
+			{
+				Value = null;
+			}
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
+
+		public static implicit operator byte[](DNullableCustom d) => d.Value;
+		public static implicit operator DNullableCustom(byte[] d) => new DNullableCustom(d);
+	}
+
+	public class DistributedValueFactory
+    {
+		public static IDistributableValueType Make(byte type)
+		{
+			GameStateEntityPropertyValueType enumType = (GameStateEntityPropertyValueType)type;
+
+			return Make(enumType);
+		}
+
+		public static IDistributableValueType Make(GameStateEntityPropertyValueType type)
+		{
+            switch (type)
+            {
+                case GameStateEntityPropertyValueType.Boolean:
+                    return new DBool();
+                case GameStateEntityPropertyValueType.Int8:
+					return new DInt8();
+				case GameStateEntityPropertyValueType.UInt8:
+					return new DUInt8();
+				case GameStateEntityPropertyValueType.Int16:
+					return new DInt16();
+				case GameStateEntityPropertyValueType.UInt16:
+					return new DUInt16();
+				case GameStateEntityPropertyValueType.Int32:
+                    return new DInt32();
+                case GameStateEntityPropertyValueType.UInt32:
+					return new DUInt32();
+				case GameStateEntityPropertyValueType.Int64:
+					return new DInt64();
+				case GameStateEntityPropertyValueType.UInt64:
+					return new DUInt64();
+				case GameStateEntityPropertyValueType.Float:
+					return new DFloat();
+				case GameStateEntityPropertyValueType.Double:
+					return new DDouble();
+				case GameStateEntityPropertyValueType.Decimal:
+					return new DDecimal();
+				case GameStateEntityPropertyValueType.Char:
+					return new DChar();
+				case GameStateEntityPropertyValueType.String:
+					return new DString();
+				case GameStateEntityPropertyValueType.Blob:
+					return new DBlob();
+				case GameStateEntityPropertyValueType.DateTime:
+					return new DDateTime();
+				case GameStateEntityPropertyValueType.TimeSpan:
+					return new DTimeSpan();
+				case GameStateEntityPropertyValueType.Guid:
+					return new DGuid();
+				case GameStateEntityPropertyValueType.CustomSmall:
+					return new DSmallCustom();
+				case GameStateEntityPropertyValueType.CustomSmallNullable:
+					return new DSmallNullableCustom();
+				case GameStateEntityPropertyValueType.Custom:
+					return new DCustom();
+				case GameStateEntityPropertyValueType.CustomNullable:
+					return new DNullableCustom();
+			}
+
+			throw new Exception("Unknown propery type " + type);
+        }
+    }
+
+
+    /*
 	public struct DistributedBool : IDistributedProperty
 	{
 		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Boolean; }
@@ -997,6 +1286,6 @@ namespace Impunity.Connection
 	}
 	*/
 
-	// ---- Arrays
+    // ---- Arrays
 
 }

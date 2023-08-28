@@ -485,7 +485,8 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 		catch (Exception e)
 		{
-			Debug.LogError("Got exception in live data test: " + e.ToString());
+			Debug.LogError("Got exception in live data test");
+			Debug.LogException(e);
 		}
 
 		RemoteGame.Dispose();

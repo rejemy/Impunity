@@ -133,10 +133,26 @@ namespace Impunity.GameState
         public string LockedWith { get; internal set; }
         public GameStateReplicant EphemeralOwner;
 
+        private IDistributableValueType[] Properties;
+
         public GameStateEntity(GameStateEntityType typeInfo, string name = null)
         {
             TypeInfo = typeInfo;
             Name = name;
+
+            if (typeInfo != null)
+            {
+                if (typeInfo.Properties != null && typeInfo.Properties.Length > 0)
+                {
+                    int maxPropIndex = typeInfo.Properties[typeInfo.Properties.Length - 1].Index;
+                    Properties = new IDistributableValueType[maxPropIndex + 1];
+
+                    foreach (GameStateEntityPropertyDef propDef in typeInfo.Properties)
+                    {
+                        Properties[propDef.Index] = DistributedValueFactory.Make(propDef.PropValueType);
+                    }
+                }
+            }
         }
 
         public bool Lock(string key, GameStateReplicant lockedBy)

@@ -169,8 +169,14 @@ namespace Impunity
 		String = 14,
 		Blob = 15,
 
-		CustomSmall = 16,
-		Custom = 17
+		DateTime = 16,
+		TimeSpan = 17,
+		Guid = 18,
+
+		CustomSmall = 100,
+		CustomSmallNullable = 101,
+		Custom = 102,
+		CustomNullable = 103
 	}
 
 	public enum GameStateEntityPropertyType
