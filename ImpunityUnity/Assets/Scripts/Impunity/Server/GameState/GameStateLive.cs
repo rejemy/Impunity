@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-
+using System.IO;
 using UltraLiteDB;
 
 
@@ -45,7 +45,7 @@ namespace Impunity.GameState
             EphemeralEntities = null;
             foreach (GameStateEntity entity in ephemerals.Values)
             {
-                entity.Destroy();
+                entity.Destroy(null);
             }
             ephemerals.Clear();
 
@@ -127,6 +127,7 @@ namespace Impunity.GameState
         public uint Id { get; internal set; }
         public string Name { get; private set; } // Not all entities have names
 
+        protected GameStateLive LiveData;
         protected GameStateEntityType TypeInfo;
 
         public GameStateReplicant LockHeldBy;
@@ -135,8 +136,9 @@ namespace Impunity.GameState
 
         private IDistributableValueType[] Properties;
 
-        public GameStateEntity(GameStateEntityType typeInfo, string name = null)
+        public GameStateEntity(GameStateLive liveData, GameStateEntityType typeInfo, string name = null)
         {
+            LiveData = liveData;
             TypeInfo = typeInfo;
             Name = name;
 
@@ -195,15 +197,67 @@ namespace Impunity.GameState
 
         public bool IsLockedBy(string key)
         {
-            return LockedWith  == key;
+            return LockedWith == key;
         }
 
-        public virtual void UpdateProps()
+        public bool IsAccessibleBy(string key)
         {
-
+            return LockedWith == null || LockedWith == key;
         }
 
-        public virtual void Destroy()
+        public virtual void UpdateProps(BinaryReader propReader, byte[] propData)
+        {
+            if (propData == null || propData.Length == 0)
+            {
+                return;
+            }
+
+            while(true)
+            {
+                int propId = propReader.ReadByte();
+                if (propId == 0)
+                {
+                    break;
+                }
+
+                if(propId >= Properties.Length)
+                {
+                    throw new Exception("Invalid property id: " + propId);
+                }
+
+                Properties[propId].ReadFrom(propReader);
+            }
+        }
+
+        public byte[] GetPropBytes()
+        {
+            if (TypeInfo == null || TypeInfo.Properties == null || TypeInfo.Properties.Length == 0)
+            {
+                return null;
+            }
+
+            BinaryWriter writer = LiveData.GetTempBufferWriter();
+            writer.BaseStream.Position = 0;
+
+            foreach(var propInfo in TypeInfo.Properties)
+            {
+                writer.Write((byte)propInfo.Index);
+                Properties[propInfo.Index].WriteTo(writer);
+            }
+
+            writer.Write((byte)0);
+
+            int length = (int)writer.BaseStream.Position;
+            writer.BaseStream.Position = 0;
+
+            byte[] propBytes = new byte[length];
+            writer.BaseStream.Read(propBytes, 0, length);
+            writer.BaseStream.Position = 0;
+
+            return propBytes;
+        }
+
+        public virtual void Destroy(BsonValue deleteData)
         {
             Unlock();
             if (EphemeralOwner != null)
@@ -219,20 +273,32 @@ namespace Impunity.GameState
         Dictionary<uint, GameStateObject> Members;
         Dictionary<string, GameStateReplicant> Listeners;
 
-        public GameStateChannel(GameStateEntityType typeInfo, string name) : base(typeInfo, name)
+        public GameStateChannel(GameStateLive liveData, GameStateEntityType typeInfo, string name) : base(liveData, typeInfo, name)
         {
             Members = new Dictionary<uint, GameStateObject>();
             Listeners = new Dictionary<string, GameStateReplicant>();
         }
 
-        public void AddListener(GameStateReplicant replicant)
+        public void AddListener(GameStateReplicant replicant, bool sendCreate)
         {
+            if (Listeners.ContainsKey(replicant.Id))
+            {
+                // Already listening
+                return;
+            }
+
             Listeners.Add(replicant.Id, replicant);
+
+            if(!sendCreate)
+            {
+                return;
+            }
 
             ChannelCreateMessageAction channelCreate = new ChannelCreateMessageAction();
             channelCreate.ChannelId = Id;
             channelCreate.ChannelName = Name;
             channelCreate.ChannelType = TypeInfo.Index;
+            channelCreate.PropBytes = GetPropBytes();
             channelCreate.ObjectsInChannel = new ObjectCreateMessageAction[Members.Count];
 
             int i = 0;
@@ -249,13 +315,14 @@ namespace Impunity.GameState
             Listeners.Remove(replicant.Id);
         }
 
-        public void AddObject(GameStateObject obj)
+        public void AddObject(GameStateObject obj, GameStateReplicant addedBy)
         {
             Members.Add(obj.Id, obj);
+            obj.AddedToChannel(this);
 
             ObjectCreateMessageAction createMessage = obj.MakeCreateMessage();
 
-            SendToListeners(createMessage);
+            SendToListeners(createMessage, addedBy);
         }
 
         public void RemoveObject(GameStateObject obj)
@@ -263,35 +330,40 @@ namespace Impunity.GameState
             Members.Remove(obj.Id);
         }
 
-        public override void UpdateProps()
+        public override void UpdateProps(BinaryReader propReader, byte[] propData)
         {
-            base.UpdateProps();
+            base.UpdateProps(propReader, propData);
 
             EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
             updateMessage.EntityId = Id;
+            updateMessage.UpdateBytes = propData;
 
-            SendToListeners(updateMessage);
+            SendToListeners(updateMessage, null);
         }
 
-        public override void Destroy()
+        public override void Destroy(BsonValue deleteData)
         {
             EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
             deleteMessage.EntityId = Id;
+            deleteMessage.DeleteData = deleteData;
 
-            SendToListeners(deleteMessage);
+            SendToListeners(deleteMessage, null);
 
             Members.Clear();
             Listeners.Clear();
 
-            base.Destroy();
-
-
+            base.Destroy(deleteData);
         }
 
-        public void SendToListeners(ServerActionBase message)
+        public void SendToListeners(ServerActionBase message, GameStateReplicant except)
         {
             foreach (GameStateReplicant replicant in Listeners.Values)
             {
+                if(except != null && except.Id == replicant.Id)
+                {
+                    continue;
+                }
+
                 replicant.SendMessageViaConnection(message);
             }
         }
@@ -301,7 +373,12 @@ namespace Impunity.GameState
     {
         GameStateChannel Channel;
 
-        public GameStateObject(GameStateEntityType typeInfo, GameStateChannel channel) : base(typeInfo, null)
+        public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo) : base(liveData, typeInfo, null)
+        {
+            Channel = null;
+        }
+
+        public void AddedToChannel(GameStateChannel channel)
         {
             Channel = channel;
         }
@@ -312,44 +389,52 @@ namespace Impunity.GameState
             message.ObjectId = Id;
             message.ChannelId = Channel.Id;
             message.ObjectType = TypeInfo.Index;
+            message.PropBytes = GetPropBytes();
 
             return message;
         }
 
-        public override void UpdateProps()
+        public override void UpdateProps(BinaryReader propReader, byte[] propData)
         {
-            base.UpdateProps();
+            base.UpdateProps(propReader, propData);
+
+            if(Channel == null)
+            {
+                return;
+            }
 
             EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
             updateMessage.EntityId = Id;
+            updateMessage.UpdateBytes = propData;
 
-            Channel.SendToListeners(updateMessage);
+            Channel.SendToListeners(updateMessage, null);
         }
 
-        public override void Destroy()
+        public override void Destroy(BsonValue deleteData)
         {
             EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
             deleteMessage.EntityId = Id;
+            deleteMessage.DeleteData = deleteData;
             Channel.RemoveObject(this);
 
-            Channel.SendToListeners(deleteMessage);
+            Channel.SendToListeners(deleteMessage, null);
             Channel = null;
 
-            base.Destroy();
+            base.Destroy(deleteData);
         }
     }
 
     // Entity that exists only to be a lock, will be deleted when lock is released
-    internal class GameStateNamedLock : GameStateEntity
+    public class GameStateNamedLock : GameStateEntity
     {
-        public GameStateNamedLock(string name) : base (null, name)
+        public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, name)
         {
             
         }
     }
 
     // Live gamestate in memory
-    internal class GameStateLive
+    public class GameStateLive
     {
         GameStateDB DB;
 
@@ -362,12 +447,23 @@ namespace Impunity.GameState
 
         uint NextId;
 
+        private BinaryReader TempBufferReader;
+        private BinaryWriter TempBufferWriter;
+
         public GameStateLive(GameStateDB db)
         {
             DB = db;
             AllEntities = new Dictionary<uint, GameStateEntity>();
             NamedEntities = new Dictionary<string, GameStateEntity>();
             ConnectedReplicas = new HashSet<GameStateReplicant>();
+
+            TempBufferReader = new BinaryReader(new MemoryStream(new byte[ImpunityConstants.MaxMessageSize]));
+            TempBufferWriter = new BinaryWriter(new MemoryStream(new byte[ImpunityConstants.MaxMessageSize]));
+        }
+
+        public BinaryWriter GetTempBufferWriter()
+        {
+            return TempBufferWriter;
         }
 
         public void EnsureFormat(GameStateFormatData format)
@@ -414,10 +510,10 @@ namespace Impunity.GameState
 
         }
 
-        private void DestroyEntity(GameStateEntity entity)
+        private void DestroyEntity(GameStateEntity entity, BsonValue deleteData)
         {
             UnregisterEntity(entity);
-            entity.Destroy();
+            entity.Destroy(deleteData);
         }
 
         public void UnregisterEntity(GameStateEntity entity)
@@ -444,10 +540,25 @@ namespace Impunity.GameState
             return typeInfo;
         }
 
+        private void UpdateEntityProps(GameStateEntity entity, byte[] propBytes)
+        {
+            if (propBytes == null || propBytes.Length == 0)
+            {
+                return;
+            }
+
+            // Put prop data into a read buffer
+            TempBufferReader.BaseStream.Position = 0;
+            TempBufferReader.BaseStream.Write(propBytes);
+            TempBufferReader.BaseStream.Position = 0;
+
+            entity.UpdateProps(TempBufferReader, propBytes);
+        }
+
         // ----- Public API below
 
 
-        public uint CreateChannel(GameStateReplicant origin, int typeId, string name)
+        public uint CreateChannel(GameStateReplicant origin, int typeId, string name, byte[] propBytes)
         {
             if (name == null)
             {
@@ -465,16 +576,17 @@ namespace Impunity.GameState
                 typeInfo = GetEntityType(typeId);
             }
 
-            GameStateChannel channel = new GameStateChannel(typeInfo, name);
+            GameStateChannel channel = new GameStateChannel(this, typeInfo, name);
+            UpdateEntityProps(channel, propBytes);
             RegisterEntity(channel);
 
-            channel.AddListener(origin);
+            channel.AddListener(origin, false);
             origin.AddSubscribedChannel(channel);
 
             return channel.Id;
         }
 
-        public uint CreateObject(GameStateReplicant origin, int typeId, uint channelId)
+        public uint CreateObject(GameStateReplicant origin, int typeId, uint channelId, byte[] propBytes)
         {
             GameStateEntityType typeInfo = GetEntityType(typeId);
 
@@ -484,16 +596,17 @@ namespace Impunity.GameState
                 throw new Exception("No channel with ID " + channelId);
             }
 
-            GameStateObject dobj = new GameStateObject(typeInfo, channel);
+            GameStateObject dobj = new GameStateObject(this, typeInfo);
+            UpdateEntityProps(dobj, propBytes);
             RegisterEntity(dobj);
 
-            // Will notify all listeners of new object
-            channel.AddObject(dobj);
+            // Will notify all listeners (expect origin) of new object
+            channel.AddObject(dobj, origin);
 
             return dobj.Id;
         }
 
-        public bool UpdateEntity(uint entityId, string key)
+        public bool UpdateEntity(uint entityId, string key, byte[] propData)
         {
             GameStateEntity entity = AllEntities[entityId];
             if (entity == null)
@@ -501,17 +614,18 @@ namespace Impunity.GameState
                 throw new Exception("No entity with ID " + entityId);
             }
 
-            if (!entity.IsLockedBy(key))
+            if (!entity.IsAccessibleBy(key))
             {
                 // Can't update locked entity
                 return false;
             }
 
-            entity.UpdateProps();
-
+            UpdateEntityProps(entity, propData);
 
             return true;
         }
+
+
 
         public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData)
         {
@@ -523,7 +637,7 @@ namespace Impunity.GameState
 
         }
 
-        public bool DeleteEntity(uint entityId, string key)
+        public bool DeleteEntity(uint entityId, string key, BsonValue deleteData)
         {
             GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
             if (entity == null)
@@ -531,13 +645,13 @@ namespace Impunity.GameState
                 throw new Exception("No entity with ID " + entityId);
             }
 
-            if (!entity.IsLockedBy(key))
+            if (!entity.IsAccessibleBy(key))
             {
                 // Can't delete locked entity
                 return false;
             }
 
-            DestroyEntity(entity);
+            DestroyEntity(entity, deleteData);
 
             return true;
         }
@@ -553,7 +667,7 @@ namespace Impunity.GameState
             if (entity.IsLocked())
             {
                 // Already locked
-                return false;
+                return entity.IsLockedBy(key);
             }
 
             entity.Lock(key, origin);
@@ -578,7 +692,7 @@ namespace Impunity.GameState
             if (entity == null)
             {
                 // Create placeholder named lock object if no entity with that name exists
-                entity = new GameStateNamedLock(name);
+                entity = new GameStateNamedLock(this, name);
                 RegisterEntity(entity);
                 origin.AddEphemeralEntity(entity);
             }
@@ -601,7 +715,7 @@ namespace Impunity.GameState
             {
                 if (entity is GameStateNamedLock)
                 {
-                    DestroyEntity(entity);
+                    DestroyEntity(entity, null);
                 }
             }
 
@@ -616,7 +730,7 @@ namespace Impunity.GameState
                 throw new Exception("No channel with name " + channelName);
             }
 
-            channel.AddListener(origin);
+            channel.AddListener(origin, true);
 
             return channel.Id;
         }

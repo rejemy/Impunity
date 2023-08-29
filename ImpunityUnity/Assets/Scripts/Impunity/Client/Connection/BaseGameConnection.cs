@@ -42,6 +42,8 @@ namespace Impunity.Connection
 
 		public void Update()
 		{
+			EntityManager.SendUpdates();
+
 			while (CompletedActions.TryDequeue(out GameStateActionBase action))
 			{
 				try
@@ -81,19 +83,19 @@ namespace Impunity.Connection
 
 		// Server message handlers
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, byte[] propData)
         {
-			EntityManager.HandleCreateChannel(channelId, channelName, channelType);
+			EntityManager.HandleCreateChannel(channelId, channelName, channelType, propData);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData)
         {
-			EntityManager.HandleCreateObject(objectId, channelId, objectType);
+			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData);
 		}
 
-		public void HandleEntityUpdate(uint entityId)
+		public void HandleEntityUpdate(uint entityId, byte[] updateData)
         {
-			EntityManager.HandleEntityUpdate(entityId);
+			EntityManager.HandleEntityUpdate(entityId, updateData);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
@@ -101,9 +103,9 @@ namespace Impunity.Connection
 			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
 		}
 
-		public void HandleEntityDelete(uint entityId)
+		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
         {
-			EntityManager.HandleEntityDelete(entityId);
+			EntityManager.HandleEntityDelete(entityId, deleteData);
 		}
 
 		public void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy)
@@ -181,14 +183,14 @@ namespace Impunity.Connection
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
-		public void CreateChannel(int entityTypeId, string channelName, ImpunityCallback<uint> onComplete)
+		public void CreateChannel(int entityTypeId, string channelName, byte[] propBytes, ImpunityCallback<uint> onComplete)
         {
-			DoAction(new CreateChannelAction(entityTypeId, channelName, onComplete));
+			DoAction(new CreateChannelAction(entityTypeId, channelName, propBytes, onComplete));
         }
 
-		public void CreateObject(int entityTypeId, uint channelId, ImpunityCallback<uint> onComplete)
+		public void CreateObject(int entityTypeId, uint channelId, byte[] propBytes, ImpunityCallback<uint> onComplete)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, channelId, onComplete));
+			DoAction(new CreateObjectAction(entityTypeId, channelId, propBytes, onComplete));
 		}
 
 		public void UpdateEntity(uint entityId, string key, byte[] updateData, ImpunityCallback<bool> onComplete)
@@ -196,9 +198,9 @@ namespace Impunity.Connection
 			DoAction(new UpdateEntityAction(entityId, key, updateData, onComplete));
 		}
 
-		public void DeleteEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
+		public void DeleteEntity(uint entityId, string key, BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new DeleteEntityAction(entityId, key, onComplete));
+			DoAction(new DeleteEntityAction(entityId, key, deleteData, onComplete));
 		}
 
 		public void TriggerEntityEvent(uint entityId, ImpunityCallback onComplete)

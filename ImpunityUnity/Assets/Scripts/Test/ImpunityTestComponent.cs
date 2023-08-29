@@ -39,26 +39,37 @@ public class TestPlayer : DistributedEntityBase
 {
 	enum DistributedPropIds
     {
-		NEWBOOL = 1
-    }
+		TESTBOOL = 1,
+		BOP = 2
+	}
 
 	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
 
-	[Distributed((int)DistributedPropIds.NEWBOOL)]
-	private DistributedValue<DBool> NewBool;
-	public void SetNewBool(bool b)
+	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged= "OnTestBoolChanged")]
+	private DistributedValue<DBool> TestBool;
+	public void SetTestBool(bool v)
     {
-		NewBool.Set(b);
-		SetDirty((int)DistributedPropIds.NEWBOOL);
+		if (TestBool.Set(v)) SetDirty((int)DistributedPropIds.TESTBOOL);
 	}
-	public bool GetNewBool()
+	public bool GetTestBool()
     {
-		return (DBool)NewBool;
+		return (DBool)TestBool;
     }
-	private void OnNewBoolChanged(DBool oldValue, DBool newValue)
+	private void OnTestBoolChanged(DBool oldValue, DBool newValue)
     {
 
     }
+
+	[Distributed((int)DistributedPropIds.BOP)]
+	private DistributedValue<DVector3> Bop;
+	public void SetBop(Vector3 v)
+	{
+		if (Bop.Set(v)) SetDirty((int)DistributedPropIds.BOP);
+	}
+	public Vector3 GetBop()
+	{
+		return (DVector3)Bop;
+	}
 
 }
 
@@ -67,35 +78,33 @@ public class TestZone : DistributedChannelBase
 {
 	enum DistributedPropIds
 	{
-		THING = 1
+		THING = 1,
+		STUFF = 2
 	}
 
 	[Distributed((int)DistributedPropIds.THING)]
 	private DistributedValue<DString> Thing;
-	public void SetThing(string b)
+	public void SetThing(string v)
 	{
-		Thing.Set(b);
-		SetDirty((int)DistributedPropIds.THING);
+		if (Thing.Set(v)) SetDirty((int)DistributedPropIds.THING);
 	}
 	public string GetThing()
 	{
 		return (DString)Thing;
 	}
-}
 
-/*
-public class ServerDistributedEntity
-{
-	internal IDistributedProperty[] Props;
-	
-
-	public ServerDistributedEntity()
-    {
-		Props = new IDistributedProperty[2];
-		Props[0] = new DistributedBool();
+	[Distributed((int)DistributedPropIds.STUFF)]
+	private DistributedValue<DFloat> Stuff;
+	public void SetStuff(float v)
+	{
+		if (Stuff.Set(v)) SetDirty((int)DistributedPropIds.STUFF);
+	}
+	public string GetStuff()
+	{
+		return (DString)Thing;
 	}
 }
-*/
+
 
 public class ImpunityTestComponent : MonoBehaviour
 {
@@ -150,37 +159,9 @@ public class ImpunityTestComponent : MonoBehaviour
 			}
 		);
 
-
-		//TestPlayer p = new TestPlayer();
-
 		StartCoroutine(ComboTest());
 	}
 
-	/*
-	void RegisterClass(Type t, Player inst)
-	{
-		foreach (var fieldInfo in t.GetFields())
-		{
-			Type fieldType = fieldInfo.FieldType;
-			if (fieldType.GetInterface(nameof(IDistributedProperty)) != null)
-			{
-				IDistributedProperty fieldProp = (IDistributedProperty)fieldInfo.GetValue(inst);
-				fieldProp.UpdateFromRemote("BOris");
-				fieldInfo.SetValue(inst, fieldProp);
-
-				//MethodInfo[] methods = fieldType.GetMethods(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
-				//MethodInfo getMethod = fieldType.GetMethod("Impunity.Connection.IDistributedProperty.GetAndClear", BindingFlags.NonPublic | BindingFlags.Instance);
-				//MethodInfo updateMethod = fieldType.GetMethod("Impunity.Connection.IDistributedProperty.UpdateFromRemote", BindingFlags.NonPublic | BindingFlags.Instance);
-
-
-
-				//Delegate uDel = updateMethod.CreateDelegate(fieldType);
-
-				Debug.Log("Found distributed property " + fieldInfo.Name);
-			}
-		}
-	}
-	*/
 
 	IEnumerator ComboTest()
 	{
@@ -314,16 +295,6 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("TCP Connected");
 
-		/*
-		Debug.Log("Calling EnsureFormat");
-		ImpunityYield ensureFormat = connection.EnsureFormat(CurrFormat);
-		yield return ensureFormat;
-		if (ensureFormat.Error != null)
-		{
-			Debug.LogError(ensureFormat.Error.Message);
-			yield break;
-		}*/
-
 		BsonDocument char1 = new BsonDocument();
 		char1["_id"] = "char1";
 		char1["name"] = "Hogstorm";
@@ -437,7 +408,6 @@ public class ImpunityTestComponent : MonoBehaviour
 			char1["level"] = 1;
 
 			await LocalGame.ConnectAsync();
-			//await LocalGame.EnsureFormatAsync(CurrFormat);
 			await LocalGame.InsertDocumentAsync(TestCollectionTypes.CHARACTERS, char1);
 			List<BsonDocument> chars = await LocalGame.ListDocumentsAsync(TestCollectionTypes.CHARACTERS);
 
@@ -474,7 +444,6 @@ public class ImpunityTestComponent : MonoBehaviour
 			await Task.Delay(20);
 
 			await RemoteGame.ConnectAsync();
-			//await RemoteGame.EnsureFormatAsync(CurrFormat);
 
 			await LiveBroadcastTests(LocalGame, RemoteGame);
 
@@ -485,8 +454,9 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 		catch (Exception e)
 		{
-			Debug.LogError("Got exception in live data test");
-			Debug.LogException(e);
+			Debug.LogError("Got exception in live data test: " + e.ToString());
+
+			
 		}
 
 		RemoteGame.Dispose();
@@ -559,25 +529,27 @@ public class ImpunityTestComponent : MonoBehaviour
     {
 		Debug.Log("Doing live channel tests");
 
-		uint channelId = await c1.CreateChannelAsync(TestEntityTypes.ZONE, "testZone");
-		Debug.Log("Made channel " + channelId);
+		TestZone channel = new TestZone();
+		channel = await c1.EntityManager.CreateChannelAsync(channel, "testZone");
+		Debug.Log("Made channel " + channel.DistributedEntityId);
 
 		await c2.SubcribeToChannelAsync("testZone");
 		Debug.Log("C2 subscribed to channel");
 
-		uint playerId = await c1.CreateObjectAsync(TestEntityTypes.PLAYER, channelId);
-		Debug.Log("Made player: " + playerId);
+		TestPlayer player = new TestPlayer();
+		player = await c1.EntityManager.CreateObjectAsync(player, channel);
+		Debug.Log("Made player: " + player.DistributedEntityId);
 
-		await c1.TryToLockEntityAsync(playerId, "xyz");
+		await c1.TryToLockEntityAsync(player.DistributedEntityId, "xyz");
 
-		bool updated = await c2.UpdateEntityAsync(playerId, null, null);
-		Debug.Log("Able to update locked entity: " + updated);
+		bool updated = await c2.DeleteEntityAsync(player.DistributedEntityId, null, null);
+		Debug.Log("Able to delete locked entity: " + updated);
 
-		await c1.UnlockEntityAsync(playerId, "xyz");
+		await c1.UnlockEntityAsync(player.DistributedEntityId, "xyz");
 
-		await c1.UnsubscribeFromChannelAsync(channelId);
-		await c2.UnsubscribeFromChannelAsync(channelId);
-		Debug.Log("Unsubscribed from channel " + channelId);
+		await c1.UnsubscribeFromChannelAsync(channel.DistributedEntityId);
+		await c2.UnsubscribeFromChannelAsync(channel.DistributedEntityId);
+		Debug.Log("Unsubscribed from channel " + channel.DistributedEntityId);
 
 
 

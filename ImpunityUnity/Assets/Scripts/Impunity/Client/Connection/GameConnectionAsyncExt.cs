@@ -28,7 +28,7 @@ namespace Impunity.Connection
 	{
 
 		public void CompleteTask(ImpunityError err, TResult result)
-        {
+		{
 			if (err != null)
 			{
 				SetException(new ImpuntyErrorException(err));
@@ -39,7 +39,7 @@ namespace Impunity.Connection
 			}
 		}
 	}
-	
+
 
 	public static class ConnectionAsyncExtensions
 	{
@@ -143,17 +143,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName)
+		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName, byte[] propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateChannel(entityTypeId, channelName, t.CompleteTask);
+			connection.CreateChannel(entityTypeId, channelName, propBytes, t.CompleteTask);
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId, byte[] propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, channelId, t.CompleteTask);
+			connection.CreateObject(entityTypeId, channelId, propBytes, t.CompleteTask);
 			return t.Task;
 		}
 
@@ -164,10 +164,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, string key)
+		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, string key, BsonValue deleteData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.DeleteEntity(entityId, key, t.CompleteTask);
+			connection.DeleteEntity(entityId, key, deleteData, t.CompleteTask);
 			return t.Task;
 		}
 
@@ -253,4 +253,22 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 	}
+
+	public static class ClientEntityManagerAsyncExtensions
+	{
+		public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : IDistributedChannel
+        {
+			var t = new ImpunityTaskCompletionSource<T>();
+			manager.CreateChannel<T>(channel, name, t.CompleteTask);
+			return t.Task;
+        }
+
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : IDistributedEntity
+		{
+			var t = new ImpunityTaskCompletionSource<T>();
+			manager.CreateObject<T>(obj, channel, t.CompleteTask);
+			return t.Task;
+		}
+	}
+
 }

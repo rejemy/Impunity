@@ -67,6 +67,11 @@ namespace Impunity
 		{
 			Stacktrace = err.Stacktrace;	
 		}
+
+		public override string ToString()
+        {
+			return Message + "\n" + Stacktrace;
+        }
 	}
 
 	internal interface IGameStateListener

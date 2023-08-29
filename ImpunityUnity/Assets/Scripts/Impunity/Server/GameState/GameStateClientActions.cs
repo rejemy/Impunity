@@ -410,20 +410,24 @@ namespace Impunity.GameState
         [BsonField("n")]
         public string Name;
 
+        [BsonField("pb")]
+        public byte[] PropBytes;
+
         public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
 
         public CreateChannelAction() { }
 
-        public CreateChannelAction(int entityTypeId, string channelName, ImpunityCallback<uint> onComplete = null)
+        public CreateChannelAction(int entityTypeId, string channelName, byte[] propBytes, ImpunityCallback<uint> onComplete = null)
         {
             EntityTypeId = entityTypeId;
             Name = channelName;
+            PropBytes = propBytes;
             OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, Name);
+            Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, Name, PropBytes);
         }
     }
 
@@ -435,20 +439,24 @@ namespace Impunity.GameState
         [BsonField("c")]
         public uint ChannelId;
 
+        [BsonField("pb")]
+        public byte[] PropBytes;
+
         public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
 
         public CreateObjectAction() { }
 
-        public CreateObjectAction(int entityTypeId, uint channelId, ImpunityCallback<uint> onComplete = null)
+        public CreateObjectAction(int entityTypeId, uint channelId, byte[] propBytes, ImpunityCallback<uint> onComplete = null)
         {
             EntityTypeId = entityTypeId;
             ChannelId = channelId;
+            PropBytes = propBytes;
             OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, ChannelId);
+            Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, ChannelId, PropBytes);
         }
     }
 
@@ -477,7 +485,7 @@ namespace Impunity.GameState
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.UpdateEntity(EntityId, Key);
+            Result = game.Live.UpdateEntity(EntityId, Key, UpdateBytes);
         }
     }
 
@@ -489,20 +497,24 @@ namespace Impunity.GameState
         [BsonField("k")]
         public string Key;
 
+        [BsonField("dd")]
+        public BsonValue DeleteData;
+
         public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
 
         public DeleteEntityAction() { }
 
-        public DeleteEntityAction(uint entityId, string key, ImpunityCallback<bool> onComplete = null)
+        public DeleteEntityAction(uint entityId, string key, BsonValue deleteData, ImpunityCallback<bool> onComplete = null)
         {
             EntityId = entityId;
             Key = key;
+            DeleteData = deleteData;
             OnCompleteCallback = onComplete;
         }
 
         protected override void DoAction(GameStateServer game)
         {
-            Result = game.Live.DeleteEntity(EntityId, Key);
+            Result = game.Live.DeleteEntity(EntityId, Key, DeleteData);
         }
     }
 

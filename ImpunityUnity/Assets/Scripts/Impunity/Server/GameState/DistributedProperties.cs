@@ -10,8 +10,8 @@ namespace Impunity.GameState
 	{
 		GameStateEntityPropertyValueType ValueType { get; }
 
-		void WriteChangesTo(BinaryWriter w);
-		void ReadChangesFrom(BinaryReader r);
+		void WriteTo(BinaryWriter w);
+		void ReadFrom(BinaryReader r);
 	}
 
 	// Single values
@@ -25,12 +25,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadBoolean();
 		}
@@ -39,6 +39,8 @@ namespace Impunity.GameState
 
 		public static implicit operator bool(DBool d) => d.Value;
 		public static implicit operator DBool(bool d) => new DBool(d);
+		public bool Equals(DBool v) => Value == v.Value;
+
 	}
 
 	public struct DInt8 : IDistributableValueType
@@ -50,12 +52,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadSByte();
 		}
@@ -75,12 +77,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadByte();
 		}
@@ -89,6 +91,7 @@ namespace Impunity.GameState
 
 		public static implicit operator byte(DUInt8 d) => d.Value;
 		public static implicit operator DUInt8(byte d) => new DUInt8(d);
+		public bool Equals(DUInt8 v) => Value == v.Value;
 	}
 
 	public struct DInt16 : IDistributableValueType
@@ -100,12 +103,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt16();
 		}
@@ -114,6 +117,7 @@ namespace Impunity.GameState
 
 		public static implicit operator short(DInt16 d) => d.Value;
 		public static implicit operator DInt16(short d) => new DInt16(d);
+		public bool Equals(DInt16 v) => Value == v.Value;
 	}
 
 	public struct DUInt16 : IDistributableValueType
@@ -125,12 +129,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadUInt16();
 		}
@@ -139,6 +143,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ushort(DUInt16 d) => d.Value;
 		public static implicit operator DUInt16(ushort d) => new DUInt16(d);
+		public bool Equals(DUInt16 v) => Value == v.Value;
 	}
 
 	public struct DInt32 : IDistributableValueType
@@ -150,12 +155,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt32();
 		}
@@ -164,6 +169,7 @@ namespace Impunity.GameState
 
 		public static implicit operator int(DInt32 d) => d.Value;
 		public static implicit operator DInt32(int d) => new DInt32(d);
+		public bool Equals(DInt32 v) => Value == v.Value;
 	}
 
 	public struct DUInt32 : IDistributableValueType
@@ -175,12 +181,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadUInt32();
 		}
@@ -189,6 +195,7 @@ namespace Impunity.GameState
 
 		public static implicit operator uint(DUInt32 d) => d.Value;
 		public static implicit operator DUInt32(uint d) => new DUInt32(d);
+		public bool Equals(DUInt32 v) => Value == v.Value;
 	}
 
 	public struct DInt64 : IDistributableValueType
@@ -200,12 +207,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt64();
 		}
@@ -214,6 +221,7 @@ namespace Impunity.GameState
 
 		public static implicit operator long(DInt64 d) => d.Value;
 		public static implicit operator DInt64(long d) => new DInt64(d);
+		public bool Equals(DInt64 v) => Value == v.Value;
 	}
 
 	public struct DUInt64 : IDistributableValueType
@@ -225,12 +233,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadUInt64();
 		}
@@ -239,6 +247,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ulong(DUInt64 d) => d.Value;
 		public static implicit operator DUInt64(ulong d) => new DUInt64(d);
+		public bool Equals(DUInt64 v) => Value == v.Value;
 	}
 
 	public struct DFloat : IDistributableValueType
@@ -250,12 +259,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadSingle();
 		}
@@ -264,6 +273,7 @@ namespace Impunity.GameState
 
 		public static implicit operator float(DFloat d) => d.Value;
 		public static implicit operator DFloat(float d) => new DFloat(d);
+		public bool Equals(DFloat v) => Value == v.Value;
 	}
 
 	public struct DDouble : IDistributableValueType
@@ -275,12 +285,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadDouble();
 		}
@@ -289,6 +299,7 @@ namespace Impunity.GameState
 
 		public static implicit operator double(DDouble d) => d.Value;
 		public static implicit operator DDouble(double d) => new DDouble(d);
+		public bool Equals(DDouble v) => Value == v.Value;
 	}
 
 	public struct DDecimal : IDistributableValueType
@@ -300,12 +311,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadDecimal();
 		}
@@ -314,6 +325,7 @@ namespace Impunity.GameState
 
 		public static implicit operator decimal(DDecimal d) => d.Value;
 		public static implicit operator DDecimal(decimal d) => new DDecimal(d);
+		public bool Equals(DDecimal v) => Value == v.Value;
 	}
 
 	public struct DChar : IDistributableValueType
@@ -325,12 +337,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadChar();
 		}
@@ -339,6 +351,7 @@ namespace Impunity.GameState
 
 		public static implicit operator char(DChar d) => d.Value;
 		public static implicit operator DChar(char d) => new DChar(d);
+		public bool Equals(DChar v) => Value == v.Value;
 	}
 
 	public struct DString : IDistributableValueType
@@ -350,7 +363,7 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
 			{
@@ -363,7 +376,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -380,6 +393,7 @@ namespace Impunity.GameState
 
 		public static implicit operator string(DString d) => d.Value;
 		public static implicit operator DString(string d) => new DString(d);
+		public bool Equals(DString v) => String.Equals(Value, v.ValueType);
 	}
 
 	
@@ -393,7 +407,7 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
 			{
@@ -407,7 +421,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -425,6 +439,7 @@ namespace Impunity.GameState
 
 		public static implicit operator byte[](DBlob d) => d.Value;
 		public static implicit operator DBlob(byte[] d) => new DBlob(d);
+		public bool Equals(DBlob v) => Array.Equals(Value, v.Value);
 	}
 
 	public struct DDateTime : IDistributableValueType
@@ -436,12 +451,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value.ToBinary());
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = new DateTime(r.ReadInt64());
 		}
@@ -450,6 +465,7 @@ namespace Impunity.GameState
 
 		public static implicit operator DateTime(DDateTime d) => d.Value;
 		public static implicit operator DDateTime(DateTime d) => new DDateTime(d);
+		public bool Equals(DDateTime v) => Value == v.Value;
 	}
 
 	public struct DTimeSpan : IDistributableValueType
@@ -461,12 +477,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value.Ticks);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = new TimeSpan(r.ReadInt64());
 		}
@@ -475,6 +491,7 @@ namespace Impunity.GameState
 
 		public static implicit operator TimeSpan(DTimeSpan d) => d.Value;
 		public static implicit operator DTimeSpan(TimeSpan d) => new DTimeSpan(d);
+		public bool Equals(DTimeSpan v) => Value == v.Value;
 	}
 
 	public struct DGuid : IDistributableValueType
@@ -486,12 +503,12 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value.ToByteArray());
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			Value = new Guid(r.ReadBytes(16));
 		}
@@ -500,6 +517,7 @@ namespace Impunity.GameState
 
 		public static implicit operator Guid(DGuid d) => d.Value;
 		public static implicit operator DGuid(Guid d) => new DGuid(d);
+		public bool Equals(DGuid v) => Value == v.Value;
 	}
 
 
@@ -512,13 +530,20 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
+			// For non-nullable custom, null actually means "uninitialized default value,
+			// whatever that is for that type. Send 0 length indicates default.
+			if (Value == null)
+            {
+				w.Write((byte)0);
+				return;
+			}
 			w.Write((byte)Value.Length);
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			int count = r.ReadByte();
 			Value = r.ReadBytes(count);
@@ -528,6 +553,7 @@ namespace Impunity.GameState
 
 		public static implicit operator byte[](DSmallCustom d) => d.Value;
 		public static implicit operator DSmallCustom(byte[] d) => new DSmallCustom(d);
+		public bool Equals(DSmallCustom v) => Array.Equals(Value, v.Value);
 	}
 
 	public struct DSmallNullableCustom : IDistributableValueType
@@ -539,7 +565,7 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
 			{
@@ -553,7 +579,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -571,6 +597,7 @@ namespace Impunity.GameState
 
 		public static implicit operator byte[](DSmallNullableCustom d) => d.Value;
 		public static implicit operator DSmallNullableCustom(byte[] d) => new DSmallNullableCustom(d);
+		public bool Equals(DSmallNullableCustom v) => Array.Equals(Value, v.Value);
 	}
 
 	public struct DCustom : IDistributableValueType
@@ -582,13 +609,20 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
+			// For non-nullable custom, null actually means "uninitialized default value,
+			// whatever that is for that type. Send 0 length indicates default.
+			if (Value == null)
+			{
+				w.Write((ushort)0);
+				return;
+			}
 			w.Write((ushort)Value.Length);
 			w.Write(Value);
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			int count = r.ReadUInt16();
 			Value = r.ReadBytes(count);
@@ -598,6 +632,7 @@ namespace Impunity.GameState
 
 		public static implicit operator byte[](DCustom d) => d.Value;
 		public static implicit operator DCustom(byte[] d) => new DCustom(d);
+		public bool Equals(DCustom v) => Array.Equals(Value, v.Value);
 	}
 
 	public struct DNullableCustom : IDistributableValueType
@@ -609,7 +644,7 @@ namespace Impunity.GameState
 			Value = v;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
 			{
@@ -623,7 +658,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r)
+		public void ReadFrom(BinaryReader r)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -641,10 +676,13 @@ namespace Impunity.GameState
 
 		public static implicit operator byte[](DNullableCustom d) => d.Value;
 		public static implicit operator DNullableCustom(byte[] d) => new DNullableCustom(d);
+		public bool Equals(DNullableCustom v) => Array.Equals(Value, v.Value);
 	}
 
 	public class DistributedValueFactory
     {
+
+
 		public static IDistributableValueType Make(byte type)
 		{
 			GameStateEntityPropertyValueType enumType = (GameStateEntityPropertyValueType)type;
@@ -706,586 +744,5 @@ namespace Impunity.GameState
         }
     }
 
-
-    /*
-	public struct DistributedBool : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Boolean; }
-
-		private bool Value;
-		private bool Dirty;
-
-		public bool Set(bool val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-        {
-			Value = r.ReadBoolean();
-			Dirty = false;
-        }
-
-        public static implicit operator bool(DistributedBool d) => d.Value;
-		public static implicit operator DistributedBool(bool d) => new DistributedBool { Value = d, Dirty = true };
-	}
-
-	public struct DistributedInt8 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Int8; }
-
-		private sbyte Value;
-		private bool Dirty;
-
-		public bool Set(sbyte val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadSByte();
-			Dirty = false;
-		}
-
-		public static implicit operator sbyte(DistributedInt8 d) => d.Value;
-	}
-
-	public struct DistributedUInt8 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.UInt8; }
-
-		private byte Value;
-		private bool Dirty;
-
-		public bool Set(byte val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadByte();
-			Dirty = false;
-		}
-
-		public static implicit operator byte(DistributedUInt8 d) => d.Value;
-	}
-
-	public struct DistributedInt16 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Int16; }
-
-		private short Value;
-		private bool Dirty;
-
-		public bool Set(short val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadInt16();
-			Dirty = false;
-		}
-
-		public static implicit operator short(DistributedInt16 d) => d.Value;
-	}
-
-	public struct DistributedUInt16 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Uint16; }
-
-		private ushort Value;
-		private bool Dirty;
-
-		public bool Set(ushort val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadUInt16();
-			Dirty = false;
-		}
-
-		public static implicit operator ushort(DistributedUInt16 d) => d.Value;
-	}
-
-	public struct DistributedInt32 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Int32; }
-
-		private int Value;
-		private bool Dirty;
-
-		public bool Set(int val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadInt32();
-			Dirty = false;
-		}
-
-		public static implicit operator int(DistributedInt32 d) => d.Value;
-	}
-
-	public struct DistributedUInt32 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Uint32; }
-
-		private uint Value;
-		private bool Dirty;
-
-		public bool Set(uint val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadUInt32();
-			Dirty = false;
-		}
-
-		public static implicit operator uint(DistributedUInt32 d) => d.Value;
-	}
-
-	public struct DistributedInt64 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Int64; }
-
-		private long Value;
-		private bool Dirty;
-
-		public bool Set(long val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadInt32();
-			Dirty = false;
-		}
-
-		public static implicit operator long(DistributedInt64 d) => d.Value;
-	}
-
-	public struct DistributedUInt64 : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Uint64; }
-
-		private ulong Value;
-		private bool Dirty;
-
-		public bool Set(ulong val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadUInt32();
-			Dirty = false;
-		}
-
-		public static implicit operator ulong(DistributedUInt64 d) => d.Value;
-	}
-
-	public struct DistributedFloat : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Float; }
-
-		private float Value;
-		private bool Dirty;
-
-		public bool Set(float val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadSingle();
-			Dirty = false;
-		}
-
-		public static implicit operator float(DistributedFloat d) => d.Value;
-	}
-
-	public struct DistributedDouble : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Double; }
-
-		private double Value;
-		private bool Dirty;
-
-		public bool Set(double val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadDouble();
-			Dirty = false;
-		}
-
-		public static implicit operator double(DistributedDouble d) => d.Value;
-	}
-
-	public struct DistributedDecimal : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Decimal; }
-
-		private decimal Value;
-		private bool Dirty;
-
-		public bool Set(decimal val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadDecimal();
-			Dirty = false;
-		}
-
-		public static implicit operator decimal(DistributedDecimal d) => d.Value;
-	}
-
-	public struct DistributedString : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.String; }
-
-		private string Value;
-		private bool Dirty;
-
-		public bool Set(string val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			if (Value == null)
-			{
-				w.Write(false);
-			}
-			else
-			{
-				w.Write(true);
-				w.Write(Value);
-			}
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			bool hasValue = r.ReadBoolean();
-			if (hasValue)
-			{
-				Value = r.ReadString();
-			}
-			else
-            {
-				Value = null;
-            }
-			
-			Dirty = false;
-		}
-
-		public static implicit operator string(DistributedString d) => d.Value;
-	}
-
-	public struct DistributedChar : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Char; }
-
-		private char Value;
-		private bool Dirty;
-
-		public bool Set(char val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			w.Write(Value);
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			Value = r.ReadChar();
-			Dirty = false;
-		}
-
-		public static implicit operator char(DistributedChar d) => d.Value;
-	}
-
-	public struct DistributedBlob : IDistributedProperty
-	{
-		GameStateEntityPropertyValueType IDistributedProperty.ValueType { get => GameStateEntityPropertyValueType.Blob; }
-
-		private byte[] Value;
-		private bool Dirty;
-
-		public bool Set(byte[] val)
-		{
-			if (Value == val)
-			{
-				return Dirty;
-			}
-
-			Value = val;
-			Dirty = true;
-			return true;
-		}
-
-		uint IDistributedProperty.IndexInObject { get; set; }
-
-		void IDistributedProperty.WriteChangesTo(BinaryWriter w)
-		{
-			Dirty = false;
-			if (Value == null)
-			{
-				w.Write(false);
-			}
-			else
-			{
-				w.Write(true);
-				w.Write((ushort)Value.Length);
-				w.Write(Value);
-			}
-		}
-
-		void IDistributedProperty.ReadChangesFrom(BinaryReader r)
-		{
-			bool hasValue = r.ReadBoolean();
-			if(hasValue)
-            {
-				int count = r.ReadUInt16();
-				Value = r.ReadBytes(count);
-			}
-			else
-            {
-				Value = null;
-            }
-			
-			Dirty = false;
-		}
-
-		public static implicit operator byte[](DistributedBlob d) => d.Value;
-	}
-	*/
-
-    // ---- Arrays
 
 }

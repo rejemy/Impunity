@@ -53,7 +53,7 @@ namespace Impunity.Unity
 		}
 	}
 
-	public static class ConnectionCoroutines
+	public static class ConnectionYieldExtensions
 	{
 		// ---------- API
 
@@ -154,17 +154,17 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateChannel(this BaseGameConnection connection, int entityTypeId, string channelName)
+		public static ImpunityYield<uint> CreateChannel(this BaseGameConnection connection, int entityTypeId, string channelName, byte[] propBytes)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateChannel(entityTypeId, channelName, action.OnComplete);
+			connection.CreateChannel(entityTypeId, channelName, propBytes, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObject(this BaseGameConnection connection, int entityTypeId, uint channelId)
+		public static ImpunityYield<uint> CreateObject(this BaseGameConnection connection, int entityTypeId, uint channelId, byte[] propBytes)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateObject(entityTypeId, channelId, action.OnComplete);
+			connection.CreateObject(entityTypeId, channelId, propBytes, action.OnComplete);
 			return action;
 		}
 
@@ -175,10 +175,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> DeleteEntity(this BaseGameConnection connection, uint entityId, string key)
+		public static ImpunityYield<bool> DeleteEntity(this BaseGameConnection connection, uint entityId, string key, BsonValue deleteData)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.DeleteEntity(entityId, key, action.OnComplete);
+			connection.DeleteEntity(entityId, key, deleteData, action.OnComplete);
 			return action;
 		}
 
@@ -218,7 +218,7 @@ namespace Impunity.Unity
 		}
 	}
 
-	public static class GameStateDBCollectionCoroutines
+	public static class GameStateDBCollectionYieldExtensions
 	{
 
 		public static ImpunityYield<BsonValue> InsertDocument<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
@@ -261,6 +261,23 @@ namespace Impunity.Unity
 			ImpunityYield<List<DTYPE>> action = new ImpunityYield<List<DTYPE>>();
 			collection.ListDocuments(action.OnComplete);
 			return action;
+		}
+	}
+
+	public static class ClientEntityManagerYieldExtensions
+	{
+		public static ImpunityYield<T> CreateChannel<T>(this ClientEntityManager manager, T channel, string name) where T : IDistributedChannel
+		{
+			var t = new ImpunityYield<T>();
+			manager.CreateChannel<T>(channel, name, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<T> CreateObject<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : IDistributedEntity
+		{
+			var t = new ImpunityYield<T>();
+			manager.CreateObject<T>(obj, channel, t.OnComplete);
+			return t;
 		}
 	}
 }

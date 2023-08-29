@@ -78,6 +78,9 @@ namespace Impunity.GameState
         [BsonField("t")]
         public int ChannelType;
 
+        [BsonField("pb")]
+        public byte[] PropBytes;
+
         [BsonField("obs")]
         public ObjectCreateMessageAction[] ObjectsInChannel;
 
@@ -86,10 +89,10 @@ namespace Impunity.GameState
         // Called in client main thread
         public override void DoAction(IServerMessageHandler handler)
         {
-            handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType);
+            handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, PropBytes);
             foreach (ObjectCreateMessageAction objCreate in ObjectsInChannel)
             {
-                handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType);
+                handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.PropBytes);
             }
         }
     }
@@ -105,12 +108,15 @@ namespace Impunity.GameState
         [BsonField("t")]
         public int ObjectType;
 
+        [BsonField("pb")]
+        public byte[] PropBytes;
+
         public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
         // Called in client main thread
         public override void DoAction(IServerMessageHandler handler)
         {
-            handler.HandleCreateObject(ObjectId, ChannelId, ObjectType);
+            handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, PropBytes);
         }
     }
 
@@ -119,12 +125,15 @@ namespace Impunity.GameState
         [BsonField("id")]
         public uint EntityId;
 
+        [BsonField("ub")]
+        public byte[] UpdateBytes;
+
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE; }
 
         // Called in client main thread
         public override void DoAction(IServerMessageHandler handler)
         {
-            handler.HandleEntityUpdate(EntityId);
+            handler.HandleEntityUpdate(EntityId, UpdateBytes);
         }
     }
 
@@ -133,10 +142,10 @@ namespace Impunity.GameState
         [BsonField("id")]
         public uint EntityId;
 
-        [BsonField("mt")]
+        [BsonField("et")]
         public int EventType;
 
-        [BsonField("mb")]
+        [BsonField("ed")]
         public BsonValue EventData;
 
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_EVENT_MESSAGE; }
@@ -153,12 +162,15 @@ namespace Impunity.GameState
         [BsonField("id")]
         public uint EntityId;
 
+        [BsonField("dd")]
+        public BsonValue DeleteData;
+
         public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_DELETE_MESSAGE; }
 
         // Called in client main thread
         public override void DoAction(IServerMessageHandler handler)
         {
-            handler.HandleEntityDelete(EntityId);
+            handler.HandleEntityDelete(EntityId, DeleteData);
         }
     }
 

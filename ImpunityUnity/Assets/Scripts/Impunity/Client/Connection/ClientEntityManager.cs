@@ -46,22 +46,21 @@ namespace Impunity.Connection
 		T CurrentValue;
 		T NewValue;
 
-		public void Set(T newValue)
+		public bool Set(T newValue)
 		{
 			NewValue = newValue;
+			return !NewValue.Equals(CurrentValue);
 		}
 
 		public void WriteChangesTo(BinaryWriter w)
 		{
-			NewValue.WriteChangesTo(w);
+			NewValue.WriteTo(w);
 		}
 
 		public void ReadChangesFrom(BinaryReader r)
 		{
-			//T oldValue = CurrentValue;
-			CurrentValue.ReadChangesFrom(r);
-			NewValue = default(T);
-			//notify?.Invoke(oldValue, CurrentValue);
+			CurrentValue.ReadFrom(r);
+			NewValue = CurrentValue;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => CurrentValue.ValueType; }
@@ -96,6 +95,7 @@ namespace Impunity.Connection
 		public void SetDirty(int fieldId)
         {
 			DirtyBits |= 1ul << (fieldId - 1);
+			Manager?.SetDirty(this);
 		}
 
 		public void ClearDirty()
@@ -142,12 +142,20 @@ namespace Impunity.Connection
 		private Dictionary<uint, IDistributedEntity> DistributedObjects;
 		private HashSet<IDistributedEntity> DirtyObjects;
 
+		private byte[] PropertyEncodingBuffer;
+		private BinaryWriter PropertyEncodingWriter;
+
 		public ClientEntityManager()
         {
 			DistributedTypes = null;
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
 			DirtyObjects = new HashSet<IDistributedEntity>();
+
+			PropertyEncodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
+			PropertyEncodingWriter = new BinaryWriter(new MemoryStream(PropertyEncodingBuffer));
 		}
+
+		// -------------- Public API
 
 		public GameStateEntityType[] RegisterEntityTypes(Type[] entityTypes)
         {
@@ -192,6 +200,66 @@ namespace Impunity.Connection
 
 			return convertedEntityTypes;
         }
+
+		public void CreateChannel<T>(T channel, string name, ImpunityCallback<T> onComplete) where T : IDistributedChannel
+		{
+			if (name == null)
+            {
+				throw new Exception("Channel must have name");
+            }
+
+			channel.ChannelName = name;
+
+			Type entityType = channel.GetType();
+			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
+			if (distAttr == null)
+			{
+				throw new Exception("Tried to create distributed channel type " + entityType.Name + " with no DistributedEntity attribute");
+			}
+
+			int entityTypeId = distAttr.EntityId;
+			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
+            {
+				throw new Exception("Tried to create distributed channel with invalid entity type id: " + entityTypeId);
+            }
+
+			channel.DistributedEntityType = entityTypeId;
+			byte[] propertyBytes = GetPropertyBytes(channel);
+
+			Connection.CreateChannel(entityTypeId, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
+			{
+				RegisterEntity(channel, channelId);
+				onComplete?.Invoke(err, channel);
+			});
+		}
+
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : IDistributedEntity
+		{
+
+			Type entityType = distObj.GetType();
+			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
+			if (distAttr == null)
+			{
+				throw new Exception("Tried to create distributed object type " + entityType.Name + " with no DistributedEntity attribute");
+			}
+
+			int entityTypeId = distAttr.EntityId;
+			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
+			{
+				throw new Exception("Tried to create distributed object with invalid entity type id: " + entityTypeId);
+			}
+
+			distObj.DistributedEntityType = entityTypeId;
+			byte[] propertyBytes = GetPropertyBytes(distObj);
+
+			Connection.CreateObject(entityTypeId, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
+			{
+				RegisterEntity(distObj, objectId);
+				onComplete?.Invoke(err, distObj);
+			});
+		}
+
+		// ---------------
 
 		private GameStateEntityType RegisterEntityType(Type entityType, List<DistributedTypeInfo> internalTypeInfoList)
         {
@@ -328,7 +396,7 @@ namespace Impunity.Connection
 			return typeInfo;
 		}
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, byte[] propData)
 		{
 			IDistributedChannel channel = null;
 			if (channelType != 0)
@@ -354,13 +422,23 @@ namespace Impunity.Connection
 			}
 
 			channel.ChannelName = channelName;
-			channel.DistributedEntityId = channelId;
-			channel.Manager = this;
-
-			DistributedObjects[channelId] = channel;
+			RegisterEntity(channel, channelId);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType)
+		private void RegisterEntity(IDistributedEntity entity, uint entityId)
+        {
+			entity.DistributedEntityId = entityId;
+			entity.Manager = this;
+
+			DistributedObjects[entity.DistributedEntityId] = entity;
+
+			if (entity.DirtyBits != 0)
+			{
+				SetDirty(entity);
+			}
+		}
+
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData)
 		{
 			IDistributedEntity entity = null;
 
@@ -374,13 +452,10 @@ namespace Impunity.Connection
 				entity = (IDistributedEntity)Activator.CreateInstance(typeInfo.ObjectType);
 			}
 
-			entity.DistributedEntityId = objectId;
-			entity.Manager = this;
-
-			DistributedObjects[objectId] = entity;
+			RegisterEntity(entity, objectId);
 		}
 
-		public void HandleEntityUpdate(uint entityId)
+		public void HandleEntityUpdate(uint entityId, byte[] updateData)
 		{
 			ImpunityLogger.LogInformation("Got entity update request");
 		}
@@ -390,7 +465,7 @@ namespace Impunity.Connection
 			ImpunityLogger.LogInformation("Got entity event request");
 		}
 
-		public void HandleEntityDelete(uint entityId)
+		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
 		{
 			ImpunityLogger.LogInformation("Got entity delete request");
 		}
@@ -412,16 +487,50 @@ namespace Impunity.Connection
 
 		}
 
-		private void SendEntityUpdates(IDistributedEntity entity)
+		private byte[] GetPropertyBytes(IDistributedEntity entity)
         {
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 
-			for(int i=0; i<typeInfo.DistributedFields.Length; i++)
+			ulong dirtyBits = entity.DirtyBits;
+			if (dirtyBits == 0)
             {
+				return null;
+			}
 
-            }
+			PropertyEncodingWriter.BaseStream.Position = 0;
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo == null) continue;
+
+				if ((dirtyBits & (1ul << (fieldInfo.FieldId - 1))) != 0)
+				{
+					PropertyEncodingWriter.Write((byte)fieldInfo.FieldId);
+					// Boxes a copy :(
+					IDistributedField fieldInst = (IDistributedField)fieldInfo.FieldAccessor.GetValue(entity);
+					fieldInst.WriteChangesTo(PropertyEncodingWriter);
+				}
+			}
+
+			PropertyEncodingWriter.Write((byte)0);
 
 			entity.ClearDirty();
+
+			byte[] updateDatabuffer = PropertyEncodingBuffer;
+
+			// Makes new array and assigns it to updateDataBuffer, unfortunately causing an allocation for each property update.
+			// to be fixed by rewriting the entire action serialization system
+			Array.Resize<byte>(ref updateDatabuffer, (int)PropertyEncodingWriter.BaseStream.Position);
+			PropertyEncodingWriter.BaseStream.Position = 0;
+
+			return updateDatabuffer;
+		}
+
+		private void SendEntityUpdates(IDistributedEntity entity)
+        {
+
+			byte[] updateDatabuffer = GetPropertyBytes(entity);
+
+			Connection.UpdateEntity(entity.DistributedEntityId, null, updateDatabuffer, null);
 
 		}
 	}
