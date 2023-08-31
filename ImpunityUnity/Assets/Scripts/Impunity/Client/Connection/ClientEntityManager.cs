@@ -82,6 +82,10 @@ namespace Impunity.Connection
 	public interface IDistributedChannel : IDistributedEntity
 	{
 		string ChannelName { get; set; }
+		Dictionary<uint, IDistributedEntity> DistributedObjects { get; }
+
+		void OnObjectAdded(IDistributedEntity entity, bool newlyCreated);
+		void OnObjectRemoved(uint entityId, bool destroyed);
 	}
 
 	public abstract class DistributedEntityBase : IDistributedEntity
@@ -90,6 +94,7 @@ namespace Impunity.Connection
 		public int DistributedEntityType { get; set; }
 
 		public ClientEntityManager Manager { get; set; }
+		public IDistributedChannel Channel { get; set; }
 
 		public ulong DirtyBits { get; private set; }
 		public void SetDirty(int fieldId)
@@ -107,10 +112,30 @@ namespace Impunity.Connection
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
 	{
 		public string ChannelName { get; set; }
+		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; }
+
+		public DistributedChannelBase()
+        {
+			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
+		}
+
+		public virtual void OnObjectAdded(IDistributedEntity entity, bool newlyCreated)
+		{
+			DistributedObjects.Add(entity.DistributedEntityId, entity);
+		}
+
+		public virtual void OnObjectRemoved(uint entityId, bool destroyed)
+        {
+			DistributedObjects.Remove(entityId);
+		}
+
 	}
 
 	public class GenericDistributedChannel : DistributedChannelBase
 	{
+		public GenericDistributedChannel() : base()
+		{
+		}
 	}
 
 
@@ -121,6 +146,7 @@ namespace Impunity.Connection
 		public int FieldId;
 		public FieldInfo FieldAccessor;
 		public GameStateEntityPropertyValueType FieldValueType;
+		public MethodInfo OnChangedMethod;
 	}
 
 	public class DistributedTypeInfo
@@ -139,20 +165,30 @@ namespace Impunity.Connection
 
 		private DistributedTypeInfo[] DistributedTypes;
 
+		private Dictionary<string, IDistributedChannel> SubscribedChannels;
 		private Dictionary<uint, IDistributedEntity> DistributedObjects;
 		private HashSet<IDistributedEntity> DirtyObjects;
 
 		private byte[] PropertyEncodingBuffer;
 		private BinaryWriter PropertyEncodingWriter;
 
+		private byte[] PropertyDecodingBuffer;
+		private BinaryReader PropertyDecodingReader;
+
+		public Action<IDistributedEntity, IDistributedChannel, bool> OnDistributedObjectCreated;
+
 		public ClientEntityManager()
         {
 			DistributedTypes = null;
+			SubscribedChannels = new Dictionary<string, IDistributedChannel>();
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
 			DirtyObjects = new HashSet<IDistributedEntity>();
 
 			PropertyEncodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			PropertyEncodingWriter = new BinaryWriter(new MemoryStream(PropertyEncodingBuffer));
+
+			PropertyDecodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
+			PropertyDecodingReader = new BinaryReader(new MemoryStream(PropertyDecodingBuffer));
 		}
 
 		// -------------- Public API
@@ -201,12 +237,17 @@ namespace Impunity.Connection
 			return convertedEntityTypes;
         }
 
-		public void CreateChannel<T>(T channel, string name, ImpunityCallback<T> onComplete) where T : IDistributedChannel
+		public void CreateChannel<T>(T channel, string name, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
 			if (name == null)
             {
 				throw new Exception("Channel must have name");
             }
+
+			if(SubscribedChannels.ContainsKey(name))
+            {
+				throw new Exception("Channel with name " + name + " already exists");
+			}
 
 			channel.ChannelName = name;
 
@@ -228,12 +269,26 @@ namespace Impunity.Connection
 
 			Connection.CreateChannel(entityTypeId, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
 			{
+				if (err != null)
+                {
+					onComplete?.Invoke(err, null);
+					return;
+				}
+
+				// Check if channel got created while we were waiting
+				if (DistributedObjects.ContainsKey(channelId))
+                {
+					IDistributedChannel createdChannel = (IDistributedChannel)DistributedObjects[channelId];
+					onComplete?.Invoke(null, (T)createdChannel);
+					return;
+                }
+
 				RegisterEntity(channel, channelId);
 				onComplete?.Invoke(err, channel);
 			});
 		}
 
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : IDistributedEntity
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
 		{
 
 			Type entityType = distObj.GetType();
@@ -254,8 +309,57 @@ namespace Impunity.Connection
 
 			Connection.CreateObject(entityTypeId, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
 			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, null);
+					return;
+				}
+
 				RegisterEntity(distObj, objectId);
 				onComplete?.Invoke(err, distObj);
+			});
+		}
+
+		public void SubscribeToChannel<T>(string channelName, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
+		{
+			if (SubscribedChannels.ContainsKey(channelName))
+            {
+				onComplete(null, (T)SubscribedChannels[channelName]);
+				return;
+            }
+
+			Connection.SubcribeToChannel(channelName, (ImpunityError err, uint channelId) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, null);
+					return;
+				}
+
+				IDistributedChannel newChannel = (IDistributedChannel)DistributedObjects.GetValueOrDefault(channelId);
+				if (newChannel == null)
+                {
+					// We didn't get the channel create before the action returned, shouldn't happen
+					throw new Exception("Didn't get channel create message for subscribed channel " + channelName + " id: " + channelId);
+                }
+
+				onComplete?.Invoke(null, (T)newChannel);
+			});
+        }
+
+		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete)
+		{
+			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityError err) =>
+			{
+				if (err != null)
+                {
+					onComplete?.Invoke(err);
+					return;
+                }
+
+				SubscribedChannels.Remove(channel.ChannelName);
+
+				onComplete?.Invoke(null);
 			});
 		}
 
@@ -263,13 +367,18 @@ namespace Impunity.Connection
 
 		private GameStateEntityType RegisterEntityType(Type entityType, List<DistributedTypeInfo> internalTypeInfoList)
         {
+			if (!entityType.IsClass)
+            {
+				throw new Exception("Tried to register distributed entity " + entityType.Name + " that's not a class type");
+			}
+
 			GameStateEntityType entityData = new GameStateEntityType();
 			entityData.Name = entityType.Name;
 
 			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
 			if (distAttr == null)
 			{
-				throw new Exception("Tried to register distributed entity type " + entityType.Name + " with no DistributedEntity attribute");
+				throw new Exception("Tried to register distributed entity " + entityType.Name + " with no DistributedEntity attribute");
 			}
 
 			entityData.Index = distAttr.EntityId;
@@ -335,6 +444,20 @@ namespace Impunity.Connection
 				dfield.FieldId = fieldAttr.FieldId;
 				dfield.FieldAccessor = fieldInfo;
 				dfield.FieldValueType = tempFieldValue.ValueType;
+
+				if(fieldAttr.OnChanged != null)
+                {
+					// If there's a custom property changed method
+					MethodInfo onChangedMethod = entityType.GetMethod(fieldAttr.OnChanged, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+					if (onChangedMethod == null)
+                    {
+						throw new Exception("Type " + entityType.Name + " references a distributed property onChanged method " + fieldAttr.OnChanged + " that could not be found");
+                    }
+
+					dfield.OnChangedMethod = onChangedMethod;
+				}
+
+
 				distributedFields.Add(dfield);
 			}
 
@@ -421,24 +544,15 @@ namespace Impunity.Connection
 				channel = new GenericDistributedChannel();
 			}
 
+			channel.DistributedEntityType = channelType;
 			channel.ChannelName = channelName;
+
+			SetPropertyBytes(channel, propData);
+
 			RegisterEntity(channel, channelId);
 		}
 
-		private void RegisterEntity(IDistributedEntity entity, uint entityId)
-        {
-			entity.DistributedEntityId = entityId;
-			entity.Manager = this;
-
-			DistributedObjects[entity.DistributedEntityId] = entity;
-
-			if (entity.DirtyBits != 0)
-			{
-				SetDirty(entity);
-			}
-		}
-
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData, bool newlyCreated)
 		{
 			IDistributedEntity entity = null;
 
@@ -452,21 +566,84 @@ namespace Impunity.Connection
 				entity = (IDistributedEntity)Activator.CreateInstance(typeInfo.ObjectType);
 			}
 
+			entity.DistributedEntityType = objectType;
+
+			SetPropertyBytes(entity, propData);
+
 			RegisterEntity(entity, objectId);
+
+			IDistributedChannel channel = (IDistributedChannel)DistributedObjects[channelId];
+			
+			try
+			{
+				channel.OnObjectAdded(entity, newlyCreated);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError(e, "Excpetion in channel OnObjectAdded:");
+			}
+
+			try
+			{
+				OnDistributedObjectCreated?.Invoke(entity, channel, newlyCreated);
+			}
+			catch (Exception e)
+            {
+				ImpunityLogger.LogError(e, "Excpetion in OnDistributedObjectCreated handler:");
+            }
+		}
+
+		private void RegisterEntity(IDistributedEntity entity, uint entityId)
+		{
+			entity.DistributedEntityId = entityId;
+			entity.Manager = this;
+
+			DistributedObjects[entity.DistributedEntityId] = entity;
+
+			if (entity.DirtyBits != 0)
+			{
+				SetDirty(entity);
+			}
+
+			if (entity is IDistributedChannel channel)
+			{
+				SubscribedChannels.Add(channel.ChannelName, channel);
+			}
 		}
 
 		public void HandleEntityUpdate(uint entityId, byte[] updateData)
 		{
-			ImpunityLogger.LogInformation("Got entity update request");
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity == null)
+            {
+				ImpunityLogger.LogWarning("Got property update for entity we don't know about: " + entityId);
+				return;
+            }
+
+			SetPropertyBytes(entity, updateData);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity == null)
+			{
+				ImpunityLogger.LogWarning("Got event trigger for entity we don't know about: " + entityId);
+				return;
+			}
+
 			ImpunityLogger.LogInformation("Got entity event request");
 		}
 
 		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
 		{
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity == null)
+			{
+				ImpunityLogger.LogWarning("Got delete for entity we don't know about: " + entityId);
+				return;
+			}
+
 			ImpunityLogger.LogInformation("Got entity delete request");
 		}
 
@@ -523,6 +700,46 @@ namespace Impunity.Connection
 			PropertyEncodingWriter.BaseStream.Position = 0;
 
 			return updateDatabuffer;
+		}
+
+		private void SetPropertyBytes(IDistributedEntity entity, byte[] propertyBytes)
+        {
+			if (propertyBytes == null || propertyBytes.Length == 0)
+            {
+				return;
+            }
+
+			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
+			DistributedTypeFieldInfo[] fields = typeInfo.DistributedFields;
+
+			PropertyDecodingReader.BaseStream.Position = 0;
+			PropertyDecodingReader.BaseStream.Write(propertyBytes);
+			PropertyDecodingReader.BaseStream.Position = 0;
+
+			while (true)
+			{
+				int propId = PropertyDecodingReader.ReadByte();
+				if (propId == 0)
+				{
+					break;
+				}
+
+				if (propId <= 0 || propId >= fields.Length)
+				{
+					throw new Exception("Invalid property id: " + propId);
+				}
+
+				DistributedTypeFieldInfo fieldInfo = fields[propId];
+				if (fieldInfo == null)
+                {
+					throw new Exception("Invalid property id: " + propId);
+				}
+
+				// Creates boxed copy :(
+				IDistributedField fieldValue = (IDistributedField)fieldInfo.FieldAccessor.GetValue(entity);
+				fieldValue.ReadChangesFrom(PropertyDecodingReader);
+				fieldInfo.FieldAccessor.SetValue(entity, fieldValue);
+			}
 		}
 
 		private void SendEntityUpdates(IDistributedEntity entity)

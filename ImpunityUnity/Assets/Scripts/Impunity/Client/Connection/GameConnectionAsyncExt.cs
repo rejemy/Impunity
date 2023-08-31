@@ -256,17 +256,31 @@ namespace Impunity.Connection
 
 	public static class ClientEntityManagerAsyncExtensions
 	{
-		public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : IDistributedChannel
+		public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
         {
 			var t = new ImpunityTaskCompletionSource<T>();
 			manager.CreateChannel<T>(channel, name, t.CompleteTask);
 			return t.Task;
         }
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : IDistributedEntity
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
 			manager.CreateObject<T>(obj, channel, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task<T> SubscribeToChannelAsync<T>(this ClientEntityManager manager, string channelName) where T : class, IDistributedChannel
+		{
+			var t = new ImpunityTaskCompletionSource<T>();
+			manager.SubscribeToChannel<T>(channelName, t.CompleteTask);
+			return t.Task;
+		}
+
+		public static Task UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
+        {
+			var t = new ImpunityTaskCompletionSource();
+			manager.UnsubscribeFromChannel(channel, t.CompleteTask);
 			return t.Task;
 		}
 	}

@@ -128,7 +128,7 @@ namespace Impunity.GameState
         public string Name { get; private set; } // Not all entities have names
 
         protected GameStateLive LiveData;
-        protected GameStateEntityType TypeInfo;
+        public GameStateEntityType TypeInfo;
 
         public GameStateReplicant LockHeldBy;
         public string LockedWith { get; internal set; }
@@ -567,7 +567,22 @@ namespace Impunity.GameState
 
             if (NamedEntities.ContainsKey(name))
             {
-                throw new Exception("Entity with name " + name + " already exists");
+                GameStateEntity existingEnt = NamedEntities[name];
+                if (existingEnt.TypeInfo != null && existingEnt.TypeInfo.Index == typeId)
+                {
+                    // Existing channel of the same type already created
+                    GameStateChannel existingChannel = (GameStateChannel)existingEnt;
+
+                    // subscribe to existing channel instead of erroring
+                    existingChannel.AddListener(origin, true);
+                    origin.AddSubscribedChannel(existingChannel);
+
+                    return existingChannel.Id;
+                }
+                else
+                {
+                    throw new Exception("Entity with name " + name + " already exists");
+                }
             }
 
             GameStateEntityType typeInfo = null;

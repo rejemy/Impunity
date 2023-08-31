@@ -88,9 +88,9 @@ namespace Impunity.Connection
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, propData);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData, bool newlyCreated)
         {
-			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData);
+			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData, newlyCreated);
 		}
 
 		public void HandleEntityUpdate(uint entityId, byte[] updateData)

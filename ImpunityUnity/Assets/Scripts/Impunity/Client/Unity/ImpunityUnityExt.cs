@@ -266,17 +266,31 @@ namespace Impunity.Unity
 
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateChannel<T>(this ClientEntityManager manager, T channel, string name) where T : IDistributedChannel
+		public static ImpunityYield<T> CreateChannel<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityYield<T>();
 			manager.CreateChannel<T>(channel, name, t.OnComplete);
 			return t;
 		}
 
-		public static ImpunityYield<T> CreateObject<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : IDistributedEntity
+		public static ImpunityYield<T> CreateObject<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityYield<T>();
 			manager.CreateObject<T>(obj, channel, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<T> SubscribeToChannel<T>(this ClientEntityManager manager, string channelName) where T : class, IDistributedChannel
+        {
+			var t = new ImpunityYield<T>();
+			manager.SubscribeToChannel<T>(channelName, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
+		{
+			var t = new ImpunityYield();
+			manager.UnsubscribeFromChannel(channel, t.OnComplete);
 			return t;
 		}
 	}

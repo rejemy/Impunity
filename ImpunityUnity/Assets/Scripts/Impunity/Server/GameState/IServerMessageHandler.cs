@@ -7,7 +7,7 @@ namespace Impunity.GameState
 	public interface IServerMessageHandler
 	{
 		void HandleCreateChannel(uint channelId, string channelName, int channelType, byte[] propData);
-		void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData);
+		void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData, bool newlyCreated);
 		void HandleEntityUpdate(uint entityId, byte[] propData);
 		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData);
 		void HandleEntityDelete(uint entityId, BsonValue deleteData);

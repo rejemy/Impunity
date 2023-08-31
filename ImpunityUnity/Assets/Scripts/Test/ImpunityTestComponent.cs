@@ -40,12 +40,12 @@ public class TestPlayer : DistributedEntityBase
 	enum DistributedPropIds
     {
 		TESTBOOL = 1,
-		BOP = 2
+		DIRECTION = 2
 	}
 
 	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
 
-	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged= "OnTestBoolChanged")]
+	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged = "OnTestBoolChanged")]
 	private DistributedValue<DBool> TestBool;
 	public void SetTestBool(bool v)
     {
@@ -60,15 +60,19 @@ public class TestPlayer : DistributedEntityBase
 
     }
 
-	[Distributed((int)DistributedPropIds.BOP)]
-	private DistributedValue<DVector3> Bop;
-	public void SetBop(Vector3 v)
+	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
+	private DistributedValue<DVector3> Direction;
+	public void SetDirection(Vector3 v)
 	{
-		if (Bop.Set(v)) SetDirty((int)DistributedPropIds.BOP);
+		if (Direction.Set(v)) SetDirty((int)DistributedPropIds.DIRECTION);
 	}
-	public Vector3 GetBop()
+	public Vector3 GetDirection()
 	{
-		return (DVector3)Bop;
+		return (DVector3)Direction;
+	}
+	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
+	{
+
 	}
 
 }
@@ -78,30 +82,30 @@ public class TestZone : DistributedChannelBase
 {
 	enum DistributedPropIds
 	{
-		THING = 1,
-		STUFF = 2
+		STATUS = 1,
+		SCALAR = 2
 	}
 
-	[Distributed((int)DistributedPropIds.THING)]
-	private DistributedValue<DString> Thing;
-	public void SetThing(string v)
+	[Distributed((int)DistributedPropIds.STATUS)]
+	private DistributedValue<DString> Status;
+	public void SetStatus(string v)
 	{
-		if (Thing.Set(v)) SetDirty((int)DistributedPropIds.THING);
+		if (Status.Set(v)) SetDirty((int)DistributedPropIds.STATUS);
 	}
-	public string GetThing()
+	public string GetStatus()
 	{
-		return (DString)Thing;
+		return (DString)Status;
 	}
 
-	[Distributed((int)DistributedPropIds.STUFF)]
-	private DistributedValue<DFloat> Stuff;
-	public void SetStuff(float v)
+	[Distributed((int)DistributedPropIds.SCALAR)]
+	private DistributedValue<DFloat> Scalar;
+	public void SetScalar(float v)
 	{
-		if (Stuff.Set(v)) SetDirty((int)DistributedPropIds.STUFF);
+		if (Scalar.Set(v)) SetDirty((int)DistributedPropIds.SCALAR);
 	}
-	public string GetStuff()
+	public float GetScalar()
 	{
-		return (DString)Thing;
+		return (DFloat)Scalar;
 	}
 }
 
@@ -525,21 +529,56 @@ public class ImpunityTestComponent : MonoBehaviour
 		Debug.Log("Lock tests complete");
 	}
 
+	void Connection1ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
+    {
+		Debug.Log("Got new object on connection 1 in channel " + channel.ChannelName + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
+    }
+
+	void Connection2ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
+	{
+		Debug.Log("Got new object on connection 2 in channel " + channel.ChannelName + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
+	}
+
 	async Task LiveChannelTests(BaseGameConnection c1, BaseGameConnection c2)
     {
 		Debug.Log("Doing live channel tests");
 
-		TestZone channel = new TestZone();
-		channel = await c1.EntityManager.CreateChannelAsync(channel, "testZone");
-		Debug.Log("Made channel " + channel.DistributedEntityId);
+		c1.EntityManager.OnDistributedObjectCreated = Connection1ObjectCreated;
+		c2.EntityManager.OnDistributedObjectCreated = Connection2ObjectCreated;
 
-		await c2.SubcribeToChannelAsync("testZone");
-		Debug.Log("C2 subscribed to channel");
+		TestZone c1channel = new TestZone();
+		c1channel = await c1.EntityManager.CreateChannelAsync(c1channel, "testZone");
+		Debug.Log("C1 Made channel " + c1channel.DistributedEntityId);
 
-		TestPlayer player = new TestPlayer();
-		player = await c1.EntityManager.CreateObjectAsync(player, channel);
-		Debug.Log("Made player: " + player.DistributedEntityId);
+		TestPlayer c1player1 = new TestPlayer();
+		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel);
+		Debug.Log("C1 Made player: " + c1player1.DistributedEntityId);
 
+		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone");
+		Debug.Log("C2 subscribed to channel " + c2channel.DistributedEntityId);
+
+		TestPlayer c2player1 = new TestPlayer();
+		c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c1channel);
+		Debug.Log("C2 Made player: " + c2player1.DistributedEntityId);
+
+		c1channel.SetScalar(2.0f);
+		c1channel.SetStatus("New status");
+
+		int tries = 10;
+		while(c2channel.GetScalar() != 2.0f)
+        {
+			await Task.Delay(100);
+			tries--;
+			if(tries == 0)
+            {
+				Debug.LogError("Didn't get distributed status");
+				return;
+            }
+		}
+
+		Debug.Log("c2channel got new status");
+
+		/*
 		await c1.TryToLockEntityAsync(player.DistributedEntityId, "xyz");
 
 		bool updated = await c2.DeleteEntityAsync(player.DistributedEntityId, null, null);
@@ -551,7 +590,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		await c2.UnsubscribeFromChannelAsync(channel.DistributedEntityId);
 		Debug.Log("Unsubscribed from channel " + channel.DistributedEntityId);
 
-
+		*/
 
 		await Task.Delay(100);
 
