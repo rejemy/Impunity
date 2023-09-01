@@ -46,6 +46,11 @@ namespace Impunity.Connection
 		T CurrentValue;
 		T NewValue;
 
+		public T Get()
+        {
+			return CurrentValue;
+        }
+
 		public bool Set(T newValue)
 		{
 			NewValue = newValue;
@@ -144,9 +149,11 @@ namespace Impunity.Connection
 	public class DistributedTypeFieldInfo
 	{
 		public int FieldId;
-		public FieldInfo FieldAccessor;
+		public string FieldName;
+		//public FieldInfo FieldAccessor;
 		public GameStateEntityPropertyValueType FieldValueType;
-		public MethodInfo OnChangedMethod;
+		public MethodInfo WriteMethod;
+		public MethodInfo UpdateMethod;
 	}
 
 	public class DistributedTypeInfo
@@ -171,9 +178,11 @@ namespace Impunity.Connection
 
 		private byte[] PropertyEncodingBuffer;
 		private BinaryWriter PropertyEncodingWriter;
+		private object[] WriteMethodArgs;
 
 		private byte[] PropertyDecodingBuffer;
 		private BinaryReader PropertyDecodingReader;
+		private object[] UpdateMethodArgs;
 
 		public Action<IDistributedEntity, IDistributedChannel, bool> OnDistributedObjectCreated;
 
@@ -186,9 +195,11 @@ namespace Impunity.Connection
 
 			PropertyEncodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			PropertyEncodingWriter = new BinaryWriter(new MemoryStream(PropertyEncodingBuffer));
+			WriteMethodArgs = new object[] { PropertyEncodingWriter };
 
 			PropertyDecodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			PropertyDecodingReader = new BinaryReader(new MemoryStream(PropertyDecodingBuffer));
+			UpdateMethodArgs = new object[] { PropertyDecodingReader };
 		}
 
 		// -------------- Public API
@@ -442,20 +453,22 @@ namespace Impunity.Connection
 
 				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo();
 				dfield.FieldId = fieldAttr.FieldId;
-				dfield.FieldAccessor = fieldInfo;
+				dfield.FieldName = fieldInfo.Name;
 				dfield.FieldValueType = tempFieldValue.ValueType;
 
-				if(fieldAttr.OnChanged != null)
-                {
-					// If there's a custom property changed method
-					MethodInfo onChangedMethod = entityType.GetMethod(fieldAttr.OnChanged, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-					if (onChangedMethod == null)
-                    {
-						throw new Exception("Type " + entityType.Name + " references a distributed property onChanged method " + fieldAttr.OnChanged + " that could not be found");
-                    }
-
-					dfield.OnChangedMethod = onChangedMethod;
+				MethodInfo writeMethod = entityType.GetMethod("imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (writeMethod == null)
+				{
+					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
+				dfield.WriteMethod = writeMethod;
+
+				MethodInfo updateMethod = entityType.GetMethod("imp_Update" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (updateMethod == null)
+				{
+					throw new Exception("Cant find update method for property " + fieldInfo.Name + " on type " + entityType.Name);
+				}
+				dfield.UpdateMethod = updateMethod;
 
 
 				distributedFields.Add(dfield);
@@ -474,7 +487,7 @@ namespace Impunity.Connection
             {
 				GameStateEntityPropertyDef propDef = new GameStateEntityPropertyDef();
 				propDef.Index = dfield.FieldId;
-				propDef.Name = dfield.FieldAccessor.Name;
+				propDef.Name = dfield.FieldName;
 				propDef.PropValueType = (byte)dfield.FieldValueType;
 				entityData.Properties[p++] = propDef;
 			}
@@ -682,9 +695,7 @@ namespace Impunity.Connection
 				if ((dirtyBits & (1ul << (fieldInfo.FieldId - 1))) != 0)
 				{
 					PropertyEncodingWriter.Write((byte)fieldInfo.FieldId);
-					// Boxes a copy :(
-					IDistributedField fieldInst = (IDistributedField)fieldInfo.FieldAccessor.GetValue(entity);
-					fieldInst.WriteChangesTo(PropertyEncodingWriter);
+					fieldInfo.WriteMethod.Invoke(entity, WriteMethodArgs);
 				}
 			}
 
@@ -735,10 +746,8 @@ namespace Impunity.Connection
 					throw new Exception("Invalid property id: " + propId);
 				}
 
-				// Creates boxed copy :(
-				IDistributedField fieldValue = (IDistributedField)fieldInfo.FieldAccessor.GetValue(entity);
-				fieldValue.ReadChangesFrom(PropertyDecodingReader);
-				fieldInfo.FieldAccessor.SetValue(entity, fieldValue);
+				fieldInfo.UpdateMethod.Invoke(entity, UpdateMethodArgs);
+
 			}
 		}
 

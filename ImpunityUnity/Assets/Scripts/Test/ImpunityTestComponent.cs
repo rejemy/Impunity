@@ -35,7 +35,7 @@ public static class TestEntityTypes
 
 
 [DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "DistributedEntityFactory")]
-public class TestPlayer : DistributedEntityBase
+public partial class TestPlayer : DistributedEntityBase
 {
 	enum DistributedPropIds
     {
@@ -47,21 +47,44 @@ public class TestPlayer : DistributedEntityBase
 
 	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged = "OnTestBoolChanged")]
 	private DistributedValue<DBool> TestBool;
-	public void SetTestBool(bool v)
-    {
-		if (TestBool.Set(v)) SetDirty((int)DistributedPropIds.TESTBOOL);
-	}
-	public bool GetTestBool()
-    {
-		return (DBool)TestBool;
-    }
-	private void OnTestBoolChanged(DBool oldValue, DBool newValue)
+	
+	private void OnTestBoolChanged(bool oldValue, bool newValue)
     {
 
     }
 
 	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
 	private DistributedValue<DVector3> Direction;
+
+	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
+	{
+
+	}
+
+}
+
+public partial class TestPlayer
+{
+	public void SetTestBool(bool v)
+	{
+		if (TestBool.Set(v)) SetDirty((int)DistributedPropIds.TESTBOOL);
+	}
+	public bool GetTestBool()
+	{
+		return (DBool)TestBool;
+	}
+	private void imp_WriteTestBool(BinaryWriter w)
+	{
+		TestBool.WriteChangesTo(w);
+	}
+	private void imp_UpdateTestBool(BinaryReader r)
+    {
+		bool oldValue = (DBool)TestBool;
+		TestBool.ReadChangesFrom(r);
+		bool newValue = (DBool)TestBool;
+		OnTestBoolChanged(oldValue, newValue);
+	}
+
 	public void SetDirection(Vector3 v)
 	{
 		if (Direction.Set(v)) SetDirty((int)DistributedPropIds.DIRECTION);
@@ -70,15 +93,21 @@ public class TestPlayer : DistributedEntityBase
 	{
 		return (DVector3)Direction;
 	}
-	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
+	private void imp_WriteDirection(BinaryWriter w)
 	{
-
+		Direction.WriteChangesTo(w);
 	}
-
+	private void imp_UpdateDirection(BinaryReader r)
+	{
+		Vector3 oldValue = (DVector3)Direction;
+		Direction.ReadChangesFrom(r);
+		Vector3 newValue = (DVector3)Direction;
+		OnDirectionChanged(oldValue, newValue);
+	}
 }
 
 [DistributedEntity(TestEntityTypes.ZONE)]
-public class TestZone : DistributedChannelBase
+public partial class TestZone : DistributedChannelBase
 {
 	enum DistributedPropIds
 	{
@@ -88,6 +117,15 @@ public class TestZone : DistributedChannelBase
 
 	[Distributed((int)DistributedPropIds.STATUS)]
 	private DistributedValue<DString> Status;
+	
+
+	[Distributed((int)DistributedPropIds.SCALAR)]
+	private DistributedValue<DFloat> Scalar;
+	
+}
+
+public partial class TestZone
+{
 	public void SetStatus(string v)
 	{
 		if (Status.Set(v)) SetDirty((int)DistributedPropIds.STATUS);
@@ -96,9 +134,15 @@ public class TestZone : DistributedChannelBase
 	{
 		return (DString)Status;
 	}
+	private void imp_WriteStatus(BinaryWriter w)
+	{
+		Status.WriteChangesTo(w);
+	}
+	private void imp_UpdateStatus(BinaryReader r)
+	{
+		Status.ReadChangesFrom(r);
+	}
 
-	[Distributed((int)DistributedPropIds.SCALAR)]
-	private DistributedValue<DFloat> Scalar;
 	public void SetScalar(float v)
 	{
 		if (Scalar.Set(v)) SetDirty((int)DistributedPropIds.SCALAR);
@@ -107,8 +151,15 @@ public class TestZone : DistributedChannelBase
 	{
 		return (DFloat)Scalar;
 	}
+	private void imp_WriteScalar(BinaryWriter w)
+	{
+		Scalar.WriteChangesTo(w);
+	}
+	private void imp_UpdateScalar(BinaryReader r)
+	{
+		Scalar.ReadChangesFrom(r);
+	}
 }
-
 
 public class ImpunityTestComponent : MonoBehaviour
 {
