@@ -5,7 +5,6 @@ using System.IO;
 using System;
 using System.Threading.Tasks;
 
-
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -19,6 +18,7 @@ using Impunity.Unity;
 using Impunity.Networking;
 
 using UltraLiteDB;
+
 
 public static class TestCollectionTypes
 {
@@ -40,7 +40,7 @@ public partial class TestPlayer : DistributedEntityBase
 	enum DistributedPropIds
     {
 		TESTBOOL = 1,
-		DIRECTION = 2
+		DIRECTION = 3
 	}
 
 	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
@@ -63,6 +63,7 @@ public partial class TestPlayer : DistributedEntityBase
 
 }
 
+/*
 public partial class TestPlayer
 {
 	public void SetTestBool(bool v)
@@ -105,6 +106,7 @@ public partial class TestPlayer
 		OnDirectionChanged(oldValue, newValue);
 	}
 }
+*/
 
 [DistributedEntity(TestEntityTypes.ZONE)]
 public partial class TestZone : DistributedChannelBase
@@ -112,7 +114,7 @@ public partial class TestZone : DistributedChannelBase
 	enum DistributedPropIds
 	{
 		STATUS = 1,
-		SCALAR = 2
+		SCALAR = 3
 	}
 
 	[Distributed((int)DistributedPropIds.STATUS)]
@@ -124,6 +126,7 @@ public partial class TestZone : DistributedChannelBase
 	
 }
 
+/*
 public partial class TestZone
 {
 	public void SetStatus(string v)
@@ -160,6 +163,7 @@ public partial class TestZone
 		Scalar.ReadChangesFrom(r);
 	}
 }
+*/
 
 public class ImpunityTestComponent : MonoBehaviour
 {
@@ -184,6 +188,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	void Start()
 	{
+
 		ImpunityUnityLogger.Setup(ImpunityLogLevel.INFO);
 
 		GameStatePath = Path.Join(Application.persistentDataPath, "ImpTest", "TestGame");
