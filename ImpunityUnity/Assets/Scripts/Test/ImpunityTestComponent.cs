@@ -40,7 +40,7 @@ public partial class TestPlayer : DistributedEntityBase
 	enum DistributedPropIds
     {
 		TESTBOOL = 1,
-		DIRECTION = 3
+		DIRECTION = 2
 	}
 
 	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
@@ -63,50 +63,6 @@ public partial class TestPlayer : DistributedEntityBase
 
 }
 
-/*
-public partial class TestPlayer
-{
-	public void SetTestBool(bool v)
-	{
-		if (TestBool.Set(v)) SetDirty((int)DistributedPropIds.TESTBOOL);
-	}
-	public bool GetTestBool()
-	{
-		return (DBool)TestBool;
-	}
-	private void imp_WriteTestBool(BinaryWriter w)
-	{
-		TestBool.WriteChangesTo(w);
-	}
-	private void imp_UpdateTestBool(BinaryReader r)
-    {
-		bool oldValue = (DBool)TestBool;
-		TestBool.ReadChangesFrom(r);
-		bool newValue = (DBool)TestBool;
-		OnTestBoolChanged(oldValue, newValue);
-	}
-
-	public void SetDirection(Vector3 v)
-	{
-		if (Direction.Set(v)) SetDirty((int)DistributedPropIds.DIRECTION);
-	}
-	public Vector3 GetDirection()
-	{
-		return (DVector3)Direction;
-	}
-	private void imp_WriteDirection(BinaryWriter w)
-	{
-		Direction.WriteChangesTo(w);
-	}
-	private void imp_UpdateDirection(BinaryReader r)
-	{
-		Vector3 oldValue = (DVector3)Direction;
-		Direction.ReadChangesFrom(r);
-		Vector3 newValue = (DVector3)Direction;
-		OnDirectionChanged(oldValue, newValue);
-	}
-}
-*/
 
 [DistributedEntity(TestEntityTypes.ZONE)]
 public partial class TestZone : DistributedChannelBase
@@ -114,7 +70,7 @@ public partial class TestZone : DistributedChannelBase
 	enum DistributedPropIds
 	{
 		STATUS = 1,
-		SCALAR = 3
+		SCALAR = 2
 	}
 
 	[Distributed((int)DistributedPropIds.STATUS)]
@@ -125,45 +81,6 @@ public partial class TestZone : DistributedChannelBase
 	private DistributedValue<DFloat> Scalar;
 	
 }
-
-/*
-public partial class TestZone
-{
-	public void SetStatus(string v)
-	{
-		if (Status.Set(v)) SetDirty((int)DistributedPropIds.STATUS);
-	}
-	public string GetStatus()
-	{
-		return (DString)Status;
-	}
-	private void imp_WriteStatus(BinaryWriter w)
-	{
-		Status.WriteChangesTo(w);
-	}
-	private void imp_UpdateStatus(BinaryReader r)
-	{
-		Status.ReadChangesFrom(r);
-	}
-
-	public void SetScalar(float v)
-	{
-		if (Scalar.Set(v)) SetDirty((int)DistributedPropIds.SCALAR);
-	}
-	public float GetScalar()
-	{
-		return (DFloat)Scalar;
-	}
-	private void imp_WriteScalar(BinaryWriter w)
-	{
-		Scalar.WriteChangesTo(w);
-	}
-	private void imp_UpdateScalar(BinaryReader r)
-	{
-		Scalar.ReadChangesFrom(r);
-	}
-}
-*/
 
 public class ImpunityTestComponent : MonoBehaviour
 {
