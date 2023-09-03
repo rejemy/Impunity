@@ -42,6 +42,8 @@ namespace SourceGenerator
 	[Generator]
 	public class DistributedEntityGenerator : ISourceGenerator
 	{
+		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new [] { "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor" });
+
 		public static StringBuilder Output = new StringBuilder();
 		public static StringBuilder Info = new StringBuilder();
 
@@ -53,14 +55,27 @@ namespace SourceGenerator
 			//WriteLine("Running Initialize");
 		}
 
-		public static void WriteLine(string line)
-		{
-			Output.AppendLine("/* " + line + "*/");
-		}
-
 		private void LogNode(SyntaxNode node, string indent)
 		{
-			WriteLine(indent + "Node: " + node.GetType().Name);
+			string summary="";
+			if (node is ClassDeclarationSyntax cds)
+			{
+				summary = cds.Identifier.Text;
+			}
+			else if (node is AttributeSyntax ats)
+			{
+				summary = ats.Name.ToString();
+			}
+			else if (node is AttributeArgumentListSyntax aals)
+			{
+				summary = aals.GetText().ToString();
+			}
+			else if (node is AttributeArgumentSyntax aas)
+			{
+				summary = aas.NameEquals + " " + aas.Expression;
+			}
+			
+			WriteInfo(indent + node.GetType().Name + " " + summary);
 			foreach(var child in node.ChildNodes())
 			{
 				LogNode(child, indent + " ");
@@ -74,18 +89,22 @@ namespace SourceGenerator
 
 		public void Execute(GeneratorExecutionContext context)
 		{
-			//WriteLine("Running Execute");
+			if (IgnoreAssemblies.Contains(context.Compilation.AssemblyName))
+			{
+				return;
+			}
+
 			DistributedClasses = new List<DistributedClassInfo>();
 			SourceBasePath = null;
 			Output.Clear();
-			//Info.Clear();
+			Info.Clear();
 
-			WriteInfo("Running codegen 3 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
+			WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
 			
 			foreach (var syntaxTree in context.Compilation.SyntaxTrees)
 			{
 				ExamineSyntaxTree(syntaxTree);
-				//WriteLine(syntaxTree.FilePath);
+				//WriteInfo(syntaxTree.FilePath);
 				//LogNode(syntaxTree.GetRoot(), "");
 			}
 
@@ -286,10 +305,19 @@ namespace SourceGenerator
 			string distributedPropertyId = null;
 			string onChangedMethodName = null;
 
-			AttributeArgumentListSyntax distributeArguments = attr.ChildNodes().OfType<AttributeArgumentListSyntax>().First();
-			foreach (AttributeArgumentSyntax argSyntax in distributeArguments.Arguments)
+			var distributeArguments = attr.DescendantNodes().OfType<AttributeArgumentSyntax>();
+			foreach (AttributeArgumentSyntax argSyntax in distributeArguments)
 			{
-				string argName = argSyntax.NameEquals?.ToString();
+				string argName = null;
+				if (argSyntax.NameEquals != null)
+				{
+					IdentifierNameSyntax argIdentifier = argSyntax.NameEquals.ChildNodes().OfType<IdentifierNameSyntax>().FirstOrDefault();
+					if (argIdentifier != null)
+					{
+						argName = argIdentifier.Identifier.Text;
+					}
+				}
+
 				string argValue = argSyntax.Expression?.ToString();
 
 				if (argName == null)
@@ -299,7 +327,10 @@ namespace SourceGenerator
 				}
 				else if(argName == "OnChanged")
 				{
-					onChangedMethodName = argValue;
+					if (argValue.StartsWith("\"") && argValue.EndsWith("\""))
+					{
+						onChangedMethodName = argValue.Substring(1, argValue.Length - 2).Trim();
+					}
 				}
 			}
 
@@ -319,7 +350,7 @@ namespace SourceGenerator
 
 			classInfo.Properties.Add(propInfo);
 
-			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId+")");
+			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId+", "+propInfo.OnChangedMethodName+")");
 		}
 
 		// determine the namespace the class/enum/struct is declared in, if any

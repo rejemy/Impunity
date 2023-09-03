@@ -50,15 +50,16 @@ public partial class TestPlayer : DistributedEntityBase
 	
 	private void OnTestBoolChanged(bool oldValue, bool newValue)
     {
-
-    }
+		Debug.Log("Got testbool change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
+	}
 
 	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
 	private DistributedValue<DVector3> Direction;
 
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
 	{
-
+		Debug.Log("Got direction change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
+		ImpunityTestComponent.WaitingNextThing = false;
 	}
 
 }
@@ -102,6 +103,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	bool TestsDone = false;
 
+	public static bool WaitingNextThing = false;
 
 	void Start()
 	{
@@ -550,6 +552,24 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		Debug.Log("c2channel got new status");
+
+		WaitingNextThing = true;
+
+		c2player1.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
+
+		tries = 10;
+		while (WaitingNextThing)
+		{
+			await Task.Delay(100);
+			tries--;
+			if (tries == 0)
+			{
+				Debug.LogError("Didn't get direction change callback");
+				return;
+			}
+		}
+
+		Debug.Log("Direction change callback worked");
 
 		/*
 		await c1.TryToLockEntityAsync(player.DistributedEntityId, "xyz");
