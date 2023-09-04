@@ -300,6 +300,20 @@ namespace Impunity.Connection
 			entity.Delete(deleteData, t.OnComplete);
 			return t.Task;
 		}
+
+		public static Task<bool> LockAsync(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.Lock(key, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> UnlockAsync(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.Unlock(key, t.OnComplete);
+			return t.Task;
+		}
 	}
 
 	public static class IDistributedChannelAsyncExtensions

@@ -589,16 +589,19 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Deletes happened");
 
-		/*
-		await c1.TryToLockEntityAsync(player.DistributedEntityId, "xyz");
+		
+		await c2player1.LockAsync("xyz");
 
-		bool updated = await c2.DeleteEntityAsync(player.DistributedEntityId, null, null);
-		ImpunityLogger.LogInformation("Able to delete locked entity: " + updated);
+		bool deleted = await c1.DeleteEntityAsync(c2player1.DistributedEntityId, null, null);
+		if (deleted)
+		{
+			ImpunityLogger.LogError("Was able to delete locked object");
+			return;
+		}
 
-		await c1.UnlockEntityAsync(player.DistributedEntityId, "xyz");
+		await c2player1.UnlockAsync("xyz");
+		ImpunityLogger.LogInformation("Completed locking");
 
-
-		*/
 
 		ImpunityLogger.LogInformation("Unsubscribing both connections");
 

@@ -301,6 +301,20 @@ namespace Impunity.Unity
 			entity.Delete(deleteData, t.OnComplete);
 			return t;
 		}
+
+		public static ImpunityYield<bool> LockYield(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityYield<bool>();
+			entity.Lock(key, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<bool> UnlockYield(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityYield<bool>();
+			entity.Unlock(key, t.OnComplete);
+			return t;
+		}
 	}
 
 	public static class IDistributedChannelYieldExtensions
