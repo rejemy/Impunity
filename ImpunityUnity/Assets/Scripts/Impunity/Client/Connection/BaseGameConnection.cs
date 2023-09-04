@@ -203,9 +203,9 @@ namespace Impunity.Connection
 			DoAction(new DeleteEntityAction(entityId, key, deleteData, onComplete));
 		}
 
-		public void TriggerEntityEvent(uint entityId, ImpunityCallback onComplete)
+		public void TriggerEntityEvent(uint entityId, int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
-			DoAction(new EventEntityAction(entityId, onComplete));
+			DoAction(new EventEntityAction(entityId, eventType, eventData, onComplete));
 		}
 
 		public void TryToLockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)

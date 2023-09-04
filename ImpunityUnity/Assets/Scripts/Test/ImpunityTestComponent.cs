@@ -59,9 +59,14 @@ public partial class TestPlayer : DistributedEntityBase
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
 	{
 		Debug.Log("Got direction change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
-		ImpunityTestComponent.WaitingNextThing = false;
+		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
+	public override void OnEventTriggered(int eventType, BsonValue eventData)
+	{
+		Debug.Log("Got event " + eventType + " on TestPlayer with data " + eventData.ToString());
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
 }
 
 
@@ -103,7 +108,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	bool TestsDone = false;
 
-	public static bool WaitingNextThing = false;
+	public static int WaitingForCount = 0;
 
 	void Start()
 	{
@@ -539,37 +544,34 @@ public class ImpunityTestComponent : MonoBehaviour
 		c1channel.SetScalar(2.0f);
 		c1channel.SetStatus("New status");
 
-		int tries = 10;
-		while(c2channel.GetScalar() != 2.0f)
-        {
-			await Task.Delay(100);
-			tries--;
-			if(tries == 0)
-            {
-				Debug.LogError("Didn't get distributed status");
-				return;
-            }
+		if(!await WaitForCount("Didn't get distributed status"))
+		{
+			return;
 		}
 
 		Debug.Log("c2channel got new status");
 
-		WaitingNextThing = true;
+		WaitingForCount = 2;
 
 		c2player1.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
 
-		tries = 10;
-		while (WaitingNextThing)
+		if (!await WaitForCount("Didn't get direction change callback"))
 		{
-			await Task.Delay(100);
-			tries--;
-			if (tries == 0)
-			{
-				Debug.LogError("Didn't get direction change callback");
-				return;
-			}
+			return;
 		}
 
 		Debug.Log("Direction change callback worked");
+
+		WaitingForCount = 2;
+
+		c2player1.TriggerEvent(1, "Wooow!", null);
+
+		if (!await WaitForCount("Didn't event trigger"))
+		{
+			return;
+		}
+
+		Debug.Log("Event trigger worked worked");
 
 		/*
 		await c1.TryToLockEntityAsync(player.DistributedEntityId, "xyz");
@@ -589,6 +591,23 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Debug.Log("Live channel tests complete");
     }
+
+	async Task<bool> WaitForCount(string error)
+	{
+		int tries = 10;
+		while (WaitingForCount > 0)
+		{
+			await Task.Delay(100);
+			tries--;
+			if (tries == 0)
+			{
+				Debug.LogError(error);
+				return false;
+			}
+		}
+
+		return true;
+	}
 
 	void OnNetworkError(ImpunityError err)
     {

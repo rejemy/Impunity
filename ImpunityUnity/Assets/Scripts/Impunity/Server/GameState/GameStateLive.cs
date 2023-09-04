@@ -257,6 +257,11 @@ namespace Impunity.GameState
             return propBytes;
         }
 
+        public virtual void SendEvent(int eventType, BsonValue eventData)
+		{
+
+		}
+
         public virtual void Destroy(BsonValue deleteData)
         {
             Unlock();
@@ -341,6 +346,17 @@ namespace Impunity.GameState
             SendToListeners(updateMessage, null);
         }
 
+        public override void SendEvent(int eventType, BsonValue eventData)
+        {
+            EntityEventMessageAction eventMessage = new EntityEventMessageAction();
+            eventMessage.EntityId = Id;
+            eventMessage.EventType = eventType;
+            eventMessage.EventData = eventData;
+
+            SendToListeners(eventMessage, null);
+        }
+
+
         public override void Destroy(BsonValue deleteData)
         {
             EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
@@ -408,6 +424,16 @@ namespace Impunity.GameState
             updateMessage.UpdateBytes = propData;
 
             Channel.SendToListeners(updateMessage, null);
+        }
+
+        public override void SendEvent(int eventType, BsonValue eventData)
+        {
+            EntityEventMessageAction eventMessage = new EntityEventMessageAction();
+            eventMessage.EntityId = Id;
+            eventMessage.EventType = eventType;
+            eventMessage.EventData = eventData;
+
+            Channel.SendToListeners(eventMessage, null);
         }
 
         public override void Destroy(BsonValue deleteData)
@@ -650,6 +676,7 @@ namespace Impunity.GameState
                 throw new Exception("No entity with ID " + entityId);
             }
 
+            entity.SendEvent(eventType, eventData);
         }
 
         public bool DeleteEntity(uint entityId, string key, BsonValue deleteData)

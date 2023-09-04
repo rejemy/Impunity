@@ -182,10 +182,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield TriggerEntityEvent(this BaseGameConnection connection, uint entityId)
+		public static ImpunityYield TriggerEntityEvent(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData)
 		{
 			var action = new ImpunityYield();
-			connection.TriggerEntityEvent(entityId, action.OnComplete);
+			connection.TriggerEntityEvent(entityId, eventType, eventData, action.OnComplete);
 			return action;
 		}
 
@@ -287,10 +287,20 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
+		public static ImpunityYield UnsubscribeFromChannel(this ClientEntityManager manager, IDistributedChannel channel)
 		{
 			var t = new ImpunityYield();
 			manager.UnsubscribeFromChannel(channel, t.OnComplete);
+			return t;
+		}
+	}
+
+	public static class DistributedEntityBaseYieldExtensions
+	{
+		public static ImpunityYield TriggerEvent(this DistributedEntityBase entity, int eventType, BsonValue eventData)
+		{
+			var t = new ImpunityYield();
+			entity.TriggerEvent(eventType, eventData, t.OnComplete);
 			return t;
 		}
 	}

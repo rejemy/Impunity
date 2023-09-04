@@ -10,7 +10,7 @@ namespace Impunity.Connection
 {
 	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
 	{
-		public void CompleteTask(ImpunityError err)
+		public void OnComplete(ImpunityError err)
 		{
 			if (err != null)
 			{
@@ -27,7 +27,7 @@ namespace Impunity.Connection
 	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
 	{
 
-		public void CompleteTask(ImpunityError err, TResult result)
+		public void OnComplete(ImpunityError err, TResult result)
 		{
 			if (err != null)
 			{
@@ -49,14 +49,14 @@ namespace Impunity.Connection
 		public static Task ConnectAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.Connect(t.CompleteTask);
+			connection.Connect(t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<List<ActionResult>> CompoundActionAsync(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
 		{
 			var t = new ImpunityTaskCompletionSource<List<ActionResult>>();
-			connection.CompoundAction(actions, t.CompleteTask);
+			connection.CompoundAction(actions, t.OnComplete);
 			return t.Task;
 		}
 
@@ -65,14 +65,14 @@ namespace Impunity.Connection
 		public static Task SetGameSummaryAsync(this BaseGameConnection connection, BsonDocument summary)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.SetGameSummary(summary, t.CompleteTask);
+			connection.SetGameSummary(summary, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<BsonDocument> GetGameSummaryAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonDocument>();
-			connection.GetGameSummary(t.CompleteTask);
+			connection.GetGameSummary(t.OnComplete);
 			return t.Task;
 		}
 
@@ -88,42 +88,42 @@ namespace Impunity.Connection
 		public static Task<BsonValue> InsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonValue>();
-			connection.InsertDocument(collectionId, doc, t.CompleteTask);
+			connection.InsertDocument(collectionId, doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UpdateDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UpdateDocument(collectionId, doc, t.CompleteTask);
+			connection.UpdateDocument(collectionId, doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UpsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UpsertDocument(collectionId, doc, t.CompleteTask);
+			connection.UpsertDocument(collectionId, doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<BsonDocument> FindDocumentByIdAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonDocument>();
-			connection.FindDocumentById(collectionId, id, t.CompleteTask);
+			connection.FindDocumentById(collectionId, id, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> DeleteDocumentAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.DeleteDocument(collectionId, id, t.CompleteTask);
+			connection.DeleteDocument(collectionId, id, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<List<BsonDocument>> ListDocumentsAsync(this BaseGameConnection connection, int collectionId)
 		{
 			var t = new ImpunityTaskCompletionSource<List<BsonDocument>>();
-			connection.ListDocuments(collectionId, t.CompleteTask);
+			connection.ListDocuments(collectionId, t.OnComplete);
 			return t.Task;
 		}
 
@@ -132,77 +132,77 @@ namespace Impunity.Connection
 		public static Task<bool> TryToLockAsync(this BaseGameConnection connection, string lockName, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.TryToLock(lockName, key, t.CompleteTask);
+			connection.TryToLock(lockName, key, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UnlockAsync(this BaseGameConnection connection, string lockName, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.Unlock(lockName, key, t.CompleteTask);
+			connection.Unlock(lockName, key, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName, byte[] propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateChannel(entityTypeId, channelName, propBytes, t.CompleteTask);
+			connection.CreateChannel(entityTypeId, channelName, propBytes, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId, byte[] propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, channelId, propBytes, t.CompleteTask);
+			connection.CreateObject(entityTypeId, channelId, propBytes, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, string key, byte[] updateData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UpdateEntity(entityId, key, updateData, t.CompleteTask);
+			connection.UpdateEntity(entityId, key, updateData, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, string key, BsonValue deleteData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.DeleteEntity(entityId, key, deleteData, t.CompleteTask);
+			connection.DeleteEntity(entityId, key, deleteData, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId)
+		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.TriggerEntityEvent(entityId, t.CompleteTask);
+			connection.TriggerEntityEvent(entityId, eventType, eventData, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.TryToLockEntity(entityId, key, t.CompleteTask);
+			connection.TryToLockEntity(entityId, key, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UnlockEntity(entityId, key, t.CompleteTask);
+			connection.UnlockEntity(entityId, key, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.SubcribeToChannel(channelName, t.CompleteTask);
+			connection.SubcribeToChannel(channelName, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task UnsubscribeFromChannelAsync(this BaseGameConnection connection, uint channelId)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.UnsubscribeFromChannel(channelId, t.CompleteTask);
+			connection.UnsubscribeFromChannel(channelId, t.OnComplete);
 			return t.Task;
 		}
 
@@ -214,42 +214,42 @@ namespace Impunity.Connection
 		public static Task<BsonValue> InsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonValue>();
-			collection.InsertDocument(doc, t.CompleteTask);
+			collection.InsertDocument(doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UpdateDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			collection.UpdateDocument(doc, t.CompleteTask);
+			collection.UpdateDocument(doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> UpsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			collection.UpsertDocument(doc, t.CompleteTask);
+			collection.UpsertDocument(doc, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<DTYPE> FindDocumentByIdAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<DTYPE>();
-			collection.FindDocumentById(id, t.CompleteTask);
+			collection.FindDocumentById(id, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<bool> DeleteDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			collection.DeleteDocument(id, t.CompleteTask);
+			collection.DeleteDocument(id, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<List<DTYPE>> ListDocumentsAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<DTYPE>>();
-			collection.ListDocuments(t.CompleteTask);
+			collection.ListDocuments(t.OnComplete);
 			return t.Task;
 		}
 	}
@@ -259,28 +259,38 @@ namespace Impunity.Connection
 		public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
         {
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateChannel<T>(channel, name, t.CompleteTask);
+			manager.CreateChannel<T>(channel, name, t.OnComplete);
 			return t.Task;
         }
 
 		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, t.CompleteTask);
+			manager.CreateObject<T>(obj, channel, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task<T> SubscribeToChannelAsync<T>(this ClientEntityManager manager, string channelName) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.SubscribeToChannel<T>(channelName, t.CompleteTask);
+			manager.SubscribeToChannel<T>(channelName, t.OnComplete);
 			return t.Task;
 		}
 
 		public static Task UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
         {
 			var t = new ImpunityTaskCompletionSource();
-			manager.UnsubscribeFromChannel(channel, t.CompleteTask);
+			manager.UnsubscribeFromChannel(channel, t.OnComplete);
+			return t.Task;
+		}
+	}
+
+	public static class DistributedEntityBaseExtensions
+	{
+		public static Task TriggerEventAsync(this DistributedEntityBase entity, int eventType, BsonValue eventData)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			entity.TriggerEvent(eventType, eventData, t.OnComplete);
 			return t.Task;
 		}
 	}

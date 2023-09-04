@@ -82,6 +82,10 @@ namespace Impunity.Connection
 
 		void SetDirty(int fieldId);
 		void ClearDirty();
+
+		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
+
+		void OnEventTriggered(int eventType, BsonValue eventData);
 	}
 
 	public interface IDistributedChannel : IDistributedEntity
@@ -112,6 +116,13 @@ namespace Impunity.Connection
         {
 			DirtyBits = 0ul;
 		}
+
+		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
+		{
+			Manager.Connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+		}
+
+		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
 	}
 
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
@@ -645,7 +656,14 @@ namespace Impunity.Connection
 				return;
 			}
 
-			ImpunityLogger.LogInformation("Got entity event request");
+			try
+			{
+				entity.OnEventTriggered(eventType, eventData);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError(e, "Exception in OnEventTriggered: ");
+			}
 		}
 
 		public void HandleEntityDelete(uint entityId, BsonValue deleteData)

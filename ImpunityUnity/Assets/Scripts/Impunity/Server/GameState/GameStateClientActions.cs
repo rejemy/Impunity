@@ -533,9 +533,11 @@ namespace Impunity.GameState
 
         public EventEntityAction() { }
 
-        public EventEntityAction(uint entityId, ImpunityCallback onComplete = null)
+        public EventEntityAction(uint entityId, int eventType, BsonValue eventData, ImpunityCallback onComplete = null)
         {
             EntityId = entityId;
+            EventType = eventType;
+            EventData = eventData;
             OnCompleteCallback = onComplete;
         }
 
