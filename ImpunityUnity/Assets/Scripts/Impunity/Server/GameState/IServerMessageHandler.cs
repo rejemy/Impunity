@@ -1,4 +1,4 @@
-﻿
+
 using UltraLiteDB;
 
 namespace Impunity.GameState
