@@ -285,14 +285,32 @@ namespace Impunity.Connection
 		}
 	}
 
-	public static class DistributedEntityBaseExtensions
+	public static class IDistributedEntityAsyncExtensions
 	{
-		public static Task TriggerEventAsync(this DistributedEntityBase entity, int eventType, BsonValue eventData)
+		public static Task TriggerEventAsync(this IDistributedEntity entity, int eventType, BsonValue eventData)
 		{
 			var t = new ImpunityTaskCompletionSource();
 			entity.TriggerEvent(eventType, eventData, t.OnComplete);
 			return t.Task;
 		}
+
+		public static Task<bool> DeleteAsync(this IDistributedEntity entity, BsonValue deleteData)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.Delete(deleteData, t.OnComplete);
+			return t.Task;
+		}
+	}
+
+	public static class IDistributedChannelAsyncExtensions
+	{
+		public static Task UnsubscribeAsync(this IDistributedChannel channel)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			channel.Unsubscribe(t.OnComplete);
+			return t.Task;
+		}
+
 	}
 
 }

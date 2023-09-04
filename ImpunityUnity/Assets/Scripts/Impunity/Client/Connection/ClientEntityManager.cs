@@ -84,14 +84,19 @@ namespace Impunity.Connection
 		void ClearDirty();
 
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
+		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
 
 		void OnEventTriggered(int eventType, BsonValue eventData);
+		void OnDeleted(BsonValue deleteData);
+		void OnUndistributed();
 	}
 
 	public interface IDistributedChannel : IDistributedEntity
 	{
 		string ChannelName { get; set; }
 		Dictionary<uint, IDistributedEntity> DistributedObjects { get; }
+
+		void Unsubscribe(ImpunityCallback onComplete);
 
 		void OnObjectAdded(IDistributedEntity entity, bool newlyCreated);
 		void OnObjectRemoved(uint entityId, bool destroyed);
@@ -122,7 +127,14 @@ namespace Impunity.Connection
 			Manager.Connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
 		}
 
+		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
+		{
+			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
+		}
+
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
+		public virtual void OnDeleted(BsonValue deleteData) { }
+		public virtual void OnUndistributed() { }
 	}
 
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
@@ -133,6 +145,11 @@ namespace Impunity.Connection
 		public DistributedChannelBase()
         {
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
+		}
+
+		public void Unsubscribe(ImpunityCallback onComplete)
+		{
+			Manager.UnsubscribeFromChannel(this, onComplete);
 		}
 
 		public virtual void OnObjectAdded(IDistributedEntity entity, bool newlyCreated)
@@ -635,6 +652,16 @@ namespace Impunity.Connection
 			}
 		}
 
+		private void UnregisterEntity(IDistributedEntity entity)
+		{
+			DistributedObjects.Remove(entity.DistributedEntityId);
+
+			if (entity is IDistributedChannel channel)
+			{
+				SubscribedChannels.Remove(channel.ChannelName);
+			}
+		}
+
 		public void HandleEntityUpdate(uint entityId, byte[] updateData)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
@@ -675,7 +702,32 @@ namespace Impunity.Connection
 				return;
 			}
 
-			ImpunityLogger.LogInformation("Got entity delete request");
+			if (entity is IDistributedChannel channel)
+			{
+				foreach(var obj in channel.DistributedObjects.Values)
+				{
+					UnregisterEntity(obj);
+
+					try
+					{
+						obj.OnUndistributed();
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in OnUndistributed: ");
+					}
+				}
+			}
+
+			UnregisterEntity(entity);
+			try
+			{
+				entity.OnDeleted(deleteData);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError(e, "Exception in OnDeleted: ");
+			}
 		}
 
 		public void SetDirty(IDistributedEntity entity)

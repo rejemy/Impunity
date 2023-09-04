@@ -264,6 +264,11 @@ namespace Impunity.GameState
 
         public virtual void Destroy(BsonValue deleteData)
         {
+            Cleanup();
+        }
+
+        public void Cleanup()
+		{
             Unlock();
             if (EphemeralOwner != null)
             {
@@ -364,6 +369,12 @@ namespace Impunity.GameState
             deleteMessage.DeleteData = deleteData;
 
             SendToListeners(deleteMessage, null);
+
+            foreach(GameStateObject member in Members.Values)
+			{
+                member.Cleanup();
+                LiveData.UnregisterEntity(member);
+            }
 
             Members.Clear();
             Listeners.Clear();
