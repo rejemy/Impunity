@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -143,21 +144,21 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName, byte[] propBytes)
+		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName, ArraySegment<byte> propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
 			connection.CreateChannel(entityTypeId, channelName, propBytes, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId, byte[] propBytes)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId, ArraySegment<byte> propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
 			connection.CreateObject(entityTypeId, channelId, propBytes, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, string key, byte[] updateData)
+		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, string key, ArraySegment<byte> updateData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.UpdateEntity(entityId, key, updateData, t.OnComplete);

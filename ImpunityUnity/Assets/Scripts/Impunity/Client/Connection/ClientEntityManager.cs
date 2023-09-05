@@ -316,7 +316,7 @@ namespace Impunity.Connection
             }
 
 			channel.DistributedEntityType = entityTypeId;
-			byte[] propertyBytes = GetPropertyBytes(channel);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel);
 
 			Connection.CreateChannel(entityTypeId, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
 			{
@@ -356,7 +356,7 @@ namespace Impunity.Connection
 			}
 
 			distObj.DistributedEntityType = entityTypeId;
-			byte[] propertyBytes = GetPropertyBytes(distObj);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj);
 
 			Connection.CreateObject(entityTypeId, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
 			{
@@ -572,7 +572,7 @@ namespace Impunity.Connection
 			return typeInfo;
 		}
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, byte[] propData)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, ArraySegment<byte> propData)
 		{
 			IDistributedChannel channel = null;
 			if (channelType != 0)
@@ -605,7 +605,7 @@ namespace Impunity.Connection
 			RegisterEntity(channel, channelId);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, bool newlyCreated)
 		{
 			IDistributedEntity entity = null;
 
@@ -674,7 +674,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void HandleEntityUpdate(uint entityId, byte[] updateData)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
@@ -759,7 +759,7 @@ namespace Impunity.Connection
 
 		}
 
-		private byte[] GetPropertyBytes(IDistributedEntity entity)
+		private ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity)
         {
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 
@@ -784,20 +784,14 @@ namespace Impunity.Connection
 			PropertyEncodingWriter.Write((byte)0);
 
 			entity.ClearDirty();
+			int bufferSize = (int)PropertyEncodingWriter.BaseStream.Position;
 
-			byte[] updateDatabuffer = PropertyEncodingBuffer;
-
-			// Makes new array and assigns it to updateDataBuffer, unfortunately causing an allocation for each property update.
-			// to be fixed by rewriting the entire action serialization system
-			Array.Resize<byte>(ref updateDatabuffer, (int)PropertyEncodingWriter.BaseStream.Position);
-			PropertyEncodingWriter.BaseStream.Position = 0;
-
-			return updateDatabuffer;
+			return new ArraySegment<byte>(PropertyEncodingBuffer, 0, bufferSize);
 		}
 
-		private void SetPropertyBytes(IDistributedEntity entity, byte[] propertyBytes)
+		private void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes)
         {
-			if (propertyBytes == null || propertyBytes.Length == 0)
+			if (propertyBytes == null || propertyBytes.Count == 0)
             {
 				return;
             }
@@ -835,8 +829,7 @@ namespace Impunity.Connection
 
 		private void SendEntityUpdates(IDistributedEntity entity)
         {
-
-			byte[] updateDatabuffer = GetPropertyBytes(entity);
+			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity);
 
 			Connection.UpdateEntity(entity.DistributedEntityId, null, updateDatabuffer, null);
 

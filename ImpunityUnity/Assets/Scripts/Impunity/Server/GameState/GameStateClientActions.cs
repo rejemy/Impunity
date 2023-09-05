@@ -411,13 +411,13 @@ namespace Impunity.GameState
 		public string Name;
 
 		[BsonField("pb")]
-		public byte[] PropBytes;
+		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
 
 		public CreateChannelAction() { }
 
-		public CreateChannelAction(int entityTypeId, string channelName, byte[] propBytes, ImpunityCallback<uint> onComplete = null)
+		public CreateChannelAction(int entityTypeId, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
 			Name = channelName;
@@ -440,13 +440,13 @@ namespace Impunity.GameState
 		public uint ChannelId;
 
 		[BsonField("pb")]
-		public byte[] PropBytes;
+		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, uint channelId, byte[] propBytes, ImpunityCallback<uint> onComplete = null)
+		public CreateObjectAction(int entityTypeId, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
 			ChannelId = channelId;
@@ -469,13 +469,13 @@ namespace Impunity.GameState
 		public string Key;
 
 		[BsonField("ub")]
-		public byte[] UpdateBytes;
+		public ArraySegment<byte> UpdateBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
 
 		public UpdateEntityAction() { }
 
-		public UpdateEntityAction(uint entityId, string key, byte[] updateBytes, ImpunityCallback<bool> onComplete = null)
+		public UpdateEntityAction(uint entityId, string key, ArraySegment<byte> updateBytes, ImpunityCallback<bool> onComplete = null)
 		{
 			EntityId = entityId;
 			Key = key;

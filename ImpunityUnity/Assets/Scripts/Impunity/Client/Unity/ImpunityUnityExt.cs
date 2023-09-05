@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 using UnityEngine;
@@ -145,21 +146,21 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateChannelYield(this BaseGameConnection connection, int entityTypeId, string channelName, byte[] propBytes)
+		public static ImpunityYield<uint> CreateChannelYield(this BaseGameConnection connection, int entityTypeId, string channelName, ArraySegment<byte> propBytes)
 		{
 			var action = new ImpunityYield<uint>();
 			connection.CreateChannel(entityTypeId, channelName, propBytes, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, uint channelId, byte[] propBytes)
+		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, uint channelId, ArraySegment<byte> propBytes)
 		{
 			var action = new ImpunityYield<uint>();
 			connection.CreateObject(entityTypeId, channelId, propBytes, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<bool> UpdateEntityYield(this BaseGameConnection connection, uint entityId, string key, byte[] updateData)
+		public static ImpunityYield<bool> UpdateEntityYield(this BaseGameConnection connection, uint entityId, string key, ArraySegment<byte> updateData)
 		{
 			var action = new ImpunityYield<bool>();
 			connection.UpdateEntity(entityId, key, updateData, action.OnComplete);

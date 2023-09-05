@@ -83,17 +83,17 @@ namespace Impunity.Connection
 
 		// Server message handlers
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, byte[] propData)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, ArraySegment<byte> propData)
         {
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, propData);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, byte[] propData, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, bool newlyCreated)
         {
 			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData, newlyCreated);
 		}
 
-		public void HandleEntityUpdate(uint entityId, byte[] updateData)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)
         {
 			EntityManager.HandleEntityUpdate(entityId, updateData);
 		}
@@ -183,17 +183,17 @@ namespace Impunity.Connection
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
-		public void CreateChannel(int entityTypeId, string channelName, byte[] propBytes, ImpunityCallback<uint> onComplete)
+		public void CreateChannel(int entityTypeId, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
         {
 			DoAction(new CreateChannelAction(entityTypeId, channelName, propBytes, onComplete));
         }
 
-		public void CreateObject(int entityTypeId, uint channelId, byte[] propBytes, ImpunityCallback<uint> onComplete)
+		public void CreateObject(int entityTypeId, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
 		{
 			DoAction(new CreateObjectAction(entityTypeId, channelId, propBytes, onComplete));
 		}
 
-		public void UpdateEntity(uint entityId, string key, byte[] updateData, ImpunityCallback<bool> onComplete)
+		public void UpdateEntity(uint entityId, string key, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)
 		{
 			DoAction(new UpdateEntityAction(entityId, key, updateData, onComplete));
 		}

@@ -188,9 +188,9 @@ namespace Impunity.GameState
 			return LockedWith == null || LockedWith == key;
 		}
 
-		public virtual void UpdateProps(BinaryReader propReader, byte[] propData)
+		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
 		{
-			if (propData == null || propData.Length == 0)
+			if (propData == null || propData.Count == 0)
 			{
 				return;
 			}
@@ -323,7 +323,7 @@ namespace Impunity.GameState
 			Members.Remove(obj.Id);
 		}
 
-		public override void UpdateProps(BinaryReader propReader, byte[] propData)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
 		{
 			base.UpdateProps(propReader, propData);
 
@@ -404,7 +404,7 @@ namespace Impunity.GameState
 			return message;
 		}
 
-		public override void UpdateProps(BinaryReader propReader, byte[] propData)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
 		{
 			base.UpdateProps(propReader, propData);
 
@@ -560,9 +560,9 @@ namespace Impunity.GameState
 			return typeInfo;
 		}
 
-		private void UpdateEntityProps(GameStateEntity entity, byte[] propBytes)
+		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes)
 		{
-			if (propBytes == null || propBytes.Length == 0)
+			if (propBytes == null || propBytes.Count == 0)
 			{
 				return;
 			}
@@ -578,7 +578,7 @@ namespace Impunity.GameState
 		// ----- Public API below
 
 
-		public uint CreateChannel(GameStateReplicant origin, int typeId, string name, byte[] propBytes)
+		public uint CreateChannel(GameStateReplicant origin, int typeId, string name, ArraySegment<byte> propBytes)
 		{
 			if (name == null)
 			{
@@ -621,7 +621,7 @@ namespace Impunity.GameState
 			return channel.Id;
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, uint channelId, byte[] propBytes)
+		public uint CreateObject(GameStateReplicant origin, int typeId, uint channelId, ArraySegment<byte> propBytes)
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
@@ -641,7 +641,7 @@ namespace Impunity.GameState
 			return dobj.Id;
 		}
 
-		public bool UpdateEntity(uint entityId, string key, byte[] propData)
+		public bool UpdateEntity(uint entityId, string key, ArraySegment<byte> propData)
 		{
 			GameStateEntity entity = AllEntities[entityId];
 			if (entity == null)

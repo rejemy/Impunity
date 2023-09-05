@@ -79,7 +79,7 @@ namespace Impunity.GameState
 		public int ChannelType;
 
 		[BsonField("pb")]
-		public byte[] PropBytes;
+		public ArraySegment<byte> PropBytes;
 
 		[BsonField("obs")]
 		public ObjectCreateMessageAction[] ObjectsInChannel;
@@ -109,7 +109,7 @@ namespace Impunity.GameState
 		public int ObjectType;
 
 		[BsonField("pb")]
-		public byte[] PropBytes;
+		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
@@ -126,7 +126,7 @@ namespace Impunity.GameState
 		public uint EntityId;
 
 		[BsonField("ub")]
-		public byte[] UpdateBytes;
+		public ArraySegment<byte> UpdateBytes;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE; }
 
