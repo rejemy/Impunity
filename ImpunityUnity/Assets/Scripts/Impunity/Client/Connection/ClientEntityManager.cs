@@ -64,8 +64,8 @@ namespace Impunity.Connection
 
 		public void ReadChangesFrom(BinaryReader r)
 		{
-			CurrentValue.ReadFrom(r);
-			NewValue = CurrentValue;
+			NewValue.ReadFrom(r);
+			CurrentValue = NewValue;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => CurrentValue.ValueType; }
