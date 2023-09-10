@@ -188,7 +188,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.EnsureFormat(Format);
+			game.UpdateFormat(Format);
 		}
 	}
 
@@ -407,6 +407,9 @@ namespace Impunity.GameState
 		[BsonField("t")]
 		public int EntityTypeId;
 
+		[BsonField("if")]
+		public byte InstanceFlags;
+
 		[BsonField("n")]
 		public string Name;
 
@@ -417,9 +420,10 @@ namespace Impunity.GameState
 
 		public CreateChannelAction() { }
 
-		public CreateChannelAction(int entityTypeId, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
+		public CreateChannelAction(int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
+			InstanceFlags = instanceFlags;
 			Name = channelName;
 			PropBytes = propBytes;
 			OnCompleteCallback = onComplete;
@@ -427,7 +431,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, Name, PropBytes);
+			Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, Name, PropBytes);
 		}
 	}
 
@@ -435,6 +439,9 @@ namespace Impunity.GameState
 	{
 		[BsonField("t")]
 		public int EntityTypeId;
+
+		[BsonField("if")]
+		public byte InstanceFlags;
 
 		[BsonField("c")]
 		public uint ChannelId;
@@ -446,9 +453,10 @@ namespace Impunity.GameState
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
+		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
+			InstanceFlags = instanceFlags;
 			ChannelId = channelId;
 			PropBytes = propBytes;
 			OnCompleteCallback = onComplete;
@@ -456,7 +464,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, ChannelId, PropBytes);
+			Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes);
 		}
 	}
 
@@ -485,7 +493,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.UpdateEntity(EntityId, Key, UpdateBytes);
+			Result = game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, Key, UpdateBytes);
 		}
 	}
 

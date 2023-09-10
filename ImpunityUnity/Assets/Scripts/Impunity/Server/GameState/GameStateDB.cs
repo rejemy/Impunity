@@ -45,7 +45,7 @@ namespace Impunity.GameState
 
 		}
 
-		public static GameStateDB Open(string path, string password = null)
+		public static GameStateDB Open(string path, ImpunityOptions options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -57,12 +57,12 @@ namespace Impunity.GameState
 
 			ImpunityLogger.LogInformation("Opening game database at " + game.DBFilename);
 
-			game.OpenDatabase(password);
+			game.OpenDatabase(options);
 
 			return game;
 		}
 
-		public static GameStateDB Create(string path, BsonDocument summary, string password = null)
+		public static GameStateDB Create(string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -76,12 +76,14 @@ namespace Impunity.GameState
 
 			Directory.CreateDirectory(path);
 
-			game.OpenDatabase(password);
+			game.OpenDatabase(options);
+
+			game.SetGameSummary(summary);
 
 			return game;
 		}
 
-		private void OpenDatabase(string password)
+		private void OpenDatabase(ImpunityOptions options)
 		{
 			if (GameDB != null)
 				return;
@@ -90,7 +92,7 @@ namespace Impunity.GameState
 				new ConnectionString
 				{
 					Filename = DBFilename,
-					Password = password,
+					Password = options?.DBPassword,
 					Flush = true
 				},
 				new BsonMapper(),
@@ -172,7 +174,7 @@ namespace Impunity.GameState
 		}
 
 
-		public void EnsureFormat(GameStateFormatData format)
+		public void SetFormat(GameStateFormatData format)
 		{
 			if (format.Collections == null || format.Collections.Length < 1)
 			{

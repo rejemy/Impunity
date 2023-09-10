@@ -183,14 +183,14 @@ namespace Impunity.Connection
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
-		public void CreateChannel(int entityTypeId, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
+		public void CreateChannel(int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
         {
-			DoAction(new CreateChannelAction(entityTypeId, channelName, propBytes, onComplete));
+			DoAction(new CreateChannelAction(entityTypeId, instanceFlags, channelName, propBytes, onComplete));
         }
 
-		public void CreateObject(int entityTypeId, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, channelId, propBytes, onComplete));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, onComplete));
 		}
 
 		public void UpdateEntity(uint entityId, string key, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)

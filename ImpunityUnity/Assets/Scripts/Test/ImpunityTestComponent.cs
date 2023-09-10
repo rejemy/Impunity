@@ -11,6 +11,8 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
+using Dreamwing.Cons;
+
 using Impunity;
 using Impunity.GameState;
 using Impunity.Connection;
@@ -40,7 +42,9 @@ public partial class TestPlayer : DistributedEntityBase
 	enum DistributedPropIds
     {
 		TESTBOOL = 1,
-		DIRECTION = 2
+		DIRECTION = 2,
+		FLAGS = 3,
+		QUESTS = 4
 	}
 
 	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
@@ -60,6 +64,22 @@ public partial class TestPlayer : DistributedEntityBase
 	{
 		ImpunityLogger.LogInformation("Got direction change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	[Distributed((int)DistributedPropIds.FLAGS, OnChanged = "OnFlagsChanged")]
+	private DistributedIntDictionary<DString> Flags;
+
+	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
+	{
+		ImpunityLogger.LogInformation("Got flags change on TestPlayer, key " + key + " from " + oldFlag + " to " + newFlag);
+	}
+
+	[Distributed((int)DistributedPropIds.QUESTS, OnChanged = "OnQuestsChanged")]
+	private DistributedStringDictionary<DString> Quests;
+
+	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
+	{
+		ImpunityLogger.LogInformation("Got quests change on TestPlayer, key " + key + " from " + oldQuest + " to " + newQuest);
 	}
 
 	public override void OnEventTriggered(int eventType, BsonValue eventData)
@@ -82,7 +102,9 @@ public partial class TestZone : DistributedChannelBase
 	enum DistributedPropIds
 	{
 		STATUS = 1,
-		SCALAR = 2
+		SCALAR = 2,
+		GRID = 3,
+		CHAT = 4
 	}
 
 	[Distributed((int)DistributedPropIds.STATUS)]
@@ -91,7 +113,24 @@ public partial class TestZone : DistributedChannelBase
 
 	[Distributed((int)DistributedPropIds.SCALAR)]
 	private DistributedValue<DFloat> Scalar;
-	
+
+	[Distributed((int)DistributedPropIds.GRID, OnChanged = "OnGridChanged")]
+	private DistributedArray<DInt32> Grid;
+
+	private void OnGridChanged(int index, int oldValue, int newValue)
+	{
+		ImpunityLogger.LogInformation("Got grid change on TestZone, index " + index + " from " + oldValue + " to " + newValue);
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged")]
+	private DistributedQueue<DString> Chat;
+
+	private void OnChatChanged(string newValue)
+	{
+		ImpunityLogger.LogInformation("Got chat change on TestZone: " + newValue);
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
 }
 
 public class ImpunityTestComponent : MonoBehaviour
@@ -118,6 +157,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	void Start()
 	{
+		Cons.Init();
+		Cons.Open();
 
 		ImpunityUnityLogger.Setup(ImpunityLogLevel.INFO);
 
@@ -546,8 +587,10 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		c1channel.SetScalar(2.0f);
 		c1channel.SetStatus("New status");
+		c1channel.InitGrid(100);
+		c1channel.InitChat(100);
 
-		if(!await WaitForCount("Didn't get distributed status"))
+		if (!await WaitForCount("Didn't get distributed status"))
 		{
 			return;
 		}
@@ -579,11 +622,8 @@ public class ImpunityTestComponent : MonoBehaviour
 		WaitingForCount = 2;
 		c1player1.Delete("Deleted buddy", null);
 
-		await Task.Delay(100);
-
-		if (WaitingForCount != 0)
+		if (!await WaitForCount("Didn't get delete callbacks"))
 		{
-			ImpunityLogger.LogError("Didn't get delete callbacks");
 			return;
 		}
 
@@ -602,6 +642,18 @@ public class ImpunityTestComponent : MonoBehaviour
 		await c2player1.UnlockAsync("xyz");
 		ImpunityLogger.LogInformation("Completed locking");
 
+
+		ImpunityLogger.LogInformation("Distributed array tests:");
+
+		WaitingForCount = 2;
+		c1channel.SetGrid(10, 32);
+
+		if (!await WaitForCount("Didn't get array callbacks"))
+		{
+			return;
+		}
+
+		ImpunityLogger.LogInformation("Distributed array done");
 
 		ImpunityLogger.LogInformation("Unsubscribing both connections");
 
@@ -661,10 +713,12 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		if(TestsDone)
         {
+			
 			ImpunityLogger.LogInformation("Done with tests");
 
 			Cleanup();
 
+			TestsDone = false;
 			Quit();
 		}
 	}

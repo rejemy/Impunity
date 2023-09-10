@@ -144,17 +144,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, string channelName, ArraySegment<byte> propBytes)
+		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateChannel(entityTypeId, channelName, propBytes, t.OnComplete);
+			connection.CreateChannel(entityTypeId, instanceFlags, channelName, propBytes, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, uint channelId, ArraySegment<byte> propBytes)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, channelId, propBytes, t.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, t.OnComplete);
 			return t.Task;
 		}
 

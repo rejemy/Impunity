@@ -11,6 +11,13 @@ using System.IO;
 namespace Impunity.Networking
 {
 
+	public interface INetworkable
+	{
+		void WriteTo(BinaryWriter w);
+		void ReadFrom(BinaryReader r);
+	}
+
+
 	public static class ImpunityMessageFlags
 	{
 		public const ushort NO_REPLY = 1;
@@ -33,20 +40,36 @@ namespace Impunity.Networking
 
 	public class TemporaryBuffer : IDisposable
     {
-		public byte[] Bytes;
-		public int Length;
+		public readonly bool IsSmall;
+		public readonly byte[] Bytes;
+		public readonly MemoryStream Stream;
+		public readonly BinaryWriter Writer;
+		public readonly BinaryReader Reader;
+
 		internal TemporaryBuffer NextBuffer;
 
-		public TemporaryBuffer()
+		public TemporaryBuffer(bool small)
         {
-			Bytes = new byte[ImpunityConstants.MaxMessageSize];
-			Length = 0;
+			IsSmall = small;
+			if(IsSmall)
+			{
+				Bytes = new byte[ImpunityConstants.MinMessageSize];
+			}
+			else
+			{
+				Bytes = new byte[ImpunityConstants.MaxMessageSize];
+			}
+			
+			Stream = new MemoryStream(Bytes);
+			Writer = new BinaryWriter(Stream);
+			Reader = new BinaryReader(Stream);
+
 			NextBuffer = null;
 		}
 
 		public void Dispose()
         {
-			ImpunityNetworkingUtil.ReturnTemporaryBuffer(this);
+			ImpunityNetworkingUtil.ReturnBuffer(this);
 		}
 	}
 
@@ -55,25 +78,28 @@ namespace Impunity.Networking
 		private static BsonMapper Mapper = null;
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
 
-		private static TemporaryBuffer BufferPool;
-		private static object BufferLock = new object();
+		private static TemporaryBuffer SmallBufferPool;
+		private static object SmallBufferLock = new object();
 
-		public static TemporaryBuffer GetTemporaryBuffer()
+		private static TemporaryBuffer LargeBufferPool;
+		private static object LargeBufferLock = new object();
+
+		public static TemporaryBuffer GetSmallBuffer()
         {
 			TemporaryBuffer buff = null;
 
-			lock (BufferLock)
+			lock (SmallBufferLock)
             {
-				if (BufferPool != null)
+				if (SmallBufferPool != null)
                 {
-					buff = BufferPool;
-					BufferPool = buff.NextBuffer;
+					buff = SmallBufferPool;
+					SmallBufferPool = buff.NextBuffer;
 				}
             }
 
 			if (buff == null)
             {
-				buff = new TemporaryBuffer();
+				buff = new TemporaryBuffer(true);
 			}
 			else
             {
@@ -83,15 +109,52 @@ namespace Impunity.Networking
 			return buff;
 		}
 
-		public static void ReturnTemporaryBuffer(TemporaryBuffer b)
+		public static TemporaryBuffer GetLargeBuffer()
 		{
-			b.Length = 0;
+			TemporaryBuffer buff = null;
 
-			lock (BufferLock)
+			lock (LargeBufferLock)
 			{
-				b.NextBuffer = BufferPool;
-				BufferPool = b;
+				if (LargeBufferPool != null)
+				{
+					buff = LargeBufferPool;
+					LargeBufferPool = buff.NextBuffer;
+				}
 			}
+
+			if (buff == null)
+			{
+				buff = new TemporaryBuffer(false);
+			}
+			else
+			{
+				buff.NextBuffer = null;
+			}
+
+			return buff;
+		}
+
+		public static void ReturnBuffer(TemporaryBuffer b)
+		{
+			b.Stream.Position = 0;
+
+			if(b.IsSmall)
+			{
+				lock (SmallBufferLock)
+				{
+					b.NextBuffer = SmallBufferPool;
+					SmallBufferPool = b;
+				}
+			}
+			else
+			{
+				lock (LargeBufferLock)
+				{
+					b.NextBuffer = LargeBufferPool;
+					LargeBufferPool = b;
+				}
+			}
+			
 		}
 
 		public static BsonMapper GetBsonMapper()

@@ -109,14 +109,14 @@ namespace Impunity.GameState
 			WorkerThread.Start();
 		}
 
-		public static GameStateServer Open(string path, string password = null)
+		public static GameStateServer Open(string path, ImpunityOptions options = null)
 		{
-			return new GameStateServer(GameStateDB.Open(path, password));
+			return new GameStateServer(GameStateDB.Open(path, options));
 		}
 
-		public static GameStateServer Create(string path, BsonDocument summary, string password = null)
+		public static GameStateServer Create(string path, BsonDocument summary, ImpunityOptions options = null)
 		{
-			return new GameStateServer(GameStateDB.Create(path, summary, password));
+			return new GameStateServer(GameStateDB.Create(path, summary, options));
 		}
 
 		// Called by connection threads
@@ -131,7 +131,7 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
-		public void EnsureFormat(GameStateFormatData format)
+		public void UpdateFormat(GameStateFormatData format)
 		{
 			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
 			{
@@ -143,8 +143,14 @@ namespace Impunity.GameState
 				throw new Exception("Can't set savegame to earlier version");
 			}
 
-			DB.EnsureFormat(format);
-			Live.EnsureFormat(format);
+			if (Metadata.Version > 0 && (format.Version > Metadata.Version || format.DataChecksum != Metadata.DataFormatChecksum))
+			{
+				throw new Exception("Upgrading game data to new format not yet supported");
+			}
+
+
+			DB.SetFormat(format);
+			Live.SetFormat(format);
 
 			Metadata.Version = format.Version;
 			Metadata.DataFormatChecksum = format.DataChecksum;

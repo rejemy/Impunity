@@ -5,7 +5,6 @@ using System.Reflection;
 
 using UltraLiteDB;
 
-using Impunity.GameState;
 
 namespace Impunity.Connection
 {
@@ -26,6 +25,7 @@ namespace Impunity.Connection
 	{
 		internal int FieldId;
 		public string OnChanged { get; set; }
+		public string OnReplaced { get; set; }
 
 		public Distributed(int fieldId)
 		{
@@ -33,50 +33,13 @@ namespace Impunity.Connection
 		}
 	}
 
-	public interface IDistributedField
-	{
-		GameStateEntityPropertyValueType ValueType { get; }
-
-		void WriteChangesTo(BinaryWriter w);
-		void ReadChangesFrom(BinaryReader r);
-	}
-
-	public struct DistributedValue<T> : IDistributedField where T : struct, IDistributableValueType
-	{
-		T CurrentValue;
-		T NewValue;
-
-		public T Get()
-        {
-			return CurrentValue;
-        }
-
-		public bool Set(T newValue)
-		{
-			NewValue = newValue;
-			return !NewValue.Equals(CurrentValue);
-		}
-
-		public void WriteChangesTo(BinaryWriter w)
-		{
-			NewValue.WriteTo(w);
-		}
-
-		public void ReadChangesFrom(BinaryReader r)
-		{
-			NewValue.ReadFrom(r);
-			CurrentValue = NewValue;
-		}
-
-		public GameStateEntityPropertyValueType ValueType { get => CurrentValue.ValueType; }
-
-		public static implicit operator T(DistributedValue<T> d) => d.CurrentValue;
-	}
 
 	public interface IDistributedEntity
 	{
 		uint DistributedEntityId { get; set; }
 		int DistributedEntityType { get; set; }
+		bool IsClientAuthoritative { get; set; }
+
 		ClientEntityManager Manager { get; set; }
 		ulong DirtyBits { get; }
 
@@ -108,6 +71,7 @@ namespace Impunity.Connection
 	{
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
+		public bool IsClientAuthoritative { get; set; }
 
 		public ClientEntityManager Manager { get; set; }
 		public IDistributedChannel Channel { get; set; }
@@ -190,7 +154,7 @@ namespace Impunity.Connection
 	{
 		public int FieldId;
 		public string FieldName;
-		//public FieldInfo FieldAccessor;
+		public GameStateEntityFieldType FieldType;
 		public GameStateEntityPropertyValueType FieldValueType;
 		public MethodInfo WriteMethod;
 		public MethodInfo UpdateMethod;
@@ -318,7 +282,13 @@ namespace Impunity.Connection
 			channel.DistributedEntityType = entityTypeId;
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel);
 
-			Connection.CreateChannel(entityTypeId, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
+			byte instaceFlags = 0;
+			if (channel.IsClientAuthoritative)
+			{
+				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+			}
+
+			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
 			{
 				if (err != null)
                 {
@@ -358,7 +328,13 @@ namespace Impunity.Connection
 			distObj.DistributedEntityType = entityTypeId;
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj);
 
-			Connection.CreateObject(entityTypeId, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
+			byte instaceFlags = 0;
+			if (distObj.IsClientAuthoritative)
+			{
+				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+			}
+
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -494,6 +470,7 @@ namespace Impunity.Connection
 				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo();
 				dfield.FieldId = fieldAttr.FieldId;
 				dfield.FieldName = fieldInfo.Name;
+				dfield.FieldType = tempFieldValue.FieldType;
 				dfield.FieldValueType = tempFieldValue.ValueType;
 
 				MethodInfo writeMethod = entityType.GetMethod("imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -528,6 +505,7 @@ namespace Impunity.Connection
 				GameStateEntityPropertyDef propDef = new GameStateEntityPropertyDef();
 				propDef.Index = dfield.FieldId;
 				propDef.Name = dfield.FieldName;
+				propDef.FieldType = (byte)dfield.FieldType;
 				propDef.PropValueType = (byte)dfield.FieldValueType;
 				entityData.Properties[p++] = propDef;
 			}

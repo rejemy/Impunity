@@ -108,6 +108,7 @@ namespace Impunity.GameState
 	{
 		public uint Id { get; internal set; }
 		public string Name { get; private set; } // Not all entities have names
+		private ImpunityInstanceFlags Flags;
 
 		protected GameStateLive LiveData;
 		public GameStateEntityType TypeInfo;
@@ -119,11 +120,12 @@ namespace Impunity.GameState
 
 		private IDistributableValueType[] Properties;
 
-		public GameStateEntity(GameStateLive liveData, GameStateEntityType typeInfo, string name = null)
+		public GameStateEntity(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string name = null)
 		{
 			LiveData = liveData;
 			TypeInfo = typeInfo;
 			Name = name;
+			Flags = (ImpunityInstanceFlags)instanceFlags;
 
 			if (typeInfo != null)
 			{
@@ -134,10 +136,34 @@ namespace Impunity.GameState
 
 					foreach (GameStateEntityPropertyDef propDef in typeInfo.Properties)
 					{
-						Properties[propDef.Index] = DistributedValueFactory.Make(propDef.PropValueType);
+						GameStateEntityFieldType fieldType = (GameStateEntityFieldType)propDef.FieldType;
+						switch(fieldType)
+						{
+							case GameStateEntityFieldType.Value:
+								Properties[propDef.Index] = DistributedValueFactory.MakeValue(propDef.PropValueType);
+								break;
+							case GameStateEntityFieldType.Array:
+								Properties[propDef.Index] = DistributedValueFactory.MakeArray(propDef.PropValueType);
+								break;
+							case GameStateEntityFieldType.Queue:
+								Properties[propDef.Index] = DistributedValueFactory.MakeQueue(propDef.PropValueType);
+								break;
+							case GameStateEntityFieldType.IntDictionary:
+								Properties[propDef.Index] = DistributedValueFactory.MakeIntDictionary(propDef.PropValueType);
+								break;
+							case GameStateEntityFieldType.StringDictionary:
+								Properties[propDef.Index] = DistributedValueFactory.MakeStringDictionary(propDef.PropValueType);
+								break;
+						}
+						
 					}
 				}
 			}
+		}
+
+		public bool IsClientAuthoritative()
+		{
+			return (Flags & ImpunityInstanceFlags.ClientAuthoritative) != 0;
 		}
 
 		public bool Lock(string key, GameStateReplicant lockedBy)
@@ -188,7 +214,7 @@ namespace Impunity.GameState
 			return LockedWith == null || LockedWith == key;
 		}
 
-		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
+		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy)
 		{
 			if (propData == null || propData.Count == 0)
 			{
@@ -266,7 +292,8 @@ namespace Impunity.GameState
 		Dictionary<uint, GameStateObject> Members;
 		Dictionary<string, GameStateReplicant> Listeners;
 
-		public GameStateChannel(GameStateLive liveData, GameStateEntityType typeInfo, string name) : base(liveData, typeInfo, name)
+		public GameStateChannel(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string name)
+			: base(liveData, typeInfo, instanceFlags, name)
 		{
 			Members = new Dictionary<uint, GameStateObject>();
 			Listeners = new Dictionary<string, GameStateReplicant>();
@@ -323,15 +350,17 @@ namespace Impunity.GameState
 			Members.Remove(obj.Id);
 		}
 
-		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy)
 		{
-			base.UpdateProps(propReader, propData);
+			base.UpdateProps(propReader, propData, updatedBy);
 
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
 
-			SendToListeners(updateMessage, null);
+			GameStateReplicant except = IsClientAuthoritative() ? updatedBy : null;
+
+			SendToListeners(updateMessage, except);
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData)
@@ -383,7 +412,8 @@ namespace Impunity.GameState
 	{
 		GameStateChannel Channel;
 
-		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo) : base(liveData, typeInfo, null)
+		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags)
+			: base(liveData, typeInfo, instanceFlags, null)
 		{
 			Channel = null;
 		}
@@ -404,9 +434,9 @@ namespace Impunity.GameState
 			return message;
 		}
 
-		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy)
 		{
-			base.UpdateProps(propReader, propData);
+			base.UpdateProps(propReader, propData, updatedBy);
 
 			if(Channel == null)
 			{
@@ -417,7 +447,9 @@ namespace Impunity.GameState
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
 
-			Channel.SendToListeners(updateMessage, null);
+			GameStateReplicant except = IsClientAuthoritative() ? updatedBy : null;
+
+			Channel.SendToListeners(updateMessage, except);
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData)
@@ -447,7 +479,7 @@ namespace Impunity.GameState
 	// Entity that exists only to be a lock, will be deleted when lock is released
 	public class GameStateNamedLock : GameStateEntity
 	{
-		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, name)
+		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, 0, name)
 		{
 			
 		}
@@ -486,7 +518,7 @@ namespace Impunity.GameState
 			return TempBufferWriter;
 		}
 
-		public void EnsureFormat(GameStateFormatData format)
+		public void SetFormat(GameStateFormatData format)
 		{
 			if (format.EntityTypes == null || format.EntityTypes.Length < 1)
 			{
@@ -560,7 +592,7 @@ namespace Impunity.GameState
 			return typeInfo;
 		}
 
-		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes)
+		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy)
 		{
 			if (propBytes == null || propBytes.Count == 0)
 			{
@@ -572,13 +604,13 @@ namespace Impunity.GameState
 			TempBufferReader.BaseStream.Write(propBytes);
 			TempBufferReader.BaseStream.Position = 0;
 
-			entity.UpdateProps(TempBufferReader, propBytes);
+			entity.UpdateProps(TempBufferReader, propBytes, updatedBy);
 		}
 
 		// ----- Public API below
 
 
-		public uint CreateChannel(GameStateReplicant origin, int typeId, string name, ArraySegment<byte> propBytes)
+		public uint CreateChannel(GameStateReplicant origin, int typeId, byte instanceFlags, string name, ArraySegment<byte> propBytes)
 		{
 			if (name == null)
 			{
@@ -611,17 +643,22 @@ namespace Impunity.GameState
 				typeInfo = GetEntityType(typeId);
 			}
 
-			GameStateChannel channel = new GameStateChannel(this, typeInfo, name);
-			UpdateEntityProps(channel, propBytes);
+			GameStateChannel channel = new GameStateChannel(this, typeInfo, instanceFlags, name);
+			UpdateEntityProps(channel, propBytes, origin);
 			RegisterEntity(channel);
 
 			channel.AddListener(origin, false);
 			origin.AddSubscribedChannel(channel);
 
+			if(channel.IsClientAuthoritative())
+			{
+				channel.Lock(origin.Id, origin);
+			}
+
 			return channel.Id;
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, uint channelId, ArraySegment<byte> propBytes)
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes)
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
@@ -631,9 +668,14 @@ namespace Impunity.GameState
 				throw new Exception("No channel with ID " + channelId);
 			}
 
-			GameStateObject dobj = new GameStateObject(this, typeInfo);
-			UpdateEntityProps(dobj, propBytes);
+			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags);
+			UpdateEntityProps(dobj, propBytes, origin);
 			RegisterEntity(dobj);
+
+			if (dobj.IsClientAuthoritative())
+			{
+				dobj.Lock(origin.Id, origin);
+			}
 
 			// Will notify all listeners (expect origin) of new object
 			channel.AddObject(dobj, origin);
@@ -641,7 +683,7 @@ namespace Impunity.GameState
 			return dobj.Id;
 		}
 
-		public bool UpdateEntity(uint entityId, string key, ArraySegment<byte> propData)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, string key, ArraySegment<byte> propData)
 		{
 			GameStateEntity entity = AllEntities[entityId];
 			if (entity == null)
@@ -655,7 +697,7 @@ namespace Impunity.GameState
 				return false;
 			}
 
-			UpdateEntityProps(entity, propData);
+			UpdateEntityProps(entity, propData, origin);
 
 			return true;
 		}

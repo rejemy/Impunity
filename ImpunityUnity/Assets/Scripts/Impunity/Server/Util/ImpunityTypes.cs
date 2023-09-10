@@ -12,6 +12,7 @@ namespace Impunity
 		public const string ImpunityVersion = "1";
 		public const ushort DefaultServerPort = 29654;
 		public const ushort DefaultClientPort = 29655;
+		public const int MinMessageSize = 4096;
 		public const int MaxMessageSize = 65000;
 		public const string ServerSearchPacketHeader = "IMP" + ImpunityVersion + "_SRCH:";
 		public const string ServerAnnouncePacketHeader = "IMP" + ImpunityVersion + "_ANNC:";
@@ -19,12 +20,21 @@ namespace Impunity
 
 	public class ImpunityOptions
 	{
+		public string DBPassword = null;
+		public bool RemoteUpgradeAllows = false;
 		public bool LANDiscoverable = false;
+		public string NetworkPassword = null;
 		public ushort ServerPort = ImpunityConstants.DefaultServerPort;
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
 		public string GameTypeCode = "IMP";
 	}
 
+	[Flags]
+	public enum ImpunityInstanceFlags : byte
+	{
+		None = 0,
+		ClientAuthoritative = 1
+	}
 
 	public enum ImpunityLogLevel
 	{
@@ -153,7 +163,7 @@ namespace Impunity
 
 	}
 
-	public enum GameStateEntityPropertyValueType
+	public enum GameStateEntityPropertyValueType : byte
 	{
 		Boolean = 1,
 
@@ -184,11 +194,20 @@ namespace Impunity
 		CustomNullable = 103
 	}
 
-	public enum GameStateEntityPropertyType
+	public enum GameStateEntityFieldType : byte
 	{
 		Value = 1,
 		Array = 2,
-		Queue = 3
+		Queue = 3,
+		IntDictionary = 4,
+		StringDictionary = 5
+	}
+
+	public enum DistributedCollectionUpdateType : byte
+	{
+		None = 0,
+		Set = 1,
+		Update = 2
 	}
 
 	public class GameStateEntityPropertyDef
@@ -199,8 +218,8 @@ namespace Impunity
 		[BsonField("n")]
 		public string Name;
 
-		[BsonField("pt")]
-		public byte PropType = (byte)GameStateEntityPropertyType.Value;
+		[BsonField("ft")]
+		public byte FieldType = (byte)GameStateEntityFieldType.Value;
 
 		[BsonField("v")]
 		public byte PropValueType;
