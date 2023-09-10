@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>ImpunityCodeGenerator</PackageId>
+    <Version>0.5</Version>
+    <AssemblyVersion>0.5</AssemblyVersion>
+    <FileVersion>0.5</FileVersion>
+    <VersionPrefix>0.5</VersionPrefix>
+    <Authors>Jeremy Friesen</Authors>
+    <Product>ImpunityNetworking</Product>
+    <Description>Impunity Networking Code Generator</Description>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0" />
+  </ItemGroup>
+
+</Project>

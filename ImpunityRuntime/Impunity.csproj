@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PackageId>ImpunityNetworking</PackageId>
+    <Version>0.9</Version>
+    <AssemblyVersion>0.9</AssemblyVersion>
+    <FileVersion>0.9</FileVersion>
+    <VersionPrefix>0.9</VersionPrefix>
+    <Authors>Jeremy Friesen</Authors>
+    <Product>ImpunityNetworking</Product>
+    <Description>Impunity Networking - Unity library enabling networked save state and multiplayer</Description>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <Title>ImpunityNetworking</Title>
+    <PackageTags>unity network tcp udp save multiplayer</PackageTags>
+    <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RootNamespace>Impunity</RootNamespace>
+    <AssemblyName>Impunity</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <DocumentationFile>bin/$(Configuration)/$(TargetFramework)/Impunity.xml</DocumentationFile>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>1591</NoWarn>
+  </PropertyGroup>
+
+<ItemGroup>
+  <Reference Include="UnityEngine">
+    <HintPath>lib/UnityEngine.dll</HintPath>
+  </Reference>
+  <Reference Include="UltraLiteDB">
+    <HintPath>../ImpunityUnity/Assets/Plugins/UltraLiteDB.dll</HintPath>
+  </Reference>
+</ItemGroup>
+
+
+<ItemGroup>
+   <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/**/*.cs" />
+</ItemGroup>
+
+</Project>
