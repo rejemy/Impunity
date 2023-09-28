@@ -13,6 +13,8 @@ namespace Impunity.Networking
 
 	public class ServerInfo
 	{
+		public int GameStateFormatVersion;
+		public string GameStateFormatChecksum;
 		public BsonDocument GameSummary;
 		public IPEndPoint Address;
 	}
@@ -146,7 +148,9 @@ namespace Impunity.Networking
 			}
 
 			ServerInfo info = new ServerInfo();
-			info.GameSummary = doc;
+			info.GameStateFormatVersion = doc["fv"];
+			info.GameStateFormatChecksum = doc["cs"];
+			info.GameSummary = doc["s"].AsDocument;
 			info.Address = from;
 
 			if (ServersFound.TryAdd(from, info))

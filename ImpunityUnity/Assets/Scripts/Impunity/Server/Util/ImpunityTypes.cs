@@ -86,6 +86,7 @@ namespace Impunity
 
 	internal interface IGameStateListener
     {
+		void OnGameStateFormatChanged(int version, string dataChecksum);
 		void OnGameSummaryChanged(BsonDocument summary);
     }
 

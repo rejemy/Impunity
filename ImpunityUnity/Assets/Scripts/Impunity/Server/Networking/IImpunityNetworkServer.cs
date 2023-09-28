@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Net;
 using System.Threading.Tasks;
 
-
+using UltraLiteDB;
 
 namespace Impunity.Networking
 {
@@ -37,7 +37,8 @@ namespace Impunity.Networking
 	{
 		ImpunityServerClientContextCallback OnClientConnected { get; set; }
 
-		void SetGameSummaryBytes(ArraySegment<byte> summaryBytes);
+		void SetGameSummary(BsonDocument summary);
+		void SetGameStateFormat(int version, string dataChecksum);
 
 		IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients();
 

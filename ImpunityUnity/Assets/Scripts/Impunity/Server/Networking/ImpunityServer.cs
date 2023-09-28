@@ -153,7 +153,12 @@ namespace Impunity.Networking
 			PendingWrite = new BlockingCollection<GameStateActionBase>();
 
 			OnGameSummaryChanged(GameState.GetGameSummary());
-
+			GameMetadata md = GameState.GetGameMetadata();
+			if (md != null)
+			{
+				OnGameStateFormatChanged(md.Version, md.DataFormatChecksum);
+			}
+			
 			NetworkServer.OnClientConnected = ClientConnected;
 
 			GameState.AddListener(this);
@@ -170,12 +175,12 @@ namespace Impunity.Networking
 
 		public void OnGameSummaryChanged(BsonDocument summary)
 		{
-			if (summary == null)
-			{
-				return;
-			}
-			byte[] summaryBytes = BsonWriter.Serialize(summary);
-			NetworkServer.SetGameSummaryBytes(new ArraySegment<byte>(summaryBytes));
+			NetworkServer.SetGameSummary(summary);
+		}
+
+		public void OnGameStateFormatChanged(int version, string dataChecksum)
+		{
+			NetworkServer.SetGameStateFormat(version, dataChecksum);
 		}
 
 		public void Start()

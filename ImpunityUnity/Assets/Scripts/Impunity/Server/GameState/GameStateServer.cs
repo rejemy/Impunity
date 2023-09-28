@@ -156,6 +156,23 @@ namespace Impunity.GameState
 			Metadata.DataFormatChecksum = format.DataChecksum;
 			DB.SaveMetadata(Metadata);
 
+
+			foreach (IGameStateListener listener in Listeners.Values)
+			{
+				try
+				{
+					listener.OnGameStateFormatChanged(Metadata.Version, Metadata.DataFormatChecksum);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in OnGameStateFormatChanged handler");
+				}
+			}
+		}
+
+		public GameMetadata GetGameMetadata()
+		{
+			return Metadata;
 		}
 
 		public BsonDocument GetGameSummary()

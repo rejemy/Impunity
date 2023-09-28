@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 
+using UltraLiteDB;
 
 namespace Impunity.Networking
 {
@@ -180,6 +181,10 @@ namespace Impunity.Networking
 
 		bool Running;
 
+		int GameStateFormatVersion;
+		string GameStateFormatChecksum;
+		BsonDocument CurrGameSummary = null;
+
 		ArraySegment<byte> AnnouncePacket;
 		byte[] SearchPacket;
 
@@ -196,7 +201,7 @@ namespace Impunity.Networking
 			Options = options;
 
 			AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]);
-			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", null, 0);
+			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", null);
 
 			Running = true;
 
@@ -204,9 +209,28 @@ namespace Impunity.Networking
 
 		}
 
-		public void SetGameSummaryBytes(ArraySegment<byte> summary)
+		public void SetGameSummary(BsonDocument summary)
 		{
-			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", summary.Array, summary.Count);
+			CurrGameSummary = summary;
+			MakeAnnouncePacket();
+		}
+
+		public void SetGameStateFormat(int version, string dataChecksum)
+		{
+			GameStateFormatVersion = version;
+			GameStateFormatChecksum = dataChecksum;
+
+			MakeAnnouncePacket();
+		}
+
+		private void MakeAnnouncePacket()
+		{
+			BsonDocument body = new BsonDocument();
+			body["fv"] = GameStateFormatVersion;
+			body["cs"] = GameStateFormatChecksum;
+			body["s"] = CurrGameSummary;
+
+			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", body);
 		}
 
 		public IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients()
@@ -297,15 +321,6 @@ namespace Impunity.Networking
 				return;
 			}
 
-			/*
-			try
-			{
-				OnClientDisconnected?.Invoke(context);
-			}
-			catch (Exception e)
-			{
-				ImpunityLogger.LogError(e, "Exception in TCP client disconnected callback");
-			}*/
 		}
 
 		private void StartBroadcastListen()
@@ -338,7 +353,7 @@ namespace Impunity.Networking
 			{
 				ServerUdpSocket = new UdpClient(Options.ServerPort);
 				ServerUdpSocket.EnableBroadcast = true;
-				//ServerUdpSocket.AllowNatTraversal(true);
+				//ServerUdpSocket.AllowNatTraversal(true); // Breaks things, not sure why
 
 				ImpunityLogger.LogInformation("Server UDP Socket listener started");
 

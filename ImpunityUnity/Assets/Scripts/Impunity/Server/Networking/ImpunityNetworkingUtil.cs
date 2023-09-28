@@ -194,15 +194,16 @@ namespace Impunity.Networking
 		// UTF8encoded: "IMP{{ImpunityVersion}}_SRCH:{{GameTypeCode}}:{{BsonBody}}
 		//
 
-		public static ArraySegment<byte> MakeBroadcastPacket(byte[] destBuffer, string header, byte[] summaryBytes, int summaryBytesLength)
+		public static ArraySegment<byte> MakeBroadcastPacket(byte[] destBuffer, string header, BsonDocument body)
 		{
 			byte[] headerBytes = Encoding.UTF8.GetBytes(header);
 			Buffer.BlockCopy(headerBytes, 0, destBuffer, 0, headerBytes.Length);
-			if (summaryBytes != null)
+			int pos = headerBytes.Length;
+			if (body != null)
 			{
-				Buffer.BlockCopy(summaryBytes, 0, destBuffer, headerBytes.Length, summaryBytesLength);
+				pos = BsonWriter.SerializeTo(body, destBuffer, headerBytes.Length);
 			}
-			return new ArraySegment<byte>(destBuffer, 0, headerBytes.Length + summaryBytesLength);
+			return new ArraySegment<byte>(destBuffer, 0, pos);
 		}
 
 		// Binary message format:

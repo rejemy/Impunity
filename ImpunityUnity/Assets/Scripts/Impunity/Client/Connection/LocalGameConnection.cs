@@ -36,10 +36,15 @@ namespace Impunity.Connection
 		}
 
 
-		public void OnGameSummaryChanged(BsonDocument summary)
+		public void OnGameStateFormatChanged(int version, string dataChecksum)
         {
 
         }
+
+		public void OnGameSummaryChanged(BsonDocument summary)
+		{
+
+		}
 
 		public override void Dispose()
 		{
