@@ -306,5 +306,19 @@ namespace Impunity.Networking
 			return sb.ToString();
 		}
 
+		public static string HashPassword(string pass)
+		{
+			if (pass == null)
+			{
+				return null;
+			}
+
+			using (SHA256 mySHA256 = SHA256.Create())
+			{
+				byte[] hash = mySHA256.ComputeHash(UTF8Encoding.UTF8.GetBytes(pass));
+				return Convert.ToBase64String(hash);
+			}
+		}
+
 	}
 }

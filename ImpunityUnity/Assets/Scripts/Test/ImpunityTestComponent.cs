@@ -150,6 +150,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	bool FoundServer;
 	IPEndPoint ServerEndpoint;
+	string FoundGameId;
 
 	bool TestsDone = false;
 
@@ -223,7 +224,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		BsonDocument summary = new BsonDocument();
 		summary["name"] = "Test Game";
 
-		GameServer = GameStateServer.Create(GameStatePath, summary);
+		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary);
 	}
 
 	async Task SetupAsync()
@@ -237,7 +238,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		BsonDocument summary = new BsonDocument();
 		summary["name"] = "Test Game";
 
-		GameServer = GameStateServer.Create(GameStatePath, summary);
+		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary);
 	}
 
 	void Cleanup()
@@ -295,7 +296,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Finder.Dispose();
 		Finder = null;
 
-		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, CurrFormat, Options);
+		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(ServerEndpoint, FoundGameId, null, CurrFormat, Options);
 		RemoteGame.OnNetworkError = OnNetworkError;
 
 		yield return GenericConnectionTest(RemoteGame);
@@ -469,7 +470,7 @@ public class ImpunityTestComponent : MonoBehaviour
 			TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
 			TCPServer.Start();
 
-			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, CurrFormat, Options);
+			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, null, null, CurrFormat, Options);
 			RemoteGame.OnNetworkError = OnNetworkError;
 
 			await Task.Delay(20);
@@ -701,6 +702,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		FoundServer = true;
 		ServerEndpoint = serverInfo.Address;
+		FoundGameId = serverInfo.GameId;
 	}
 
 

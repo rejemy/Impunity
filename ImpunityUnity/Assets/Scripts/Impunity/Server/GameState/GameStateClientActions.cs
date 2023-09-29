@@ -11,9 +11,9 @@ namespace Impunity.GameState
 	{
 		COMPOUND = 1,
 
-		SET_SUMMARY = 100,
-		GET_SUMMARY = 101,
-		ENSURE_FORMAT = 102,
+		ESTABLISH_CONNECTION = 100,
+		SET_SUMMARY = 101,
+		GET_SUMMARY = 102,
 
 		INSERT_DOCUMENT = 200,
 		UPDATE_DOCUMENT = 201,
@@ -62,12 +62,12 @@ namespace Impunity.GameState
 				case ClientActionType.COMPOUND:
 					return typeof(CompoundAction);
 
+				case ClientActionType.ESTABLISH_CONNECTION:
+					return typeof(EstablishConnectionAction);
 				case ClientActionType.SET_SUMMARY:
 					return typeof(SetGameSummaryAction);
 				case ClientActionType.GET_SUMMARY:
 					return typeof(GetGameSummaryAction);
-				case ClientActionType.ENSURE_FORMAT:
-					return typeof(EnsureFormatAction);
 
 				case ClientActionType.INSERT_DOCUMENT:
 					return typeof(InsertDocumentAction);
@@ -133,6 +133,36 @@ namespace Impunity.GameState
 		}
 	}
 
+
+	public class EstablishConnectionAction : ClientActionResultlessBase
+	{
+		[BsonField("gid")]
+		public string GameId;
+
+		[BsonField("pw")]
+		public string PasswordHash;
+
+		[BsonField("f")]
+		public GameStateFormatData Format;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.ESTABLISH_CONNECTION; }
+
+		public EstablishConnectionAction() { }
+
+		public EstablishConnectionAction(string gameId, string passwordHash, GameStateFormatData format, ImpunityCallback onComplete = null)
+		{
+			GameId = gameId;
+			PasswordHash = passwordHash;
+			Format = format;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.UpdateFormat(Format);
+		}
+	}
+
 	public class SetGameSummaryAction : ClientActionResultlessBase
 	{
 		[BsonField("s")]
@@ -171,26 +201,6 @@ namespace Impunity.GameState
 		}
 	}
 
-	public class EnsureFormatAction : ClientActionResultlessBase
-	{
-		[BsonField("f")]
-		public GameStateFormatData Format;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.ENSURE_FORMAT; }
-
-		public EnsureFormatAction() { }
-
-		public EnsureFormatAction(GameStateFormatData format, ImpunityCallback onComplete = null)
-		{
-			Format = format;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			game.UpdateFormat(Format);
-		}
-	}
 
 	public class InsertDocumentAction : ClientActionResultBase<BsonValue>
 	{

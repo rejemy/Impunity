@@ -17,20 +17,30 @@ namespace Impunity.Connection
 
 		private BlockingCollection<GameStateActionBase> PendingSend;
 		private ConcurrentQueue<GameStateActionBase> AwaitingReceive;
-		
 
+		private string GameId;
+		private string GamePassword;
+		private ImpunityOptions Options;
 		private IImpunityClient NetworkClient;
 		private Thread NetworkWriterThread;
 		private bool Running;
 
 		private byte[] SendBuffer;
 
-		public RemoteGameConnection(IImpunityClient networkClient, GameStateFormat format, ClientEntityManager em) : base(format, em)
+		public RemoteGameConnection(IImpunityClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options, ClientEntityManager em) : base(format, em)
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
 			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
 
+			GameId = gameId;
+			GamePassword = gamePassword;
+
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+			Options = options;
 			NetworkClient = networkClient;
 			NetworkClient.OnNetworkError = OnNetworkErrorReceived;
 			NetworkClient.OnMessageRecieved = OnNetworkMessageReceived;
@@ -38,17 +48,20 @@ namespace Impunity.Connection
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 		}
 
-		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
+		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
 		{
-			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(serverEndpoint, options), format, em);
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
+			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(serverEndpoint, options), gameId, gamePassword, format, options, em);
 		}
 
 		public override void Connect(ImpunityCallback onComplete)
 		{
 			NetworkClient.Connect((ImpunityError err) =>
 			{
-				//NoOpAction connectAction = new NoOpAction(onComplete);
-
 				if (err != null)
 				{
 					NoOpAction connectAction = new NoOpAction(onComplete);
@@ -63,8 +76,7 @@ namespace Impunity.Connection
 				NetworkWriterThread.Name = "Network writer";
 				NetworkWriterThread.Start();
 
-				EnsureFormat(LocalFormat, onComplete);
-				//CompletedActions.Enqueue(connectAction);
+				EstablishConnection(GameId, GamePassword, LocalFormat, onComplete);
 			});
 		}
 

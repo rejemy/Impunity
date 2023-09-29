@@ -8,15 +8,6 @@ using UltraLiteDB;
 
 namespace Impunity.GameState
 {
-	public class GameMetadata
-	{
-		[BsonId]
-		public string Id;
-		[BsonField("Version")]
-		public int Version;
-		[BsonField("DataFormatChecksum")]
-		public string DataFormatChecksum;
-	}
 
 	class CollectionData
 	{

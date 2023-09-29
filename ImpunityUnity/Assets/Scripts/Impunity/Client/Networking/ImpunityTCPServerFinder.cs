@@ -13,10 +13,14 @@ namespace Impunity.Networking
 
 	public class ServerInfo
 	{
+		public IPEndPoint Address;
+		public string GameId;
+		public bool PasswordProtected;
+
 		public int GameStateFormatVersion;
 		public string GameStateFormatChecksum;
 		public BsonDocument GameSummary;
-		public IPEndPoint Address;
+		
 	}
 
 	public class ImpunityTCPServerFinder : IDisposable
@@ -148,10 +152,14 @@ namespace Impunity.Networking
 			}
 
 			ServerInfo info = new ServerInfo();
+			info.Address = from;
+			info.GameId = doc["gid"];
+			info.PasswordProtected = doc["p"];
+
 			info.GameStateFormatVersion = doc["fv"];
 			info.GameStateFormatChecksum = doc["cs"];
 			info.GameSummary = doc["s"].AsDocument;
-			info.Address = from;
+			
 
 			if (ServersFound.TryAdd(from, info))
 			{

@@ -32,16 +32,16 @@ namespace Impunity.Connection
 			State.AddListener(this);
 			State.ConnectionOpened(this);
 
-			EnsureFormat(LocalFormat, onComplete);
+			EstablishConnection(null, null, LocalFormat, onComplete);
 		}
 
 
-		public void OnGameStateFormatChanged(int version, string dataChecksum)
-        {
+		public void OnGameMetadataChanged(GameStateServer game)
+		{
 
         }
 
-		public void OnGameSummaryChanged(BsonDocument summary)
+		public void OnGameSummaryChanged(GameStateServer game)
 		{
 
 		}

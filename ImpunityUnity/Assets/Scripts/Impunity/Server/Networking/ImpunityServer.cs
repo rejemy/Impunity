@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,7 +16,9 @@ namespace Impunity.Networking
 	internal class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
 	{
 		IImpunityNetworkServerClientContext ClientContext;
-		ImpunityServer Server;
+		ImpunityServer NetworkServer;
+		GameStateServer GameServer;
+
 		byte[] SendBuffer;
 		Semaphore SendLock;
 
@@ -29,7 +32,7 @@ namespace Impunity.Networking
 
 		public ServerSideNetworkConnectionProxy(ImpunityServer server, IImpunityNetworkServerClientContext clientContext)
 		{
-			Server = server;
+			NetworkServer = server;
 			ClientContext = clientContext;
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			SendLock = new Semaphore(1, 1);
@@ -47,19 +50,50 @@ namespace Impunity.Networking
 
 			ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
 
+			if (GameServer == null && msg.MessageType != (ushort)ClientActionType.ESTABLISH_CONNECTION)
+			{
+				// Before a connection is established, only the "Establish Connection" action is allowed
+				ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " didn't establish connection before trying to do an action");
+				context.Disconnect();
+				return;
+			}
+
 			Type messageActionClassType = ClientActionFactory.GetActionClassType(msg.MessageType);
 
 			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
 			GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
-
 			action.Origin = this;
-
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
 
-			Server.GameState.QueueAction(action);
+			if (GameServer == null)
+			{
+				// Establish connection is only legal action here
+				EstablishConnectionAction establish = (EstablishConnectionAction)action;
+				GameServer = NetworkServer.GetGameStateServer(establish.GameId);
+				if (GameServer == null)
+				{
+					ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get invalid game id " + establish.GameId);
+					context.Disconnect();
+					return;
+				}
+
+				if (GameServer.GamePasswordHash != null)
+				{
+					if (GameServer.GamePasswordHash != establish.PasswordHash)
+					{
+						ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get into a game with an invalid password");
+						context.Disconnect();
+						return;
+					}
+				}
+
+				GameServer.ConnectionOpened(this);
+			}
+
+			GameServer.QueueAction(action);
 		}
 
-		// Called on writer thread
+		// Called on network writer thread
 		public void SendMessage(ushort messageType, bool guaranteed, BsonDocument results)
 		{
 			ArraySegment<byte> encodedMessage;
@@ -108,7 +142,7 @@ namespace Impunity.Networking
 			}
 
 			// Don't send on server thread, queue for send on network writer thread
-			Server.ActionCompleted(action);
+			NetworkServer.ActionCompleted(action);
 		}
 
 		// Called on server thread
@@ -116,7 +150,7 @@ namespace Impunity.Networking
 		{
 			// Don't send on server thread, queue for send on network writer thread
 			message.Origin = this;
-			Server.ActionCompleted(message);
+			NetworkServer.ActionCompleted(message);
 		}
 
 		// Called on socket thread
@@ -130,14 +164,16 @@ namespace Impunity.Networking
 		// Called on socket thread
 		private void ClientDisconnected(IImpunityNetworkServerClientContext client)
 		{
-			Server.GameState.ConnectionClosed(this);
+			GameServer?.ConnectionClosed(this);
 		}
 	}
 
 	public class ImpunityServer : IDisposable, IGameStateListener
 	{
-		public GameStateServer GameState { get; private set; }
 		IImpunityNetworkServer NetworkServer;
+		public ImpunityOptions Options { get; private set; }
+
+		Dictionary<string, GameStateServer> GameServers;
 
 		BlockingCollection<GameStateActionBase> PendingWrite;
 
@@ -146,42 +182,76 @@ namespace Impunity.Networking
 
 		public IPEndPoint TCPEndpoint { get; private set; }
 
-		public ImpunityServer(GameStateServer gameState, IImpunityNetworkServer networkServer)
+
+		public ImpunityServer(IEnumerable<GameStateServer> gameStates, IImpunityNetworkServer networkServer, ImpunityOptions options)
 		{
-			GameState = gameState;
+			GameServers = new Dictionary<string, GameStateServer>();
+
+			Options = options;
+
 			NetworkServer = networkServer;
+			NetworkServer.OnClientConnected = ClientConnected;
+			
 			PendingWrite = new BlockingCollection<GameStateActionBase>();
 
-			OnGameSummaryChanged(GameState.GetGameSummary());
-			GameMetadata md = GameState.GetGameMetadata();
-			if (md != null)
+			foreach(GameStateServer game in gameStates)
 			{
-				OnGameStateFormatChanged(md.Version, md.DataFormatChecksum);
+				GameServers.Add(game.GameId, game);
+
+				NetworkServer.AddGameServer(game);
+
+				game.AddListener(this);
 			}
 			
-			NetworkServer.OnClientConnected = ClientConnected;
-
-			GameState.AddListener(this);
-
 		}
 
 		public static ImpunityServer MakeTCPServer(GameStateServer gameState, ImpunityOptions options = null)
 		{
+			return MakeTCPServer(new GameStateServer[] { gameState }, options);
+		}
+
+		public static ImpunityServer MakeTCPServer(IEnumerable<GameStateServer> gameStates, ImpunityOptions options = null)
+		{
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
 			ImpunityTCPServer tcpserver = new ImpunityTCPServer(options);
-			ImpunityServer server = new ImpunityServer(gameState, tcpserver);
- 
+			ImpunityServer server = new ImpunityServer(gameStates, tcpserver, options);
+
 			return server;
 		}
 
-		public void OnGameSummaryChanged(BsonDocument summary)
+		public void OnGameMetadataChanged(GameStateServer game)
 		{
-			NetworkServer.SetGameSummary(summary);
+			GameMetadata md = game.GetGameMetadata();
+			if (md != null)
+			{
+				NetworkServer.SetGameStateFormat(game.GameId, md.Version, md.DataFormatChecksum);
+			}
 		}
 
-		public void OnGameStateFormatChanged(int version, string dataChecksum)
+		public void OnGameSummaryChanged(GameStateServer game)
 		{
-			NetworkServer.SetGameStateFormat(version, dataChecksum);
+			NetworkServer.SetGameSummary(game.GameId, game.GetGameSummary());
 		}
+
+		public GameStateServer GetGameStateServer(string gameId)
+		{
+			if (gameId == null && GameServers.Count == 1)
+			{
+				// if there's only a single game, return it
+				using (var enumerator = GameServers.Values.GetEnumerator())
+				{
+					enumerator.MoveNext();
+					return enumerator.Current;
+				}
+			}
+
+			return GameServers.GetValueOrDefault(gameId);
+		}
+
 
 		public void Start()
 		{
@@ -198,7 +268,7 @@ namespace Impunity.Networking
 		{
 			while (Running)
 			{
-				GameStateActionBase action = null;
+				GameStateActionBase action;
 
 				try
 				{
@@ -251,10 +321,8 @@ namespace Impunity.Networking
 		{
 			ServerSideNetworkConnectionProxy proxy = new ServerSideNetworkConnectionProxy(this, client);
 			client.ClientInfo = proxy;
-			GameState.ConnectionOpened(proxy);
 		}
 
-		
 
 		// called on game server thread
 		internal void ActionCompleted(GameStateActionBase action)
@@ -274,7 +342,11 @@ namespace Impunity.Networking
 			NetworkWriterThread?.Join();
 			NetworkWriterThread = null;
 
-			GameState.RemoveListener(this);
+			foreach(GameStateServer game in GameServers.Values)
+			{
+				game.RemoveListener(this);
+			}
+			GameServers.Clear();
 
 		}
 	}

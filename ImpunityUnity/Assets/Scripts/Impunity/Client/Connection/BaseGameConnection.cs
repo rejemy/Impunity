@@ -34,9 +34,9 @@ namespace Impunity.Connection
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 		}
 
-		protected void EnsureFormat(GameStateFormatData format, ImpunityCallback onComplete)
+		protected void EstablishConnection(string gameId, string password, GameStateFormatData format, ImpunityCallback onComplete)
 		{
-			DoAction(new EnsureFormatAction(format, onComplete));
+			DoAction(new EstablishConnectionAction(gameId, password, format, onComplete));
 		}
 
 

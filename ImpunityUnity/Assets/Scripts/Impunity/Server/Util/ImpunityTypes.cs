@@ -1,4 +1,5 @@
 using System;
+using Impunity.GameState;
 using Impunity.Networking;
 using UltraLiteDB;
 
@@ -21,9 +22,8 @@ namespace Impunity
 	public class ImpunityOptions
 	{
 		public string DBPassword = null;
-		public bool RemoteUpgradeAllows = false;
+		public bool RemoteUpgradeAllowed = false;
 		public bool LANDiscoverable = false;
-		public string NetworkPassword = null;
 		public ushort ServerPort = ImpunityConstants.DefaultServerPort;
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
 		public string GameTypeCode = "IMP";
@@ -45,6 +45,17 @@ namespace Impunity
 		ERROR = 5,
 		CRITICAL = 6
 	}
+
+	public class GameMetadata
+	{
+		[BsonId]
+		public string Id;
+		[BsonField("Version")]
+		public int Version;
+		[BsonField("DataFormatChecksum")]
+		public string DataFormatChecksum;
+	}
+
 
 	public class ImpunityError
 	{
@@ -86,8 +97,8 @@ namespace Impunity
 
 	internal interface IGameStateListener
     {
-		void OnGameStateFormatChanged(int version, string dataChecksum);
-		void OnGameSummaryChanged(BsonDocument summary);
+		void OnGameMetadataChanged(GameStateServer game);
+		void OnGameSummaryChanged(GameStateServer game);
     }
 
 	public class GameStateFormat

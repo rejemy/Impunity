@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Text;
 
 using UltraLiteDB;
+using Impunity.GameState;
 
 namespace Impunity.Networking
 {
@@ -167,6 +168,17 @@ namespace Impunity.Networking
 
 	}
 
+	class PerGameTCPServerData
+	{
+		public string GameId;
+		public int GameStateFormatVersion;
+		public string GameStateFormatChecksum;
+		public BsonDocument CurrGameSummary = null;
+		public bool PasswordProtected;
+
+		public ArraySegment<byte> AnnouncePacket;
+	}
+
 	public class ImpunityTCPServer : IImpunityNetworkServer
 	{
 		public ImpunityServerClientContextCallback OnClientConnected { get; set; }
@@ -180,15 +192,10 @@ namespace Impunity.Networking
 		UdpClient ServerUdpSocket;
 
 		bool Running;
-
-		int GameStateFormatVersion;
-		string GameStateFormatChecksum;
-		BsonDocument CurrGameSummary = null;
-
-		ArraySegment<byte> AnnouncePacket;
 		byte[] SearchPacket;
 
 		ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext> Clients;
+		Dictionary<string, PerGameTCPServerData> PerGameData;
 
 		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
 
@@ -200,37 +207,61 @@ namespace Impunity.Networking
 			}
 			Options = options;
 
-			AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]);
-			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", null);
 
-			Running = true;
-
+			PerGameData = new Dictionary<string, PerGameTCPServerData>();
 			Clients = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
 
+			Running = true;
 		}
 
-		public void SetGameSummary(BsonDocument summary)
+		public void AddGameServer(GameStateServer game)
 		{
-			CurrGameSummary = summary;
-			MakeAnnouncePacket();
+			PerGameTCPServerData tcpGameData = new PerGameTCPServerData();
+
+			tcpGameData.GameId = game.GameId;
+			tcpGameData.AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]);
+			tcpGameData.CurrGameSummary = game.GetGameSummary();
+			tcpGameData.PasswordProtected = game.GamePasswordHash != null;
+
+			GameMetadata md = game.GetGameMetadata();
+			if (md != null)
+			{
+				tcpGameData.GameStateFormatVersion = md.Version;
+				tcpGameData.GameStateFormatChecksum = md.DataFormatChecksum;
+			}
+
+			MakeAnnouncePacket(tcpGameData);
+
+			PerGameData.Add(game.GameId, tcpGameData);
 		}
 
-		public void SetGameStateFormat(int version, string dataChecksum)
+		public void SetGameSummary(string gameId, BsonDocument summary)
 		{
-			GameStateFormatVersion = version;
-			GameStateFormatChecksum = dataChecksum;
-
-			MakeAnnouncePacket();
+			PerGameTCPServerData tcpGameData = PerGameData[gameId];
+			tcpGameData.CurrGameSummary = summary;
+			MakeAnnouncePacket(tcpGameData);
 		}
 
-		private void MakeAnnouncePacket()
+		public void SetGameStateFormat(string gameId, int version, string dataChecksum)
+		{
+			PerGameTCPServerData tcpGameData = PerGameData[gameId];
+			tcpGameData.GameStateFormatVersion = version;
+			tcpGameData.GameStateFormatChecksum = dataChecksum;
+
+			MakeAnnouncePacket(tcpGameData);
+		}
+
+		private void MakeAnnouncePacket(PerGameTCPServerData tcpGameData)
 		{
 			BsonDocument body = new BsonDocument();
-			body["fv"] = GameStateFormatVersion;
-			body["cs"] = GameStateFormatChecksum;
-			body["s"] = CurrGameSummary;
+			body["gid"] = tcpGameData.GameId;
+			body["fv"] = tcpGameData.GameStateFormatVersion;
+			body["cs"] = tcpGameData.GameStateFormatChecksum;
+			body["s"] = tcpGameData.CurrGameSummary;
+			body["p"] = tcpGameData.PasswordProtected;
 
-			AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(AnnouncePacket.Array, ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", body);
+			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array,
+				ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", body);
 		}
 
 		public IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients()
@@ -403,7 +434,11 @@ namespace Impunity.Networking
 			ImpunityLogger.LogDebug("Sent server announce");
 			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Any, Options.ClientPort);
 
-			ServerUdpSocket.SendAsync(AnnouncePacket.Array, AnnouncePacket.Count, broadcastEp);
+			foreach(PerGameTCPServerData gameData in PerGameData.Values)
+			{
+				ServerUdpSocket.SendAsync(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
+			}
+			
 		}
 
 		public void Dispose()

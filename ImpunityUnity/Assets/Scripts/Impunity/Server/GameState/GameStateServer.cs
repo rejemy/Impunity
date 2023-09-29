@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
-
+using Impunity.Networking;
 using UltraLiteDB;
 
 
@@ -78,6 +78,10 @@ namespace Impunity.GameState
 
 	public class GameStateServer
 	{
+		public string GameId { get; private set; }
+		public string GamePasswordHash { get; private set; }
+		public ImpunityOptions Options { get; private set; }
+
 		public GameStateDB DB;
 		internal GameStateLive Live;
 
@@ -90,8 +94,11 @@ namespace Impunity.GameState
 
 		ConcurrentDictionary<int, IGameStateListener> Listeners;
 
-		private GameStateServer(GameStateDB gameDatabase)
+		private GameStateServer(string gameId, string gamePassword, GameStateDB gameDatabase, ImpunityOptions options)
 		{
+			GameId = gameId;
+			GamePasswordHash = ImpunityNetworkingUtil.HashPassword(gamePassword);
+			Options = options;
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
 			DB = gameDatabase;
@@ -109,14 +116,14 @@ namespace Impunity.GameState
 			WorkerThread.Start();
 		}
 
-		public static GameStateServer Open(string path, ImpunityOptions options = null)
+		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions options = null)
 		{
-			return new GameStateServer(GameStateDB.Open(path, options));
+			return new GameStateServer(gameId, gamePassword, GameStateDB.Open(path, options), options);
 		}
 
-		public static GameStateServer Create(string path, BsonDocument summary, ImpunityOptions options = null)
+		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
 		{
-			return new GameStateServer(GameStateDB.Create(path, summary, options));
+			return new GameStateServer(gameId, gamePassword, GameStateDB.Create(path, summary, options), options);
 		}
 
 		// Called by connection threads
@@ -161,7 +168,7 @@ namespace Impunity.GameState
 			{
 				try
 				{
-					listener.OnGameStateFormatChanged(Metadata.Version, Metadata.DataFormatChecksum);
+					listener.OnGameMetadataChanged(this);
 				}
 				catch (Exception e)
 				{
@@ -189,7 +196,7 @@ namespace Impunity.GameState
 			{
 				try
 				{
-					listener.OnGameSummaryChanged(summary);
+					listener.OnGameSummaryChanged(this);
 				}
 				catch (Exception e)
 				{
