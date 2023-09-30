@@ -19,6 +19,7 @@ namespace Impunity.Networking
 		public ImpunityServerErrorCallback OnNetworkError { get; set; }
 		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 		public object ClientInfo { get; set; }
+		private const int ConnectEstablishTimeout = 1000;
 
 		ImpunityTCPServer Server;
 		TcpClient Client;
@@ -50,10 +51,23 @@ namespace Impunity.Networking
 			return RemoteEndpoint.ToString();
 		}
 
+		private static async Task<int> ReadTimeout(int delayMS)
+		{
+			await Task.Delay(delayMS);
+			return -1;
+		}
+
 		public void Listen()
 		{
-			ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize)
-				.ContinueWith(OnDataRead);
+			Task.WhenAny(ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize),
+				ReadTimeout(ConnectEstablishTimeout))
+				.ContinueWith(OnFirstDataRead);
+		}
+
+		private void OnFirstDataRead(Task<Task<int>> completedTask)
+		{
+			OnDataRead(completedTask.Result);
+			completedTask.Dispose();
 		}
 
 		// On socket thread
@@ -79,8 +93,12 @@ namespace Impunity.Networking
 			int bytesRead = readTask.Result;
 			readTask.Dispose();
 
-			if (bytesRead == 0 || !Client.Connected)
+			if (bytesRead <= 0 || !Client.Connected)
 			{
+				if (bytesRead == -1)
+				{
+					ImpunityLogger.LogWarning("Closed connection because it took too long to send establish");
+				}
 				Disconnect();
 
 				return;
@@ -277,13 +295,10 @@ namespace Impunity.Networking
 
 			StartTcpListener();
 
-			if (Options.LANDiscoverable)
-			{
-				SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
+			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
 
-				StartBroadcastListen();
-			}
-
+			StartUDPListen();
+			
 			return new IPEndPoint(IPAddress.Loopback, Options.ServerPort);
 		}
 
@@ -354,7 +369,7 @@ namespace Impunity.Networking
 
 		}
 
-		private void StartBroadcastListen()
+		private void StartUDPListen()
 		{
 			UDPListenerThread = new Thread(new ThreadStart(UDPListener));
 			UDPListenerThread.IsBackground = true;
@@ -362,7 +377,7 @@ namespace Impunity.Networking
 			UDPListenerThread.Start();
 		}
 
-		private void StopBroadcastListen()
+		private void StopUDPListen()
 		{
 			if (ServerUdpSocket == null)
 			{
@@ -431,6 +446,11 @@ namespace Impunity.Networking
 
 		private void SendServerAnnounce()
 		{
+			if (!Options.LANDiscoverable)
+			{
+				return;
+			}
+
 			ImpunityLogger.LogDebug("Sent server announce");
 			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Any, Options.ClientPort);
 
@@ -445,7 +465,7 @@ namespace Impunity.Networking
 		{
 			Running = false;
 
-			StopBroadcastListen();
+			StopUDPListen();
 
 			foreach (ImpunityTCPServerClientContext client in Clients.Values)
 			{
