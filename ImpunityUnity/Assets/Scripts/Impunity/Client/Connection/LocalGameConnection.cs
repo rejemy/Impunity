@@ -65,6 +65,8 @@ namespace Impunity.Connection
 			CompletedActions.Enqueue(action);
 		}
 
+		public bool IsRemote { get { return false; } }
+
 		public bool SupportsUnguaranteed() { return false; }
 
 

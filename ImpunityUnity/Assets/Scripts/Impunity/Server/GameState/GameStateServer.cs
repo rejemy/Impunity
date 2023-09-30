@@ -11,6 +11,7 @@ namespace Impunity.GameState
 	public interface IServerSideConnectionProxy
     {
 		string ConnectionId { get; }
+		bool IsRemote { get; }
 		GameStateReplicant ConnectionReplicant { get; set; }
 
 		void ReportActionResult(GameStateActionBase action);
@@ -96,6 +97,11 @@ namespace Impunity.GameState
 
 		private GameStateServer(string gameId, string gamePassword, GameStateDB gameDatabase, ImpunityOptions options)
 		{
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
 			GameId = gameId;
 			GamePasswordHash = ImpunityNetworkingUtil.HashPassword(gamePassword);
 			Options = options;
@@ -138,7 +144,7 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
-		public void UpdateFormat(GameStateFormatData format)
+		public void UpdateFormat(GameStateFormatData format, bool isRemote)
 		{
 			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
 			{
@@ -150,9 +156,17 @@ namespace Impunity.GameState
 				throw new Exception("Can't set savegame to earlier version");
 			}
 
-			if (Metadata.Version > 0 && (format.Version > Metadata.Version || format.DataChecksum != Metadata.DataFormatChecksum))
+			if (format.Version > Metadata.Version || format.DataChecksum != Metadata.DataFormatChecksum)
 			{
-				throw new Exception("Upgrading game data to new format not yet supported");
+				if (isRemote && !Options.RemoteUpgradeAllowed)
+				{
+					throw new Exception("Remote client cannot change game format version");
+				}
+
+				if (Metadata.Version > 0)
+				{
+					throw new Exception("Upgrading game data to new format not yet supported");
+				}
 			}
 
 

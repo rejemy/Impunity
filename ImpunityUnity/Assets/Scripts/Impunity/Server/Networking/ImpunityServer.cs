@@ -25,6 +25,8 @@ namespace Impunity.Networking
 		public string ConnectionId { get { return "NetworkConnection_" + ClientContext.GetAddress(); } }
 		public GameStateReplicant ConnectionReplicant { get; set; }
 
+		public bool IsRemote { get { return true; } }
+
 		public bool SupportsUnguaranteed()
 		{
 			return ClientContext.SupportsUnguaranteed();

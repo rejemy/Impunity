@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using UltraLiteDB;
 
 using Impunity.GameState;
+using Impunity.Networking;
 
 namespace Impunity.Connection
 {
@@ -36,7 +37,8 @@ namespace Impunity.Connection
 
 		protected void EstablishConnection(string gameId, string password, GameStateFormatData format, ImpunityCallback onComplete)
 		{
-			DoAction(new EstablishConnectionAction(gameId, password, format, onComplete));
+			string hashedPassword = ImpunityNetworkingUtil.HashPassword(password);
+			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, onComplete));
 		}
 
 

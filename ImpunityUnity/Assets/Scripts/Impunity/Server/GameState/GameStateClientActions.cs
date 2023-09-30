@@ -159,7 +159,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.UpdateFormat(Format);
+			game.UpdateFormat(Format, Origin.IsRemote);
 		}
 	}
 

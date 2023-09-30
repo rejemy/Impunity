@@ -168,7 +168,8 @@ public class ImpunityTestComponent : MonoBehaviour
 		Options = new ImpunityOptions
 		{
 			GameTypeCode = "ImpTest",
-			LANDiscoverable = true
+			LANDiscoverable = true,
+			RemoteUpgradeAllowed = true
 		};
 
 		CurrFormat = new GameStateFormat
@@ -224,7 +225,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		BsonDocument summary = new BsonDocument();
 		summary["name"] = "Test Game";
 
-		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary);
+		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary, Options);
 	}
 
 	async Task SetupAsync()
@@ -238,7 +239,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		BsonDocument summary = new BsonDocument();
 		summary["name"] = "Test Game";
 
-		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary);
+		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary, Options);
 	}
 
 	void Cleanup()
@@ -321,7 +322,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		yield return connectAction;
 		if (connectAction.Error != null)
 		{
-			ImpunityLogger.LogError("Error connecting: " + connectAction.Error.Message);
+			ImpunityLogger.LogError("Error connecting: " + connectAction.Error.Message + "\n" + connectAction.Error.Stacktrace);
 			yield break;
 		}
 
