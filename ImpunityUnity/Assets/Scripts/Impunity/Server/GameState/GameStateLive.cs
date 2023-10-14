@@ -231,7 +231,7 @@ namespace Impunity.GameState
 
 				if(propId >= Properties.Length)
 				{
-					throw new Exception("Invalid property id: " + propId);
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
 				}
 
 				Properties[propId].ReadFrom(propReader);
@@ -488,23 +488,21 @@ namespace Impunity.GameState
 	// Live gamestate in memory
 	public class GameStateLive
 	{
-		GameStateDB DB;
-
 		GameStateEntityType[] EntityTypes;
 
 		Dictionary<uint, GameStateEntity> AllEntities;
 		Dictionary<string, GameStateEntity> NamedEntities;
 
 		HashSet<GameStateReplicant> ConnectedReplicas;
+		public int NumConnections { get { return ConnectedReplicas.Count; } }
 
 		uint NextId;
 
 		private BinaryReader TempBufferReader;
 		private BinaryWriter TempBufferWriter;
 
-		public GameStateLive(GameStateDB db)
+		public GameStateLive()
 		{
-			DB = db;
 			AllEntities = new Dictionary<uint, GameStateEntity>();
 			NamedEntities = new Dictionary<string, GameStateEntity>();
 			ConnectedReplicas = new HashSet<GameStateReplicant>();
@@ -518,19 +516,19 @@ namespace Impunity.GameState
 			return TempBufferWriter;
 		}
 
-		public void SetFormat(GameStateFormatData format)
+		public void SetFormat(GameStateEntityType[] entityTypes)
 		{
-			if (format.EntityTypes == null || format.EntityTypes.Length < 1)
+			if (entityTypes == null || entityTypes.Length < 1)
 			{
 				return;
 			}
 
-			int highestIndex = format.EntityTypes[format.EntityTypes.Length - 1].Index;
+			int highestIndex = entityTypes[entityTypes.Length - 1].Index;
 
 			EntityTypes = new GameStateEntityType[highestIndex + 1];
-			for (int i = 0; i < format.EntityTypes.Length; i++)
+			for (int i = 0; i < entityTypes.Length; i++)
 			{
-				GameStateEntityType typeInfo = format.EntityTypes[i];
+				GameStateEntityType typeInfo = entityTypes[i];
 				EntityTypes[typeInfo.Index] = typeInfo;
 			}
 		}
@@ -581,12 +579,12 @@ namespace Impunity.GameState
 		{
 			if (typeId <= 0 || typeId >= EntityTypes.Length)
 			{
-				throw new Exception("TypeId out of range");
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "TypeId out of range");
 			}
 			GameStateEntityType typeInfo = EntityTypes[typeId];
 			if (typeInfo == null)
 			{
-				throw new Exception("Invalid TypeId");
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid TypeId");
 			}
 
 			return typeInfo;
@@ -633,7 +631,7 @@ namespace Impunity.GameState
 				}
 				else
 				{
-					throw new Exception("Entity with name " + name + " already exists");
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Entity with name " + name + " already exists");
 				}
 			}
 
@@ -665,7 +663,7 @@ namespace Impunity.GameState
 			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null)
 			{
-				throw new Exception("No channel with ID " + channelId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with ID " + channelId);
 			}
 
 			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags);
@@ -688,7 +686,7 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities[entityId];
 			if (entity == null)
 			{
-				throw new Exception("No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
 			if (!entity.IsAccessibleBy(key))
@@ -709,7 +707,7 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
-				throw new Exception("No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
 			entity.SendEvent(eventType, eventData);
@@ -720,7 +718,7 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
-				throw new Exception("No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
 			if (!entity.IsAccessibleBy(key))
@@ -739,7 +737,7 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
-				throw new Exception("No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
 			if (entity.IsLocked())
@@ -758,7 +756,7 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
-				throw new Exception("No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
 			return entity.Unlock(key, origin);
@@ -805,7 +803,7 @@ namespace Impunity.GameState
 			GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
 			if (channel == null)
 			{
-				throw new Exception("No channel with name " + channelName);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with name " + channelName);
 			}
 
 			channel.AddListener(origin, true);
@@ -818,7 +816,7 @@ namespace Impunity.GameState
 			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null)
 			{
-				throw new Exception("No channel with id " + channelId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with id " + channelId);
 			}
 
 			channel.RemoveListener(origin);

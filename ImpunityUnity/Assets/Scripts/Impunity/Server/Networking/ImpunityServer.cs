@@ -12,6 +12,13 @@ using System.Net;
 namespace Impunity.Networking
 {
 
+	public class CloseClientConnectionAction : LocalGameStateAction
+	{
+		protected override void DoAction(GameStateServer game)
+		{
+
+		}
+	}
 
 	internal class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
 	{
@@ -88,8 +95,6 @@ namespace Impunity.Networking
 						return;
 					}
 				}
-
-				GameServer.ConnectionOpened(this);
 			}
 
 			GameServer.QueueAction(action);
@@ -116,6 +121,11 @@ namespace Impunity.Networking
 			
 		}
 
+		public void ProcessCloseConnnection()
+		{
+			ClientContext.Disconnect();
+		}
+
 		// Called on TCP socket thread
 		private void OnDataWritten(Task writeTask)
 		{
@@ -138,13 +148,8 @@ namespace Impunity.Networking
 		// Called on server thread
 		public void ReportActionResult(GameStateActionBase action)
 		{
-			if (!action.ResultsExpected)
-			{
-				return;
-			}
-
 			// Don't send on server thread, queue for send on network writer thread
-			NetworkServer.ActionCompleted(action);
+			NetworkServer.QueueNetworkAction(action);
 		}
 
 		// Called on server thread
@@ -152,11 +157,19 @@ namespace Impunity.Networking
 		{
 			// Don't send on server thread, queue for send on network writer thread
 			message.Origin = this;
-			NetworkServer.ActionCompleted(message);
+			NetworkServer.QueueNetworkAction(message);
+		}
+
+		// Called on server thread
+		public void CloseConnectionRequest()
+		{
+			CloseClientConnectionAction action = new CloseClientConnectionAction();
+			action.Origin = this;
+			NetworkServer.QueueNetworkAction(action);
 		}
 
 		// Called on socket thread
-		private void ClientNetworkError(IImpunityNetworkServerClientContext client, ImpunityError err)
+		private void ClientNetworkError(IImpunityNetworkServerClientContext client, ImpunityErrorResponse err)
 		{
 			ImpunityLogger.LogError("client network error: " + err.Message);
 
@@ -301,8 +314,11 @@ namespace Impunity.Networking
 		{
 			ServerSideNetworkConnectionProxy clientInfo = (ServerSideNetworkConnectionProxy)action.Origin;
 
-			
-			if (action is ServerActionBase)
+			if (action is CloseClientConnectionAction)
+			{
+				clientInfo.ProcessCloseConnnection();
+			}
+			else if (action is ServerActionBase)
 			{
 				// Server originated message
 				BsonDocument message = action.SerializeRequest();
@@ -314,7 +330,6 @@ namespace Impunity.Networking
 				BsonDocument results = action.SerializeResults();
 				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, results);
 			}
-
 			
 		}
 
@@ -327,7 +342,7 @@ namespace Impunity.Networking
 
 
 		// called on game server thread
-		internal void ActionCompleted(GameStateActionBase action)
+		internal void QueueNetworkAction(GameStateActionBase action)
 		{
 			PendingWrite.Add(action);
 		}

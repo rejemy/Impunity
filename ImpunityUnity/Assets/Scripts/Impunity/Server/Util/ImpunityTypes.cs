@@ -5,8 +5,8 @@ using UltraLiteDB;
 
 namespace Impunity
 {
-	public delegate void ImpunityCallback(ImpunityError err);
-	public delegate void ImpunityCallback<TReturn>(ImpunityError err, TReturn returnValue);
+	public delegate void ImpunityCallback(ImpunityErrorResponse err);
+	public delegate void ImpunityCallback<TReturn>(ImpunityErrorResponse err, TReturn returnValue);
 
 	public static class ImpunityConstants
 	{
@@ -36,6 +36,12 @@ namespace Impunity
 		ClientAuthoritative = 1
 	}
 
+	public enum ImpunityInternalCollectionIds
+	{
+		Channels = 1,
+		Entities = 2
+	}
+
 	public enum ImpunityLogLevel
 	{
 		TRACE = 1,
@@ -46,52 +52,123 @@ namespace Impunity
 		CRITICAL = 6
 	}
 
+	public enum ImpunityErrorCode
+	{
+		UnknownError = 0,
+		InternalServerError = 1,
+
+		ClientUnableToConnectError = 1000,
+		ClientConnectionBrokenError = 1001,
+
+		ServerUnavailable = 2000, // New connections to the server are temporarily paused
+		ServerPasswordIncorrect = 2001, // Attempt to connect to password protected server with the wrong password
+		ServerVersionIncompatible = 2002, // Client is not the same version as the server
+
+		ActionInvalidParameter = 3000,
+		ActionBadRequest = 3001,
+		ActionCompoundFailure = 3002
+	}
+
 	public class GameMetadata
 	{
 		[BsonId]
 		public string Id;
+
 		[BsonField("Version")]
 		public int Version;
+
 		[BsonField("DataFormatChecksum")]
 		public string DataFormatChecksum;
+
+		[BsonField("Collections")]
+		public GameStateCollection[] Collections;
+
+		[BsonField("EntityTypes")]
+		public GameStateEntityType[] EntityTypes;
+	}
+
+	public class ImpunityServerException : Exception
+	{
+		public ImpunityErrorCode ErrorCode { get; private set; }
+
+		public ImpunityServerException(ImpunityErrorCode errorCode, string message) : base(message)
+		{
+			ErrorCode = errorCode;
+		}
+	}
+
+	public class ImpunityServerFatalException : ImpunityServerException
+	{
+		public ImpunityServerFatalException(ImpunityErrorCode errorCode, string message) : base(errorCode, message)
+		{
+			
+		}
 	}
 
 
-	public class ImpunityError
+	public class ImpunityErrorResponse
 	{
+		[BsonField("err")]
+		protected int ErrorInt { get; private set; }
+
+		[BsonIgnore]
+		public ImpunityErrorCode ErrorCode {
+			get { return (ImpunityErrorCode)ErrorInt; }
+			set { ErrorInt = (int)value; }
+		}
+
+
 		[BsonField("msg")]
 		public string Message { get; private set; }
 		[BsonField("stk")]
 		public string Stacktrace { get; private set; }
 
-		public ImpunityError() {}
+		public ImpunityErrorResponse() {}
 
-		public ImpunityError(string message, string stackTrace = null)
-		{
-			Message = message;
-			Stacktrace = stackTrace;
-		}
 
-		public ImpunityError(Exception e)
+		public ImpunityErrorResponse(ImpunityServerException e)
 		{
+			ErrorCode = e.ErrorCode;
 			Message = e.Message;
 			Stacktrace = e.StackTrace;
 		}
 
+		public ImpunityErrorResponse(ImpunityErrorCode code, Exception e)
+		{
+			ErrorCode = code;
+			Message = e.Message;
+			Stacktrace = e.StackTrace;
+		}
+
+		public ImpunityErrorResponse(ImpunityErrorCode code, string message, Exception e)
+		{
+			ErrorCode = code;
+			Message = message;
+			Stacktrace = e.StackTrace;
+		}
+
+		public ImpunityErrorResponse(ImpunityErrorCode code, string message)
+		{
+			ErrorCode = code;
+			Message = message;
+		}
+
 	}
 
-	public class ImpuntyErrorException : Exception
+	public class ImpuntyErrorResponseException : Exception
 	{
-		string Stacktrace;
+		public ImpunityErrorCode ErrorId { get; private set; }
+		public string ServerStacktrace { get; private set; }
 
-		public ImpuntyErrorException(ImpunityError err) : base(err.Message)
+		public ImpuntyErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
 		{
-			Stacktrace = err.Stacktrace;	
+			ErrorId = err.ErrorCode;
+			ServerStacktrace = err.Stacktrace;	
 		}
 
 		public override string ToString()
         {
-			return Message + "\n" + Stacktrace;
+			return "Error " + ErrorId + ": " + Message + "\n" + ServerStacktrace;
         }
 	}
 
@@ -151,9 +228,9 @@ namespace Impunity
 					}
 				);
 
-				if (Collections[0].Index == 0)
+				if (Collections[0].Index < 10)
 				{
-					throw new Exception("Can't use 0 as a collection index");
+					throw new Exception("Can't use 0 - 9 as a collection index");
 				}
 			}
 
@@ -235,6 +312,9 @@ namespace Impunity
 
 		[BsonField("v")]
 		public byte PropValueType;
+
+		[BsonField("pa")]
+		public string PersistedAs;
 	}
 
 	public class GameStateEntityType
@@ -244,6 +324,9 @@ namespace Impunity
 
 		[BsonField("n")]
 		public string Name;
+
+		[BsonField("pa")]
+		public string PersistedAs;
 
 		[BsonField("ps")]
 		public GameStateEntityPropertyDef[] Properties;

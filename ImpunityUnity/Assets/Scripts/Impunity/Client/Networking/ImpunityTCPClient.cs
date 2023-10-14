@@ -125,13 +125,13 @@ namespace Impunity.Networking
 			{
 				if (!connected)
                 {
-					OnConnectCallback?.Invoke(new ImpunityError(e.Message));
+					OnConnectCallback?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, e));
 					OnConnectCallback = null;
 				}
 				else if (ClientSocket != null)
 				{
 					// Client socket is null on regular requested disonnect
-					OnNetworkError?.Invoke(new ImpunityError(e.Message));
+					OnNetworkError?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, e));
 
 					ImpunityLogger.LogError(e, "Client socket error");
 				}

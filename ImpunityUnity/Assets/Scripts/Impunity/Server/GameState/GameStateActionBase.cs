@@ -14,7 +14,7 @@ namespace Impunity.GameState
 	public class ActionResult
 	{
 		[BsonField("e")]
-		public ImpunityError Error;
+		public ImpunityErrorResponse Error;
 	}
 
 	public class ActionResult<TResult> : ActionResult
@@ -26,7 +26,7 @@ namespace Impunity.GameState
 	public abstract class GameStateActionBase
 	{
 		[BsonIgnore]
-		public ImpunityError Error;
+		public ImpunityErrorResponse Error;
 
 		[BsonIgnore]
 		internal IServerSideConnectionProxy Origin { get; set; }
@@ -36,7 +36,7 @@ namespace Impunity.GameState
 
 		public abstract ushort GetActionType();
 		public abstract bool HasCallback();
-
+		public virtual bool LiveDataQueue() { return false; }
 
 		public virtual BsonDocument SerializeRequest()
 		{
@@ -49,19 +49,27 @@ namespace Impunity.GameState
 		// Called from background thread
 		// Called when message has been encoded or processed and the input fields
 		// can be disposed of
-		public virtual void OnSendComplete() { }
+		public virtual void OnActionComplete() { }
+
 
 		// Executing the action
-
 		public void Run(GameStateServer game)
 		{
 			try
 			{
 				DoAction(game);
 			}
+			catch (ImpunityServerException e)
+			{
+				Error = new ImpunityErrorResponse(e);
+				if (e is ImpunityServerFatalException)
+				{
+					throw e;
+				}
+			}
 			catch (Exception e)
 			{
-				Error = new ImpunityError(e);
+				Error = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
 			}
 		}
 

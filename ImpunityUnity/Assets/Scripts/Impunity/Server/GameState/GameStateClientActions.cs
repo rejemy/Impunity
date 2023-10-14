@@ -159,7 +159,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.UpdateFormat(Format, Origin.IsRemote);
+			game.EstablishConnection(Origin, Format);
 		}
 	}
 
@@ -362,7 +362,7 @@ namespace Impunity.GameState
 		{
 			Result = new List<ActionResult>();
 
-			bool error = false;
+			int errors = 0;
 			foreach (GameStateActionBase action in Actions)
 			{
 				action.Run(game);
@@ -371,13 +371,13 @@ namespace Impunity.GameState
 
 				if (action.Error != null)
 				{
-					error = true;
+					errors += 1;
 				}
 			}
 
-			if (error)
+			if (errors > 0)
 			{
-				Error = new ImpunityError("Compound action error");
+				Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionCompoundFailure, "Error(s) in compound action request: " + errors);
 			}
 		}
 
@@ -390,7 +390,7 @@ namespace Impunity.GameState
 			BsonValue errorVal = resultBody["e"];
 			if (!errorVal.IsNull)
 			{
-				Error = mapper.ToObject<ImpunityError>(errorVal.AsDocument);
+				Error = mapper.ToObject<ImpunityErrorResponse>(errorVal.AsDocument);
 			}
 
 			BsonArray resultArray = (BsonArray)(resultBody["r"]);
@@ -427,6 +427,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
+		public override bool LiveDataQueue() { return true; }
 
 		public CreateChannelAction() { }
 
@@ -460,6 +461,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
+		public override bool LiveDataQueue() { return true; }
 
 		public CreateObjectAction() { }
 
@@ -490,6 +492,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> UpdateBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
+		public override bool LiveDataQueue() { return true; }
 
 		public UpdateEntityAction() { }
 
@@ -519,6 +522,7 @@ namespace Impunity.GameState
 		public BsonValue DeleteData;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
+		public override bool LiveDataQueue() { return true; }
 
 		public DeleteEntityAction() { }
 
@@ -548,6 +552,7 @@ namespace Impunity.GameState
 		public BsonValue EventData;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.EVENT_ENTITY; }
+		public override bool LiveDataQueue() { return true; }
 
 		public EventEntityAction() { }
 
@@ -574,6 +579,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_ENTITY; }
+		public override bool LiveDataQueue() { return true; }
 
 		public LockEntityAction() { }
 
@@ -599,6 +605,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_ENTITY; }
+		public override bool LiveDataQueue() { return true; }
 
 		public UnlockEntityAction() { }
 
@@ -624,6 +631,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_NAMED_LOCK; }
+		public override bool LiveDataQueue() { return true; }
 
 		public LockNamedLockAction() { }
 
@@ -649,6 +657,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_NAMED_LOCK; }
+		public override bool LiveDataQueue() { return true; }
 
 		public UnlockNamedLockAction() { }
 
@@ -673,6 +682,7 @@ namespace Impunity.GameState
 		public string Name;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.SUBSCRIBE_CHANNEL; }
+		public override bool LiveDataQueue() { return true; }
 
 		public SubscribeChannelAction() { }
 
@@ -694,6 +704,7 @@ namespace Impunity.GameState
 		public uint ID;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNSUBSCRIBE_CHANNEL; }
+		public override bool LiveDataQueue() { return true; }
 
 		public UnsubscribeChannelAction() { }
 
@@ -719,7 +730,7 @@ namespace Impunity.GameState
 		public BsonValue MessageBody;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.BROADCAST_MESSAGE; }
-
+		public override bool LiveDataQueue() { return true; }
 
 		public SendBroadcastMessageAction() { }
 

@@ -13,16 +13,16 @@ namespace Impunity.GameState
 		string ConnectionId { get; }
 		bool IsRemote { get; }
 		GameStateReplicant ConnectionReplicant { get; set; }
+		bool SupportsUnguaranteed();
 
 		void ReportActionResult(GameStateActionBase action);
 		void SendMessageToClient(ServerActionBase message);
 
-		bool SupportsUnguaranteed();
-		
+		void CloseConnectionRequest();
 	}
 
-	// Action that originates from neither the server nor client
-	public abstract class GameStateAction : GameStateActionBase
+	// Actions that don't pass between client and server
+	public abstract class LocalGameStateAction : GameStateActionBase
 	{
 		public override void DeserializeResults(BsonDocument resultBody)
 		{
@@ -55,7 +55,8 @@ namespace Impunity.GameState
 		}
 	}
 
-    public class ConnectionOpenedAction : GameStateAction
+	// Tells the live game a connection opened
+    public class ConnectionOpenedAction : LocalGameStateAction
 	{
 		protected override void DoAction(GameStateServer game)
 		{
@@ -66,7 +67,8 @@ namespace Impunity.GameState
 		}
 	}
 
-	public class ConnectionClosedAction : GameStateAction
+	// Tells the live game a connection closed
+	public class ConnectionClosedAction : LocalGameStateAction
 	{
 		protected override void DoAction(GameStateServer game)
 		{
@@ -75,7 +77,6 @@ namespace Impunity.GameState
 			Origin.ConnectionReplicant = null;
 		}
 	}
-
 
 	public class GameStateServer
 	{
@@ -89,8 +90,14 @@ namespace Impunity.GameState
 		BsonDocument Summary;
 		GameMetadata Metadata;
 
-		BlockingCollection<GameStateActionBase> ActionQueue;
-		Thread WorkerThread;
+		public bool NewConnectionsDisabled { get; private set; } = false;
+
+		BlockingCollection<GameStateActionBase> DBActionQueue;
+		Thread DBWorkerThread;
+
+		BlockingCollection<GameStateActionBase> LiveActionQueue;
+		Thread LiveWorkerThread;
+
 		bool Running;
 
 		ConcurrentDictionary<int, IGameStateListener> Listeners;
@@ -108,18 +115,29 @@ namespace Impunity.GameState
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
 			DB = gameDatabase;
-			Live = new GameStateLive(DB);
+			Live = new GameStateLive();
 
 			Summary = DB.LoadGameSummary();
 			Metadata = DB.LoadMetadata();
 
-			ActionQueue = new BlockingCollection<GameStateActionBase>();
+			DB.SetFormat(Metadata.Collections);
+			Live.SetFormat(Metadata.EntityTypes);
 
 			Running = true;
-			WorkerThread = new Thread(new ThreadStart(WorkThead));
-			WorkerThread.IsBackground = false;
-			WorkerThread.Name = "GameState work";
-			WorkerThread.Start();
+
+			DBActionQueue = new BlockingCollection<GameStateActionBase>();
+
+			DBWorkerThread = new Thread(new ThreadStart(DBWorkerThead));
+			DBWorkerThread.IsBackground = false;
+			DBWorkerThread.Name = "Database worker";
+			DBWorkerThread.Start();
+
+			LiveActionQueue = new BlockingCollection<GameStateActionBase>();
+
+			LiveWorkerThread = new Thread(new ThreadStart(LiveWorkerThead));
+			LiveWorkerThread.IsBackground = false;
+			LiveWorkerThread.Name = "Live state worker";
+			LiveWorkerThread.Start();
 		}
 
 		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions options = null)
@@ -144,6 +162,43 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
+		public void EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
+		{
+			if (NewConnectionsDisabled)
+			{
+				throw new ImpunityServerFatalException(ImpunityErrorCode.ServerUnavailable, "Server is busy, try again later");
+			}
+
+			if (!ValidateFormat(format))
+			{
+				if (Metadata.Version == 0)
+				{
+					UpdateFormat(format, proxy.IsRemote);
+				}
+				else if (Live.NumConnections == 0)
+				{
+					// We're the only connection, safe to update format
+					UpdateFormat(format, proxy.IsRemote);
+				}
+				else
+				{
+					throw new ImpunityServerFatalException(ImpunityErrorCode.ServerVersionIncompatible, "Client version doesn't match server version");
+				}
+			}
+
+			ConnectionOpened(proxy);
+		}
+
+		public bool ValidateFormat(GameStateFormatData format)
+		{
+			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
+			{
+				return true;
+			}
+
+			return false;
+		}
+
 		public void UpdateFormat(GameStateFormatData format, bool isRemote)
 		{
 			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
@@ -153,28 +208,25 @@ namespace Impunity.GameState
 
 			if (format.Version < Metadata.Version)
 			{
-				throw new Exception("Can't set savegame to earlier version");
+				throw new ImpunityServerFatalException(ImpunityErrorCode.ActionBadRequest, "Can't revert savegame to earlier version");
 			}
 
 			if (format.Version > Metadata.Version || format.DataChecksum != Metadata.DataFormatChecksum)
 			{
 				if (isRemote && !Options.RemoteUpgradeAllowed)
 				{
-					throw new Exception("Remote client cannot change game format version");
-				}
-
-				if (Metadata.Version > 0)
-				{
-					throw new Exception("Upgrading game data to new format not yet supported");
+					throw new ImpunityServerFatalException(ImpunityErrorCode.ActionBadRequest, "Remote client cannot change game format version");
 				}
 			}
 
 
-			DB.SetFormat(format);
-			Live.SetFormat(format);
+			DB.SetFormat(format.Collections);
+			Live.SetFormat(format.EntityTypes);
 
 			Metadata.Version = format.Version;
 			Metadata.DataFormatChecksum = format.DataChecksum;
+			Metadata.Collections = format.Collections;
+			Metadata.EntityTypes = format.EntityTypes;
 			DB.SaveMetadata(Metadata);
 
 
@@ -223,14 +275,16 @@ namespace Impunity.GameState
 		{
 			Running = false;
 
-			ActionQueue.CompleteAdding();
+			DBActionQueue.CompleteAdding();
+			LiveActionQueue.CompleteAdding();
 
-			WorkerThread.Join();
+			DBWorkerThread.Join();
+			LiveWorkerThread.Join();
 		}
 
-		private void Shutdown()
+		private void ShutdownDB()
 		{
-			ActionQueue.Dispose();
+			DBActionQueue.Dispose();
 
 			if (DB != null)
 			{
@@ -239,7 +293,12 @@ namespace Impunity.GameState
 			}
 		}
 
-		private void WorkThead()
+		private void ShutdownLive()
+		{
+			LiveActionQueue.Dispose();
+		}
+
+		private void DBWorkerThead()
 		{
 			while (Running)
 			{
@@ -247,25 +306,100 @@ namespace Impunity.GameState
 
 				try
 				{
-					action = ActionQueue.Take();
+					action = DBActionQueue.Take();
 				}
 				catch (InvalidOperationException)
 				{
 					// Pending actions queue was closed
-					Shutdown();
+					ShutdownDB();
 					return;
 				}
 
-				// Run catches exceptions in the action
-				action.Run(this);
+
+				// Run catches non-fatal exceptions in the action
+				bool gotFatalException = false;
+				try
+				{
+					action.Run(this);
+				}
+				catch (ImpunityServerFatalException)
+				{
+					gotFatalException = true;
+				}
+				
+
+				if (action.ResultsExpected)
+				{
+					try
+					{
+						action.Origin.ReportActionResult(action);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+					}
+				}
+				else
+				{
+					// Cleanup action
+					action.OnActionComplete();
+				}
+
+				if (gotFatalException)
+				{
+					action.Origin.CloseConnectionRequest();
+				}
+			}
+		}
+
+		private void LiveWorkerThead()
+		{
+			while (Running)
+			{
+				GameStateActionBase action = null;
 
 				try
 				{
-					action.Origin.ReportActionResult(action);
+					action = LiveActionQueue.Take();
 				}
-				catch (Exception e)
+				catch (InvalidOperationException)
 				{
-					ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+					// Pending actions queue was closed
+					ShutdownLive();
+					return;
+				}
+
+				// Run catches non-fatal exceptions in the action
+				bool gotFatalException = false;
+				try
+				{
+					action.Run(this);
+				}
+				catch (ImpunityServerFatalException)
+				{
+					gotFatalException = true;
+				}
+
+				if (action.ResultsExpected)
+				{
+					try
+					{
+						action.Origin.ReportActionResult(action);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+					}
+				}
+				else
+				{
+					// Cleanup action
+					action.OnActionComplete();
+				}
+
+				if (gotFatalException)
+				{
+					action.Origin.CloseConnectionRequest();
 				}
 			}
 		}
@@ -273,8 +407,14 @@ namespace Impunity.GameState
 
 		public void QueueAction(GameStateActionBase action)
         {
-			ActionQueue.Add(action);
-
+			if (action.LiveDataQueue())
+			{
+				LiveActionQueue.Add(action);
+			}
+			else
+			{
+				DBActionQueue.Add(action);
+			}
 		}
 
 		// Called by connection threads
@@ -283,7 +423,7 @@ namespace Impunity.GameState
 			ConnectionOpenedAction action = new ConnectionOpenedAction();
 			action.Origin = connectionProxy;
 			action.ResultsExpected = false;
-			ActionQueue.Add(action);
+			LiveActionQueue.Add(action);
 		}
 
 		// Called by connection threads
@@ -292,7 +432,7 @@ namespace Impunity.GameState
 			ConnectionClosedAction action = new ConnectionClosedAction();
 			action.Origin = connectionProxy;
 			action.ResultsExpected = false;
-			ActionQueue.Add(action);
+			LiveActionQueue.Add(action);
 		}
 
 

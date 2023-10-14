@@ -31,7 +31,6 @@ namespace Impunity.Connection
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
 			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
-			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
 
 			GameId = gameId;
 			GamePassword = gamePassword;
@@ -60,7 +59,7 @@ namespace Impunity.Connection
 
 		public override void Connect(ImpunityCallback onComplete)
 		{
-			NetworkClient.Connect((ImpunityError err) =>
+			NetworkClient.Connect((ImpunityErrorResponse err) =>
 			{
 				if (err != null)
 				{
@@ -137,7 +136,7 @@ namespace Impunity.Connection
 
 			NetworkClient.SendGuaranteedMessage(encodedMessage);
 
-			action.OnSendComplete();
+			action.OnActionComplete();
 		}
 
 		// On dotnet internal socket thread
@@ -166,7 +165,7 @@ namespace Impunity.Connection
 
 
 		// On dotnet internal socket thread
-		private void OnNetworkErrorReceived(ImpunityError error)
+		private void OnNetworkErrorReceived(ImpunityErrorResponse error)
 		{
 			CompletedActions.Enqueue(new NoOpAction(OnNetworkError));
 		}

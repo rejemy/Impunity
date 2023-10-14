@@ -79,7 +79,7 @@ namespace Impunity.Networking
 
 				try
 				{
-					OnNetworkError?.Invoke(this, new ImpunityError(readTask.Exception.Message));
+					OnNetworkError?.Invoke(this, new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, readTask.Exception));
 				}
 				catch(Exception e)
 				{

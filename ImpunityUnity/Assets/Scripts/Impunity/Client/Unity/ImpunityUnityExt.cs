@@ -15,7 +15,7 @@ namespace Impunity.Unity
 	{
 		private bool Complete = false;
 
-		public ImpunityError Error { get; private set; }
+		public ImpunityErrorResponse Error { get; private set; }
 
 		public override bool keepWaiting
 		{
@@ -25,7 +25,7 @@ namespace Impunity.Unity
 			}
 		}
 
-		public void OnComplete(ImpunityError err)
+		public void OnComplete(ImpunityErrorResponse err)
 		{
 			Error = err;
 			Complete = true;
@@ -36,7 +36,7 @@ namespace Impunity.Unity
 	{
 		private bool Complete = false;
 		public TReturn Value { get; private set; }
-		public ImpunityError Error { get; private set; }
+		public ImpunityErrorResponse Error { get; private set; }
 
 		public override bool keepWaiting
 		{
@@ -46,7 +46,7 @@ namespace Impunity.Unity
 			}
 		}
 
-		public void OnComplete(ImpunityError err, TReturn returnValue)
+		public void OnComplete(ImpunityErrorResponse err, TReturn returnValue)
 		{
 			Value = returnValue;
 			Error = err;

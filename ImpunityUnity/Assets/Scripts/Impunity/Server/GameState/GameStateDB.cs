@@ -165,23 +165,49 @@ namespace Impunity.GameState
 		}
 
 
-		public void SetFormat(GameStateFormatData format)
+		public void SetFormat(GameStateCollection[] collections)
 		{
-			if (format.Collections == null || format.Collections.Length < 1)
+			if (collections == null || collections.Length < 1)
 			{
 				return;
 			}
 
-			int highestIndex = format.Collections[format.Collections.Length - 1].Index;
+			int highestIndex = collections[collections.Length - 1].Index;
 
 			Collections = new CollectionData[highestIndex + 1];
-			for (int i = 0; i < format.Collections.Length; i++)
+
+			HashSet<string> collectionNames = new HashSet<string>();
+
+			CollectionData channelCollection = new CollectionData();
+			channelCollection.Name = "Channels";
+			channelCollection.Collection = GameDB.GetCollection<BsonDocument>(channelCollection.Name);
+			Collections[(int)ImpunityInternalCollectionIds.Channels] = channelCollection;
+			collectionNames.Add(channelCollection.Name);
+
+			CollectionData entityCollection = new CollectionData();
+			entityCollection.Name = "Entities";
+			entityCollection.Collection = GameDB.GetCollection<BsonDocument>(entityCollection.Name);
+			Collections[(int)ImpunityInternalCollectionIds.Entities] = entityCollection;
+			collectionNames.Add(entityCollection.Name);
+
+			for (int i = 0; i < collections.Length; i++)
 			{
-				GameStateCollection collectionInfo = format.Collections[i];
+				GameStateCollection collectionInfo = collections[i];
+				if (collectionInfo.Index < 10)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Collection can't have index less than 10");
+				}
+
+				if (collectionNames.Contains(collectionInfo.Name))
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Duplicate collection name: " + collectionInfo.Name);
+				}
+
 				CollectionData collection = new CollectionData();
 				collection.Name = collectionInfo.Name;
 				collection.Collection = GameDB.GetCollection<BsonDocument>(collection.Name);
 				Collections[collectionInfo.Index] = collection;
+				collectionNames.Add(collection.Name);
 			}
 		}
 
@@ -189,7 +215,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return Collections[collectionId].Collection.Insert(doc);
@@ -199,7 +225,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return Collections[collectionId].Collection.Update(doc);
@@ -209,7 +235,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return Collections[collectionId].Collection.Upsert(doc);
@@ -219,7 +245,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return Collections[collectionId].Collection.FindById(id);
@@ -229,7 +255,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return Collections[collectionId].Collection.Delete(id);
@@ -239,7 +265,7 @@ namespace Impunity.GameState
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
-				throw new Exception("Invalid collection id: " + collectionId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
 
 			return new List<BsonDocument>(Collections[collectionId].Collection.FindAll());

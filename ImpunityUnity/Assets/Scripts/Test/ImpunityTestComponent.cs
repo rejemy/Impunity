@@ -24,8 +24,8 @@ using UltraLiteDB;
 
 public static class TestCollectionTypes
 {
-	// 0 is reserved
-	public const int CHARACTERS = 1;
+	// 0 - 9 are reserved
+	public const int CHARACTERS = 10;
 }
 
 public static class TestEntityTypes
@@ -686,7 +686,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		return true;
 	}
 
-	void OnNetworkError(ImpunityError err)
+	void OnNetworkError(ImpunityErrorResponse err)
     {
 		ImpunityLogger.LogError("Got network error: " + err.Message);
     }

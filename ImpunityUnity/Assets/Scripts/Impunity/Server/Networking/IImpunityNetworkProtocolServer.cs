@@ -8,7 +8,7 @@ using UltraLiteDB;
 namespace Impunity.Networking
 {
 	public delegate void ImpunityServerMessageHandler(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes);
-	public delegate void ImpunityServerErrorCallback(IImpunityNetworkServerClientContext client, ImpunityError err);
+	public delegate void ImpunityServerErrorCallback(IImpunityNetworkServerClientContext client, ImpunityErrorResponse err);
 	public delegate void ImpunityServerClientContextCallback(IImpunityNetworkServerClientContext client);
 	
 	public interface IImpunityNetworkServerClientContext : IDisposable

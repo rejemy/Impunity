@@ -33,6 +33,8 @@ namespace Impunity.Connection
 			GameStateEntityType[] entityTypes = EntityManager.RegisterEntityTypes(format.EntityTypes);
 
 			LocalFormat = new GameStateFormatData(format, entityTypes);
+
+			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
 		}
 
 		protected void EstablishConnection(string gameId, string password, GameStateFormatData format, ImpunityCallback onComplete)

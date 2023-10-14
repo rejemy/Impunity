@@ -11,11 +11,11 @@ namespace Impunity.Connection
 {
 	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
 	{
-		public void OnComplete(ImpunityError err)
+		public void OnComplete(ImpunityErrorResponse err)
 		{
 			if (err != null)
 			{
-				SetException(new ImpuntyErrorException(err));
+				SetException(new ImpuntyErrorResponseException(err));
 			}
 			else
 			{
@@ -28,11 +28,11 @@ namespace Impunity.Connection
 	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
 	{
 
-		public void OnComplete(ImpunityError err, TResult result)
+		public void OnComplete(ImpunityErrorResponse err, TResult result)
 		{
 			if (err != null)
 			{
-				SetException(new ImpuntyErrorException(err));
+				SetException(new ImpuntyErrorResponseException(err));
 			}
 			else
 			{

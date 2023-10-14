@@ -13,6 +13,7 @@ namespace Impunity.Connection
 	{
 		internal int EntityId;
 		public string FactoryMethod { get; set; }
+		public string PersistAs { get; set; }
 
 		public DistributedEntity(int entityId)
 		{
@@ -26,6 +27,7 @@ namespace Impunity.Connection
 		internal int FieldId;
 		public string OnChanged { get; set; }
 		public string OnReplaced { get; set; }
+		public string PersistAs { get; set; }
 
 		public Distributed(int fieldId)
 		{
@@ -154,6 +156,7 @@ namespace Impunity.Connection
 	{
 		public int FieldId;
 		public string FieldName;
+		public string PersistedAs;
 		public GameStateEntityFieldType FieldType;
 		public GameStateEntityPropertyValueType FieldValueType;
 		public MethodInfo WriteMethod;
@@ -288,7 +291,7 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 			}
 
-			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, null, (ImpunityError err, uint channelId) =>
+			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, null, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
                 {
@@ -334,7 +337,7 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, null, (ImpunityError err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, null, (ImpunityErrorResponse err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -355,7 +358,7 @@ namespace Impunity.Connection
 				return;
             }
 
-			Connection.SubcribeToChannel(channelName, (ImpunityError err, uint channelId) =>
+			Connection.SubcribeToChannel(channelName, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
 				{
@@ -376,7 +379,7 @@ namespace Impunity.Connection
 
 		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete)
 		{
-			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityError err) =>
+			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityErrorResponse err) =>
 			{
 				if (err != null)
                 {
@@ -414,10 +417,16 @@ namespace Impunity.Connection
 				throw new Exception("Entity ID must be positive indeger");
             }
 
+			entityData.PersistedAs = distAttr.PersistAs?.Trim();
+			if (entityData.PersistedAs != null && entityData.PersistedAs.Length == 0)
+			{
+				throw new Exception("Can't use empty string as PersistedAs value");
+			}
+
 			DistributedTypeInfo internalTypeInfo = new DistributedTypeInfo();
 			internalTypeInfo.DistributedTypeId = entityData.Index;
 			internalTypeInfo.ObjectType = entityType;
-
+			
 			if (distAttr.FactoryMethod != null)
 			{
 				MethodInfo factoryMethod = entityType.GetMethod(distAttr.FactoryMethod, BindingFlags.Public | BindingFlags.Static);
@@ -440,6 +449,7 @@ namespace Impunity.Connection
 
 			List<DistributedTypeFieldInfo> distributedFields = new List<DistributedTypeFieldInfo>();
 
+			bool hasPersistedField = false;
 			foreach (var fieldInfo in entityType.GetRuntimeFields())
 			{
 				if (fieldInfo.IsStatic)
@@ -472,6 +482,21 @@ namespace Impunity.Connection
 				dfield.FieldName = fieldInfo.Name;
 				dfield.FieldType = tempFieldValue.FieldType;
 				dfield.FieldValueType = tempFieldValue.ValueType;
+				dfield.PersistedAs = fieldAttr.PersistAs?.Trim();
+				if (dfield.PersistedAs != null && dfield.PersistedAs.Length == 0)
+				{
+					throw new Exception("Can't use empty string as PersistedAs value");
+				}
+
+				if (dfield.PersistedAs != null)
+				{
+					hasPersistedField = true;
+					if (entityData.PersistedAs == null)
+					{
+						throw new Exception("Can't have a distributed field persisted if the entity is not persisted");
+					}
+					
+				}
 
 				MethodInfo writeMethod = entityType.GetMethod("imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
@@ -497,6 +522,11 @@ namespace Impunity.Connection
 				return entityData;
 			}
 
+			if (!hasPersistedField && entityData.PersistedAs != null)
+			{
+				throw new Exception("Persisted entity has no persisted fields, will store no data");
+			}
+
 			entityData.Properties = new GameStateEntityPropertyDef[distributedFields.Count];
 
 			int p = 0;
@@ -507,6 +537,8 @@ namespace Impunity.Connection
 				propDef.Name = dfield.FieldName;
 				propDef.FieldType = (byte)dfield.FieldType;
 				propDef.PropValueType = (byte)dfield.FieldValueType;
+				propDef.PersistedAs = dfield.PersistedAs;
+
 				entityData.Properties[p++] = propDef;
 			}
 

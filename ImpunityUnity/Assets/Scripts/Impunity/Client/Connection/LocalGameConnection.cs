@@ -22,7 +22,7 @@ namespace Impunity.Connection
 			: base(format, em)
 		{
 			State = gameState;
-			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
+			
 			int id = NextLocalConnectionId++;
 			ConnectionId = "LocalConnection_" + id;
 		}
@@ -38,12 +38,12 @@ namespace Impunity.Connection
 
 		public void OnGameMetadataChanged(GameStateServer game)
 		{
-
+			// Doesn't need to do anything
         }
 
 		public void OnGameSummaryChanged(GameStateServer game)
 		{
-
+			// Doesn't need to do anything
 		}
 
 		public override void Dispose()
@@ -55,13 +55,6 @@ namespace Impunity.Connection
 		// Called on background thread
 		public void ReportActionResult(GameStateActionBase action)
         {
-			action.OnSendComplete();
-
-			if (!action.ResultsExpected)
-			{
-				return;
-			}
-
 			CompletedActions.Enqueue(action);
 		}
 
@@ -84,6 +77,11 @@ namespace Impunity.Connection
 			State.QueueAction(action);
         }
 
+		public void CloseConnectionRequest()
+		{
+			State.RemoveListener(this);
+			State.ConnectionClosed(this);
+		}
 	}
 
 }
