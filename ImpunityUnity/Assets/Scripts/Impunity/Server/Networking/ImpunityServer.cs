@@ -69,7 +69,7 @@ namespace Impunity.Networking
 
 			Type messageActionClassType = ClientActionFactory.GetActionClassType(msg.MessageType);
 
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
 			action.Origin = this;
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;

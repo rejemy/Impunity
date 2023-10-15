@@ -411,7 +411,7 @@ namespace Impunity.Networking
 				{
 					byte[] packet = ServerUdpSocket.Receive(ref groupEP);
 					ImpunityLogger.LogInformation("Got bytes");
-					if (ImpunityNetworkingUtil.StartsWith(packet, SearchPacket))
+					if (ImpunityUtil.StartsWith(packet, SearchPacket))
 					{
 						OnSearchPacket();
 					}

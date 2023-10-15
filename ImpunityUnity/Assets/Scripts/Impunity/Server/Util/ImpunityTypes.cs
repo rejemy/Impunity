@@ -1,6 +1,5 @@
 using System;
 using Impunity.GameState;
-using Impunity.Networking;
 using UltraLiteDB;
 
 namespace Impunity
@@ -84,7 +83,7 @@ namespace Impunity
 		public GameStateCollection[] Collections;
 
 		[BsonField("EntityTypes")]
-		public GameStateEntityType[] EntityTypes;
+		public GameStateEntityTypeDef[] EntityTypes;
 	}
 
 	public class ImpunityServerException : Exception
@@ -208,13 +207,13 @@ namespace Impunity
 		public GameStateCollection[] Collections;
 
 		[BsonField("es")]
-		public GameStateEntityType[] EntityTypes;
+		public GameStateEntityTypeDef[] EntityTypes;
 
 		public GameStateFormatData()
 		{ }
 
 
-		public GameStateFormatData(GameStateFormat format, GameStateEntityType[] entityTypes)
+		public GameStateFormatData(GameStateFormat format, GameStateEntityTypeDef[] entityTypes)
 		{
 			Version = format.Version;
 
@@ -237,7 +236,7 @@ namespace Impunity
 			// Entity types should be pre-sorted from ClientEntityManager
 			EntityTypes = entityTypes;
 
-			DataChecksum = ImpunityNetworkingUtil.MakeDataChecksum(this);
+			DataChecksum = ImpunityUtil.MakeDataChecksum(this);
 		}
 
 	}
@@ -317,7 +316,7 @@ namespace Impunity
 		public string PersistedAs;
 	}
 
-	public class GameStateEntityType
+	public class GameStateEntityTypeDef
     {
 		[BsonField("id")]
 		public int Index;

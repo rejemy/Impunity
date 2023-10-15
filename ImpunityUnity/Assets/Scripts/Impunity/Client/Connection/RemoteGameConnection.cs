@@ -156,7 +156,7 @@ namespace Impunity.Connection
 			// Server message
 			Type messageActionClassType = ServerActionFactory.GetActionClassType(msg.MessageType);
 
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			ServerActionBase action = (ServerActionBase)mapper.ToObject(messageActionClassType, msg.Body);
 
 			// Ready for callback!

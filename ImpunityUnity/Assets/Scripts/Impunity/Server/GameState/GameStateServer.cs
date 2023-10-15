@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
-using Impunity.Networking;
 using UltraLiteDB;
 
 
@@ -110,12 +109,12 @@ namespace Impunity.GameState
 			}
 
 			GameId = gameId;
-			GamePasswordHash = ImpunityNetworkingUtil.HashPassword(gamePassword);
+			GamePasswordHash = ImpunityUtil.HashPassword(gamePassword);
 			Options = options;
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 
 			DB = gameDatabase;
-			Live = new GameStateLive();
+			Live = new GameStateLive(this);
 
 			Summary = DB.LoadGameSummary();
 			Metadata = DB.LoadMetadata();

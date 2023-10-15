@@ -3,14 +3,16 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 
+using UltraLiteDB;
+
 namespace Impunity.GameState
 {
 
-	public struct DSmallCustom : IDistributableValueType
+	public struct DSmallCustom : IStandardDistributableValueType
 	{
-		private byte[] Value;
+		private ArraySegment<byte> Value;
 
-		public DSmallCustom(byte[] v)
+		public DSmallCustom(ArraySegment<byte> v)
 		{
 			Value = v;
 		}
@@ -19,12 +21,12 @@ namespace Impunity.GameState
 		{
 			// For non-nullable custom, null actually means "uninitialized default value,
 			// whatever that is for that type. Send 0 length indicates default.
-			if (Value == null)
+			if (Value.Array == null)
             {
 				w.Write((byte)0);
 				return;
 			}
-			w.Write((byte)Value.Length);
+			w.Write((byte)Value.Count);
 			w.Write(Value);
 		}
 
@@ -36,30 +38,33 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 
-		public static implicit operator byte[](DSmallCustom d) => d.Value;
-		public static implicit operator DSmallCustom(byte[] d) => new DSmallCustom(d);
-		public bool Equals(DSmallCustom v) => Array.Equals(Value, v.Value);
+		public static implicit operator ArraySegment<byte>?(DSmallCustom d) => d.Value;
+		public static implicit operator DSmallCustom(ArraySegment<byte> d) => new DSmallCustom(d);
+		public bool Equals(DSmallCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DSmallNullableCustom : IDistributableValueType
+	public struct DSmallNullableCustom : IStandardDistributableValueType
 	{
-		private byte[] Value;
+		private ArraySegment<byte> Value;
 
-		public DSmallNullableCustom(byte[] v)
+		public DSmallNullableCustom(ArraySegment<byte> v)
 		{
 			Value = v;
 		}
 
 		public void WriteTo(BinaryWriter w)
 		{
-			if (Value == null)
+			if (Value.Array == null)
 			{
 				w.Write(false);
 			}
 			else
 			{
 				w.Write(true);
-				w.Write((byte)Value.Length);
+				w.Write((byte)Value.Count);
 				w.Write(Value);
 			}
 		}
@@ -80,16 +85,19 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
 
-		public static implicit operator byte[](DSmallNullableCustom d) => d.Value;
-		public static implicit operator DSmallNullableCustom(byte[] d) => new DSmallNullableCustom(d);
-		public bool Equals(DSmallNullableCustom v) => Array.Equals(Value, v.Value);
+		public static implicit operator ArraySegment<byte>(DSmallNullableCustom d) => d.Value;
+		public static implicit operator DSmallNullableCustom(ArraySegment<byte> d) => new DSmallNullableCustom(d);
+		public bool Equals(DSmallNullableCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DCustom : IDistributableValueType
+	public struct DCustom : IStandardDistributableValueType
 	{
-		private byte[] Value;
+		private ArraySegment<byte> Value;
 
-		public DCustom(byte[] v)
+		public DCustom(ArraySegment<byte> v)
 		{
 			Value = v;
 		}
@@ -98,12 +106,12 @@ namespace Impunity.GameState
 		{
 			// For non-nullable custom, null actually means "uninitialized default value,
 			// whatever that is for that type. Send 0 length indicates default.
-			if (Value == null)
+			if (Value.Array == null)
 			{
 				w.Write((ushort)0);
 				return;
 			}
-			w.Write((ushort)Value.Length);
+			w.Write((ushort)Value.Count);
 			w.Write(Value);
 		}
 
@@ -115,30 +123,33 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
 
-		public static implicit operator byte[](DCustom d) => d.Value;
-		public static implicit operator DCustom(byte[] d) => new DCustom(d);
-		public bool Equals(DCustom v) => Array.Equals(Value, v.Value);
+		public static implicit operator ArraySegment<byte>(DCustom d) => d.Value;
+		public static implicit operator DCustom(ArraySegment<byte> d) => new DCustom(d);
+		public bool Equals(DCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DNullableCustom : IDistributableValueType
+	public struct DNullableCustom : IStandardDistributableValueType
 	{
-		private byte[] Value;
+		private ArraySegment<byte> Value;
 
-		public DNullableCustom(byte[] v)
+		public DNullableCustom(ArraySegment<byte> v)
 		{
 			Value = v;
 		}
 
 		public void WriteTo(BinaryWriter w)
 		{
-			if (Value == null)
+			if (Value.Array == null)
 			{
 				w.Write(false);
 			}
 			else
 			{
 				w.Write(true);
-				w.Write((ushort)Value.Length);
+				w.Write((ushort)Value.Count);
 				w.Write(Value);
 			}
 		}
@@ -159,12 +170,15 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 
-		public static implicit operator byte[](DNullableCustom d) => d.Value;
-		public static implicit operator DNullableCustom(byte[] d) => new DNullableCustom(d);
-		public bool Equals(DNullableCustom v) => Array.Equals(Value, v.Value);
+		public static implicit operator ArraySegment<byte>(DNullableCustom d) => d.Value;
+		public static implicit operator DNullableCustom(ArraySegment<byte> d) => new DNullableCustom(d);
+		public bool Equals(DNullableCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public class ServerDistributedArray<T> : IDistributableValueType where T : struct, IDistributableValueType
+	public class ServerDistributedArray<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
@@ -219,9 +233,40 @@ namespace Impunity.GameState
 				}
 			}
 		}
+
+		public BsonValue AsBsonValue()
+		{
+			if (Value == null)
+			{
+				return null;
+			}
+
+			BsonArray array = new BsonArray();
+			foreach(T i in Value)
+			{
+				array.Add(i.AsBsonValue());
+			}
+			return array;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonArray array = value.AsArray;
+			if (array == null)
+			{
+				Value = null;
+				return;
+			}
+
+			Value = new T[array.Count];
+			for(int i=0; i < array.Count; i++)
+			{
+				Value[i].FromBsonValue(array[i]);
+			}
+		}
 	}
 
-	public class ServerDistributedQueue<T> : IDistributableValueType where T : struct, IDistributableValueType
+	public class ServerDistributedQueue<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
@@ -295,9 +340,42 @@ namespace Impunity.GameState
 				}
 			}
 		}
+
+		public BsonValue AsBsonValue()
+		{
+			if (Value == null)
+			{
+				return null;
+			}
+
+			BsonArray array = new BsonArray();
+			foreach (T i in Value)
+			{
+				array.Add(i.AsBsonValue());
+			}
+			return array;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonArray array = value.AsArray;
+			if (array == null)
+			{
+				Value = null;
+				return;
+			}
+
+			Value = new Queue<T>();
+			for (int i = 0; i < array.Count; i++)
+			{
+				T val = default(T);
+				val.FromBsonValue(array[i]);
+				AddValue(val);
+			}
+		}
 	}
 
-	public class ServerDistributedIntDictionary<T> : IDistributableValueType where T : struct, IDistributableValueType
+	public class ServerDistributedIntDictionary<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
@@ -362,9 +440,44 @@ namespace Impunity.GameState
 				}
 			}
 		}
+
+		public BsonValue AsBsonValue()
+		{
+			if (Value == null)
+			{
+				return null;
+			}
+
+			BsonDocument dict = new BsonDocument();
+			foreach(var pair in Value)
+			{
+				dict[ImpunityUtil.KeyIntToString(pair.Key)] = pair.Value.AsBsonValue();
+			}
+			return dict;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonDocument dict = value.AsDocument;
+
+			if (dict == null)
+			{
+				Value = null;
+				return;
+			}
+
+			Value = new Dictionary<int, T>();
+
+			foreach(var pair in dict)
+			{
+				T val = default(T);
+				val.FromBsonValue(pair.Value);
+				Value[ImpunityUtil.KeyStringToInt(pair.Key)] = val;
+			}
+		}
 	}
 
-	public class ServerDistributedStringDictionary<T> : IDistributableValueType where T : struct, IDistributableValueType
+	public class ServerDistributedStringDictionary<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
@@ -421,6 +534,41 @@ namespace Impunity.GameState
 					w.Write(pair.Key);
 					pair.Value.WriteTo(w);
 				}
+			}
+		}
+
+		public BsonValue AsBsonValue()
+		{
+			if (Value == null)
+			{
+				return null;
+			}
+
+			BsonDocument dict = new BsonDocument();
+			foreach (var pair in Value)
+			{
+				dict[pair.Key] = pair.Value.AsBsonValue();
+			}
+			return dict;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonDocument dict = value.AsDocument;
+
+			if (dict == null)
+			{
+				Value = null;
+				return;
+			}
+
+			Value = new Dictionary<string, T>();
+
+			foreach (var pair in dict)
+			{
+				T val = default(T);
+				val.FromBsonValue(pair.Value);
+				Value[pair.Key] = val;
 			}
 		}
 	}
@@ -481,43 +629,43 @@ namespace Impunity.GameState
 			throw new Exception("Unknown propery type " + type);
 		}
 
-		public static IDistributableValueType MakeValue(byte type)
+		public static IStandardDistributableValueType MakeValue(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
-			return (IDistributableValueType)Activator.CreateInstance(dtype);
+			return (IStandardDistributableValueType)Activator.CreateInstance(dtype);
 		}
 
 
-		public static IDistributableValueType MakeArray(byte type)
+		public static IStandardDistributableValueType MakeArray(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedArray<>).MakeGenericType(dtype);
 
-			return (IDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
-		public static IDistributableValueType MakeQueue(byte type)
+		public static IStandardDistributableValueType MakeQueue(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedQueue<>).MakeGenericType(dtype);
 
-			return (IDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
-		public static IDistributableValueType MakeIntDictionary(byte type)
+		public static IStandardDistributableValueType MakeIntDictionary(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedIntDictionary<>).MakeGenericType(dtype);
 
-			return (IDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
-		public static IDistributableValueType MakeStringDictionary(byte type)
+		public static IStandardDistributableValueType MakeStringDictionary(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedStringDictionary<>).MakeGenericType(dtype);
 
-			return (IDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
 

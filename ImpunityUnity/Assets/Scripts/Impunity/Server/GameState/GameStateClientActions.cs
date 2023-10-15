@@ -3,7 +3,6 @@ using System.Collections.Generic;
 
 using UltraLiteDB;
 
-using Impunity.Networking;
 
 namespace Impunity.GameState
 {
@@ -385,7 +384,7 @@ namespace Impunity.GameState
 		// Custom deserializer so that we know what generic type to expect for each result nin the list
 		public override void DeserializeResults(BsonDocument resultBody)
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 
 			BsonValue errorVal = resultBody["e"];
 			if (!errorVal.IsNull)

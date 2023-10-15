@@ -2,8 +2,6 @@ using System;
 
 using UltraLiteDB;
 
-using Impunity.Networking;
-
 
 namespace Impunity.GameState
 {
@@ -40,7 +38,7 @@ namespace Impunity.GameState
 
 		public virtual BsonDocument SerializeRequest()
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			BsonDocument requestBson = mapper.ToDocument(GetType(), this);
 
 			return requestBson;
@@ -64,11 +62,13 @@ namespace Impunity.GameState
 				Error = new ImpunityErrorResponse(e);
 				if (e is ImpunityServerFatalException)
 				{
+					// Rethrow fatal errors so the connection can also handle them
 					throw e;
 				}
 			}
 			catch (Exception e)
 			{
+				ImpunityLogger.LogError(e, "Exception running action");
 				Error = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
 			}
 		}
@@ -83,7 +83,7 @@ namespace Impunity.GameState
 
 		public BsonDocument SerializeResults()
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			ActionResult reply = GetResult();
 			return mapper.ToDocument(reply);
 		}
@@ -118,7 +118,7 @@ namespace Impunity.GameState
 
 		public override void DeserializeResults(BsonDocument resultBody)
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			ActionResult reply = mapper.ToObject<ActionResult>(resultBody);
 			Error = reply.Error;
 		}
@@ -157,7 +157,7 @@ namespace Impunity.GameState
 
 		public override void DeserializeResults(BsonDocument resultBody)
 		{
-			BsonMapper mapper = ImpunityNetworkingUtil.GetBsonMapper();
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
 			ActionResult<TResult> reply = mapper.ToObject<ActionResult<TResult>>(resultBody);
 			Error = reply.Error;
 			Result = reply.Result;

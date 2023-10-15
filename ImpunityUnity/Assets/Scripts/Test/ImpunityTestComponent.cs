@@ -114,7 +114,7 @@ public partial class TestZone : DistributedChannelBase
 	[Distributed((int)DistributedPropIds.SCALAR)]
 	private DistributedValue<DFloat> Scalar;
 
-	[Distributed((int)DistributedPropIds.GRID, OnChanged = "OnGridChanged")]
+	[Distributed((int)DistributedPropIds.GRID, OnChanged = "OnGridChanged", OnReplaced = "OnGridReplaced")]
 	private DistributedArray<DInt32> Grid;
 
 	private void OnGridChanged(int index, int oldValue, int newValue)
@@ -123,12 +123,24 @@ public partial class TestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged")]
+	private void OnGridReplaced(DInt32[] oldValue, DInt32[] newValue)
+	{
+		ImpunityLogger.LogInformation("Got grid replaced on TestZone");
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged", OnReplaced = "OnChatReplaced")]
 	private DistributedQueue<DString> Chat;
 
 	private void OnChatChanged(string newValue)
 	{
 		ImpunityLogger.LogInformation("Got chat change on TestZone: " + newValue);
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	private void OnChatReplaced(Queue<DString> oldValue, Queue<DString> newValue)
+	{
+		ImpunityLogger.LogInformation("Got chat replaced on TestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 }
@@ -586,6 +598,8 @@ public class ImpunityTestComponent : MonoBehaviour
 		TestPlayer c2player1 = new TestPlayer();
 		c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c1channel);
 		ImpunityLogger.LogInformation("C2 Made player: " + c2player1.DistributedEntityId);
+
+		WaitingForCount = 4;
 
 		c1channel.SetScalar(2.0f);
 		c1channel.SetStatus("New status");

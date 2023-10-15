@@ -211,7 +211,7 @@ namespace Impunity.Connection
 
 		// -------------- Public API
 
-		public GameStateEntityType[] RegisterEntityTypes(Type[] entityTypes)
+		public GameStateEntityTypeDef[] RegisterEntityTypes(Type[] entityTypes)
         {
 			if (entityTypes == null || entityTypes.Length == 0)
             {
@@ -221,13 +221,13 @@ namespace Impunity.Connection
 
 			List<DistributedTypeInfo> internalTypeInfoList = new List<DistributedTypeInfo>();
 
-			GameStateEntityType[] convertedEntityTypes = new GameStateEntityType[entityTypes.Length];
+			GameStateEntityTypeDef[] convertedEntityTypes = new GameStateEntityTypeDef[entityTypes.Length];
 
 
 			int i = 0;
 			foreach(Type entityType in entityTypes)
             {
-				GameStateEntityType entityData = RegisterEntityType(entityType, internalTypeInfoList);
+				GameStateEntityTypeDef entityData = RegisterEntityType(entityType, internalTypeInfoList);
 				convertedEntityTypes[i++] = entityData;
 			}
 
@@ -291,7 +291,7 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 			}
 
-			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, null, (ImpunityErrorResponse err, uint channelId) =>
+			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, propertyBytes, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
                 {
@@ -337,7 +337,7 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, null, (ImpunityErrorResponse err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, (ImpunityErrorResponse err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -395,14 +395,14 @@ namespace Impunity.Connection
 
 		// ---------------
 
-		private GameStateEntityType RegisterEntityType(Type entityType, List<DistributedTypeInfo> internalTypeInfoList)
+		private GameStateEntityTypeDef RegisterEntityType(Type entityType, List<DistributedTypeInfo> internalTypeInfoList)
         {
 			if (!entityType.IsClass)
             {
 				throw new Exception("Tried to register distributed entity " + entityType.Name + " that's not a class type");
 			}
 
-			GameStateEntityType entityData = new GameStateEntityType();
+			GameStateEntityTypeDef entityData = new GameStateEntityTypeDef();
 			entityData.Name = entityType.Name;
 
 			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
@@ -418,9 +418,16 @@ namespace Impunity.Connection
             }
 
 			entityData.PersistedAs = distAttr.PersistAs?.Trim();
-			if (entityData.PersistedAs != null && entityData.PersistedAs.Length == 0)
+			if (entityData.PersistedAs != null)
 			{
-				throw new Exception("Can't use empty string as PersistedAs value");
+				if (entityData.PersistedAs.Length == 0)
+				{
+					throw new Exception("Can't use empty string as PersistedAs value");
+				}
+				else if (entityData.PersistedAs.StartsWith("_"))
+				{
+					throw new Exception("Can't start PersistedAs with underscore");
+				}
 			}
 
 			DistributedTypeInfo internalTypeInfo = new DistributedTypeInfo();
@@ -483,20 +490,25 @@ namespace Impunity.Connection
 				dfield.FieldType = tempFieldValue.FieldType;
 				dfield.FieldValueType = tempFieldValue.ValueType;
 				dfield.PersistedAs = fieldAttr.PersistAs?.Trim();
-				if (dfield.PersistedAs != null && dfield.PersistedAs.Length == 0)
-				{
-					throw new Exception("Can't use empty string as PersistedAs value");
-				}
-
 				if (dfield.PersistedAs != null)
 				{
-					hasPersistedField = true;
+					if (dfield.PersistedAs.Length == 0)
+					{
+						throw new Exception("Can't use empty string as PersistedAs value");
+					}
+					else if(dfield.PersistedAs.StartsWith("_"))
+					{
+						throw new Exception("Can't start PersistedAs with underscore");
+					}
+
 					if (entityData.PersistedAs == null)
 					{
 						throw new Exception("Can't have a distributed field persisted if the entity is not persisted");
 					}
-					
+
+					hasPersistedField = true;
 				}
+
 
 				MethodInfo writeMethod = entityType.GetMethod("imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)

@@ -2,6 +2,8 @@
 using System;
 using System.IO;
 
+using UltraLiteDB;
+
 namespace Impunity.GameState
 {
 
@@ -13,9 +15,15 @@ namespace Impunity.GameState
 		void ReadFrom(BinaryReader r);
 	}
 
+	public interface IStandardDistributableValueType : IDistributableValueType
+	{
+		BsonValue AsBsonValue();
+		void FromBsonValue(BsonValue value);
+	}
+
 	// Single values
 
-	public struct DBool : IDistributableValueType
+	public struct DBool : IStandardDistributableValueType
 	{
 		private bool Value;
 
@@ -40,9 +48,11 @@ namespace Impunity.GameState
 		public static implicit operator DBool(bool d) => new DBool(d);
 		public bool Equals(DBool v) => Value == v.Value;
 
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBoolean; }
 	}
 
-	public struct DInt8 : IDistributableValueType
+	public struct DInt8 : IStandardDistributableValueType
 	{
 		private sbyte Value;
 
@@ -65,9 +75,12 @@ namespace Impunity.GameState
 
 		public static implicit operator sbyte(DInt8 d) => d.Value;
 		public static implicit operator DInt8(sbyte d) => new DInt8(d);
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = (sbyte)value.AsInt32; }
 	}
 
-	public struct DUInt8 : IDistributableValueType
+	public struct DUInt8 : IStandardDistributableValueType
 	{
 		private byte Value;
 
@@ -91,9 +104,12 @@ namespace Impunity.GameState
 		public static implicit operator byte(DUInt8 d) => d.Value;
 		public static implicit operator DUInt8(byte d) => new DUInt8(d);
 		public bool Equals(DUInt8 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return (int)Value; }
+		public void FromBsonValue(BsonValue value) { Value = (byte)value.AsInt32; }
 	}
 
-	public struct DInt16 : IDistributableValueType
+	public struct DInt16 : IStandardDistributableValueType
 	{
 		private short Value;
 
@@ -117,9 +133,12 @@ namespace Impunity.GameState
 		public static implicit operator short(DInt16 d) => d.Value;
 		public static implicit operator DInt16(short d) => new DInt16(d);
 		public bool Equals(DInt16 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = (short)value.AsInt32; }
 	}
 
-	public struct DUInt16 : IDistributableValueType
+	public struct DUInt16 : IStandardDistributableValueType
 	{
 		private ushort Value;
 
@@ -143,9 +162,12 @@ namespace Impunity.GameState
 		public static implicit operator ushort(DUInt16 d) => d.Value;
 		public static implicit operator DUInt16(ushort d) => new DUInt16(d);
 		public bool Equals(DUInt16 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return (int)Value; }
+		public void FromBsonValue(BsonValue value) { Value = (ushort)value.AsInt32; }
 	}
 
-	public struct DInt32 : IDistributableValueType
+	public struct DInt32 : IStandardDistributableValueType
 	{
 		private int Value;
 
@@ -169,9 +191,12 @@ namespace Impunity.GameState
 		public static implicit operator int(DInt32 d) => d.Value;
 		public static implicit operator DInt32(int d) => new DInt32(d);
 		public bool Equals(DInt32 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsInt32; }
 	}
 
-	public struct DUInt32 : IDistributableValueType
+	public struct DUInt32 : IStandardDistributableValueType
 	{
 		private uint Value;
 
@@ -195,9 +220,12 @@ namespace Impunity.GameState
 		public static implicit operator uint(DUInt32 d) => d.Value;
 		public static implicit operator DUInt32(uint d) => new DUInt32(d);
 		public bool Equals(DUInt32 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return (int)Value; }
+		public void FromBsonValue(BsonValue value) { Value = (uint)value.AsInt32; }
 	}
 
-	public struct DInt64 : IDistributableValueType
+	public struct DInt64 : IStandardDistributableValueType
 	{
 		private long Value;
 
@@ -221,9 +249,12 @@ namespace Impunity.GameState
 		public static implicit operator long(DInt64 d) => d.Value;
 		public static implicit operator DInt64(long d) => new DInt64(d);
 		public bool Equals(DInt64 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsInt64; }
 	}
 
-	public struct DUInt64 : IDistributableValueType
+	public struct DUInt64 : IStandardDistributableValueType
 	{
 		private ulong Value;
 
@@ -247,9 +278,12 @@ namespace Impunity.GameState
 		public static implicit operator ulong(DUInt64 d) => d.Value;
 		public static implicit operator DUInt64(ulong d) => new DUInt64(d);
 		public bool Equals(DUInt64 v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return (long)Value; }
+		public void FromBsonValue(BsonValue value) { Value = (ulong)value.AsInt64; }
 	}
 
-	public struct DFloat : IDistributableValueType
+	public struct DFloat : IStandardDistributableValueType
 	{
 		private float Value;
 
@@ -273,9 +307,12 @@ namespace Impunity.GameState
 		public static implicit operator float(DFloat d) => d.Value;
 		public static implicit operator DFloat(float d) => new DFloat(d);
 		public bool Equals(DFloat v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsSingle; }
 	}
 
-	public struct DDouble : IDistributableValueType
+	public struct DDouble : IStandardDistributableValueType
 	{
 		private double Value;
 
@@ -299,9 +336,12 @@ namespace Impunity.GameState
 		public static implicit operator double(DDouble d) => d.Value;
 		public static implicit operator DDouble(double d) => new DDouble(d);
 		public bool Equals(DDouble v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsDouble; }
 	}
 
-	public struct DDecimal : IDistributableValueType
+	public struct DDecimal : IStandardDistributableValueType
 	{
 		private decimal Value;
 
@@ -325,9 +365,12 @@ namespace Impunity.GameState
 		public static implicit operator decimal(DDecimal d) => d.Value;
 		public static implicit operator DDecimal(decimal d) => new DDecimal(d);
 		public bool Equals(DDecimal v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsDecimal; }
 	}
 
-	public struct DChar : IDistributableValueType
+	public struct DChar : IStandardDistributableValueType
 	{
 		private char Value;
 
@@ -351,9 +394,12 @@ namespace Impunity.GameState
 		public static implicit operator char(DChar d) => d.Value;
 		public static implicit operator DChar(char d) => new DChar(d);
 		public bool Equals(DChar v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return (int)Value; }
+		public void FromBsonValue(BsonValue value) { Value = (char)value.AsInt32; }
 	}
 
-	public struct DString : IDistributableValueType
+	public struct DString : IStandardDistributableValueType
 	{
 		private string Value;
 
@@ -393,30 +439,33 @@ namespace Impunity.GameState
 		public static implicit operator string(DString d) => d.Value;
 		public static implicit operator DString(string d) => new DString(d);
 		public bool Equals(DString v) => String.Equals(Value, v.ValueType);
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsString; }
 	}
 
 	
 
-	public struct DBlob : IDistributableValueType
+	public struct DBlob : IStandardDistributableValueType
 	{
-		private byte[] Value;
+		private ArraySegment<byte> Value;
 
-		public DBlob(byte[] v)
+		public DBlob(ArraySegment<byte> v)
 		{
 			Value = v;
 		}
 
 		public void WriteTo(BinaryWriter w)
 		{
-			if (Value == null)
+			if (Value.Array != null)
 			{
-				w.Write(false);
+				w.Write(true);
+				w.Write((ushort)Value.Count);
+				w.Write(Value);
 			}
 			else
 			{
-				w.Write(true);
-				w.Write((ushort)Value.Length);
-				w.Write(Value);
+				w.Write(false);
 			}
 		}
 
@@ -436,12 +485,15 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
 
-		public static implicit operator byte[](DBlob d) => d.Value;
-		public static implicit operator DBlob(byte[] d) => new DBlob(d);
-		public bool Equals(DBlob v) => Array.Equals(Value, v.Value);
+		public static implicit operator ArraySegment<byte>(DBlob d) => d.Value;
+		public static implicit operator DBlob(ArraySegment<byte> d) => new DBlob(d);
+		public bool Equals(DBlob v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DDateTime : IDistributableValueType
+	public struct DDateTime : IStandardDistributableValueType
 	{
 		private DateTime Value;
 
@@ -465,9 +517,12 @@ namespace Impunity.GameState
 		public static implicit operator DateTime(DDateTime d) => d.Value;
 		public static implicit operator DDateTime(DateTime d) => new DDateTime(d);
 		public bool Equals(DDateTime v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsDateTime; }
 	}
 
-	public struct DTimeSpan : IDistributableValueType
+	public struct DTimeSpan : IStandardDistributableValueType
 	{
 		private TimeSpan Value;
 
@@ -491,9 +546,12 @@ namespace Impunity.GameState
 		public static implicit operator TimeSpan(DTimeSpan d) => d.Value;
 		public static implicit operator DTimeSpan(TimeSpan d) => new DTimeSpan(d);
 		public bool Equals(DTimeSpan v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value.Ticks; }
+		public void FromBsonValue(BsonValue value) { Value = new TimeSpan(value.AsInt64); }
 	}
 
-	public struct DGuid : IDistributableValueType
+	public struct DGuid : IStandardDistributableValueType
 	{
 		private Guid Value;
 
@@ -517,6 +575,9 @@ namespace Impunity.GameState
 		public static implicit operator Guid(DGuid d) => d.Value;
 		public static implicit operator DGuid(Guid d) => new DGuid(d);
 		public bool Equals(DGuid v) => Value == v.Value;
+
+		public BsonValue AsBsonValue() { return Value; }
+		public void FromBsonValue(BsonValue value) { Value = value.AsGuid; }
 	}
 
 

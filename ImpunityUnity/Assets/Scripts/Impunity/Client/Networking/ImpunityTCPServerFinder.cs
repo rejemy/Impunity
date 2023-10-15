@@ -107,7 +107,7 @@ namespace Impunity.Networking
 				while (Running)
 				{
 					byte[] packet = FinderUdpSocket.Receive(ref groupEP);
-					if (ImpunityNetworkingUtil.StartsWith(packet, ServerAnnounceHeader))
+					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))
 					{
 						ImpunityLogger.LogDebug("Got server announce");
 						OnServerAnnounce(packet, ref groupEP);

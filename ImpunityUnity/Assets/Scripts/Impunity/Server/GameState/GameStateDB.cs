@@ -187,6 +187,7 @@ namespace Impunity.GameState
 			CollectionData entityCollection = new CollectionData();
 			entityCollection.Name = "Entities";
 			entityCollection.Collection = GameDB.GetCollection<BsonDocument>(entityCollection.Name);
+			entityCollection.Collection.EnsureIndex("_ch");
 			Collections[(int)ImpunityInternalCollectionIds.Entities] = entityCollection;
 			collectionNames.Add(entityCollection.Name);
 
@@ -208,6 +209,7 @@ namespace Impunity.GameState
 				collection.Collection = GameDB.GetCollection<BsonDocument>(collection.Name);
 				Collections[collectionInfo.Index] = collection;
 				collectionNames.Add(collection.Name);
+				
 			}
 		}
 
