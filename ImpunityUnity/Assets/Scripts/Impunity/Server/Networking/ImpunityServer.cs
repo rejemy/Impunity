@@ -14,6 +14,8 @@ namespace Impunity.Networking
 
 	public class CloseClientConnectionAction : LocalGameStateAction
 	{
+		public override bool IsDBOperation() { return false; }
+
 		protected override void DoAction(GameStateServer game)
 		{
 
@@ -238,6 +240,7 @@ namespace Impunity.Networking
 			return server;
 		}
 
+		// Called on live thread
 		public void OnGameMetadataChanged(GameStateServer game)
 		{
 			GameMetadata md = game.GetGameMetadata();
@@ -247,6 +250,7 @@ namespace Impunity.Networking
 			}
 		}
 
+		// Called on Live thread
 		public void OnGameSummaryChanged(GameStateServer game)
 		{
 			NetworkServer.SetGameSummary(game.GameId, game.GetGameSummary());

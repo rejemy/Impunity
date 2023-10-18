@@ -195,6 +195,19 @@ namespace Impunity.Networking
 		public bool PasswordProtected;
 
 		public ArraySegment<byte> AnnouncePacket;
+
+		public PerGameTCPServerData Copy()
+		{
+			PerGameTCPServerData copy = new PerGameTCPServerData();
+			copy.GameId = GameId;
+			copy.GameStateFormatVersion = GameStateFormatVersion;
+			copy.GameStateFormatChecksum = GameStateFormatChecksum;
+			copy.CurrGameSummary = CurrGameSummary;
+			copy.PasswordProtected = PasswordProtected;
+			copy.AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]);
+
+			return copy;
+		}
 	}
 
 	public class ImpunityTCPServer : IImpunityNetworkServer
@@ -253,20 +266,26 @@ namespace Impunity.Networking
 			PerGameData.Add(game.GameId, tcpGameData);
 		}
 
+		// Called on Live thread
 		public void SetGameSummary(string gameId, BsonDocument summary)
 		{
-			PerGameTCPServerData tcpGameData = PerGameData[gameId];
+			// Make copy so we can edit it without it being accessed by another thread
+			PerGameTCPServerData tcpGameData = PerGameData[gameId].Copy();
 			tcpGameData.CurrGameSummary = summary;
 			MakeAnnouncePacket(tcpGameData);
+			PerGameData[gameId] = tcpGameData;
 		}
 
+		// Called on Live thread
 		public void SetGameStateFormat(string gameId, int version, string dataChecksum)
 		{
-			PerGameTCPServerData tcpGameData = PerGameData[gameId];
+			// Make copy so we can edit it without it being accessed by another thread
+			PerGameTCPServerData tcpGameData = PerGameData[gameId].Copy();
 			tcpGameData.GameStateFormatVersion = version;
 			tcpGameData.GameStateFormatChecksum = dataChecksum;
 
 			MakeAnnouncePacket(tcpGameData);
+			PerGameData[gameId] = tcpGameData;
 		}
 
 		private void MakeAnnouncePacket(PerGameTCPServerData tcpGameData)

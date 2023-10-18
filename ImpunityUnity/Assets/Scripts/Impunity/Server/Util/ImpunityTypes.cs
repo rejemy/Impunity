@@ -37,8 +37,7 @@ namespace Impunity
 
 	public enum ImpunityInternalCollectionIds
 	{
-		Channels = 1,
-		Entities = 2
+		Entities = 1
 	}
 
 	public enum ImpunityLogLevel

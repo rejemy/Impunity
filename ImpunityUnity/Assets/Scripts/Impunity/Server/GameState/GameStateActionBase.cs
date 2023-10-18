@@ -34,7 +34,7 @@ namespace Impunity.GameState
 
 		public abstract ushort GetActionType();
 		public abstract bool HasCallback();
-		public virtual bool LiveDataQueue() { return false; }
+		public abstract bool IsDBOperation();
 
 		public virtual BsonDocument SerializeRequest()
 		{
@@ -93,6 +93,7 @@ namespace Impunity.GameState
 		// Final callback
 		public abstract void InvokeOnCompleteCallback();
 	}
+
 
 	public abstract class ClientActionResultlessBase : GameStateActionBase
 	{
@@ -172,6 +173,7 @@ namespace Impunity.GameState
 
 	public abstract class ServerActionBase : GameStateActionBase
 	{
+		public override bool IsDBOperation() { return false; }
 
 		[BsonIgnore]
 		public bool Guaranteed { get; set; } = true;

@@ -406,7 +406,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		char2["level"] = 10;
 
 		ImpunityLogger.LogInformation("Compound upsert");
-		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundActionYield(new GameStateActionBase[] {
+		ImpunityYield<List<ActionResult>> compoundAction = connection.CompoundDatabaseActionYield(new GameStateActionBase[] {
 			new UpsertDocumentAction(TestCollectionTypes.CHARACTERS, char1),
 			new UpsertDocumentAction(TestCollectionTypes.CHARACTERS, char2),
 			new ListDocumentsAction(TestCollectionTypes.CHARACTERS),

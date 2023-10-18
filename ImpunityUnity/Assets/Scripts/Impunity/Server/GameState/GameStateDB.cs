@@ -156,6 +156,7 @@ namespace Impunity.GameState
 		// ------------ API -----------------
 
 
+		// Called from live thread
 		public void SetGameSummary(BsonDocument summary)
 		{
 			byte[] summaryBytes = BsonSerializer.Serialize(summary);
@@ -178,16 +179,16 @@ namespace Impunity.GameState
 
 			HashSet<string> collectionNames = new HashSet<string>();
 
-			CollectionData channelCollection = new CollectionData();
-			channelCollection.Name = "Channels";
-			channelCollection.Collection = GameDB.GetCollection<BsonDocument>(channelCollection.Name);
-			Collections[(int)ImpunityInternalCollectionIds.Channels] = channelCollection;
-			collectionNames.Add(channelCollection.Name);
+			//CollectionData channelCollection = new CollectionData();
+			//channelCollection.Name = "Channels";
+			//channelCollection.Collection = GameDB.GetCollection<BsonDocument>(channelCollection.Name);
+			//Collections[(int)ImpunityInternalCollectionIds.Channels] = channelCollection;
+			//collectionNames.Add(channelCollection.Name);
 
 			CollectionData entityCollection = new CollectionData();
 			entityCollection.Name = "Entities";
 			entityCollection.Collection = GameDB.GetCollection<BsonDocument>(entityCollection.Name);
-			entityCollection.Collection.EnsureIndex("_ch");
+			entityCollection.Collection.EnsureIndex("ch");
 			Collections[(int)ImpunityInternalCollectionIds.Entities] = entityCollection;
 			collectionNames.Add(entityCollection.Name);
 
@@ -243,6 +244,50 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Upsert(doc);
 		}
 
+		public bool MergeIntoDocument(int collectionId, BsonDocument doc)
+		{
+			if (collectionId <= 0 || collectionId >= Collections.Length)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
+			}
+
+			var collection = Collections[collectionId].Collection;
+			var existing = collection.FindById(doc["_id"]);
+			if (existing == null)
+			{
+				return false;
+			}
+
+			foreach (var data in doc)
+			{
+				existing[data.Key] = data.Value;
+			}
+
+			return Collections[collectionId].Collection.Update(existing);
+		}
+
+		public bool MergeInsertDocument(int collectionId, BsonDocument doc)
+		{
+			if (collectionId <= 0 || collectionId >= Collections.Length)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
+			}
+
+			var collection = Collections[collectionId].Collection;
+			var existing = collection.FindById(doc["_id"]);
+			if (existing == null)
+			{
+				return Collections[collectionId].Collection.Upsert(doc);
+			}
+
+			foreach (var data in doc)
+			{
+				existing[data.Key] = data.Value;
+			}
+
+			return Collections[collectionId].Collection.Update(existing);
+		}
+
 		public BsonDocument FindDocumentById(int collectionId, BsonValue id)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -271,6 +316,57 @@ namespace Impunity.GameState
 			}
 
 			return new List<BsonDocument>(Collections[collectionId].Collection.FindAll());
+		}
+
+		// Private API for use by the live entity system
+
+		public void CreateLiveEntity(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			BsonDocument entityDoc = new BsonDocument();
+			entityDoc["_id"] = entityId;
+			entityDoc["ch"] = channelId;
+			entityDoc["t"] = entityType;
+			entityDoc["f"] = (int)instanceFlags;
+
+			collection.Collection.Upsert(entityDoc);
+			if (properties != null)
+			{
+				foreach (LiveEntityPersistedPropertyData prop in properties)
+				{
+					BsonDocument propDoc = new BsonDocument();
+					propDoc["_id"] = entityId + "/" + prop.PropertyName;
+					propDoc["ch"] = channelId;
+					propDoc["v"] = prop.PropertyValue;
+
+					collection.Collection.Upsert(propDoc);
+				}
+			}
+		}
+
+		public void UpdateLiveEntityProperties(string entityId, string channelId, List<LiveEntityPersistedPropertyData> properties)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			foreach (LiveEntityPersistedPropertyData prop in properties)
+			{
+				BsonDocument propDoc = new BsonDocument();
+				propDoc["_id"] = entityId + "/" + prop.PropertyName;
+				propDoc["ch"] = channelId;
+				propDoc["v"] = prop.PropertyValue;
+
+				collection.Collection.Upsert(propDoc);
+			}
+		}
+
+		public List<BsonDocument> ListChannelContents(string channelId)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			var data = collection.Collection.Find(Query.EQ("ch", channelId));
+
+			return null;
 		}
 	}
 

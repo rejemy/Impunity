@@ -125,9 +125,9 @@ namespace Impunity.Connection
 
 		// -------- API Calls
 
-		public void CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
+		public void CompoundDatabaseAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete)
 		{
-			DoAction(new CompoundAction(actions, onComplete));
+			DoAction(new CompoundDatabaseAction(actions, onComplete));
 		}
 
 		// -------- Game Setup
@@ -157,6 +157,16 @@ namespace Impunity.Connection
 		public void UpsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
 		{
 			DoAction(new UpsertDocumentAction(collectionId, doc, onComplete));
+		}
+
+		public void MergeIntoDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new MergeIntoDocumentAction(collectionId, doc, onComplete));
+		}
+
+		public void MergeInsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new MergeInsertDocumentAction(collectionId, doc, onComplete));
 		}
 
 		public void FindDocumentById(int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete)

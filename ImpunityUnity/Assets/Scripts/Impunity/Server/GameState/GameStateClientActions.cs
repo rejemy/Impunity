@@ -8,18 +8,19 @@ namespace Impunity.GameState
 {
 	public enum ClientActionType
 	{
-		COMPOUND = 1,
-
 		ESTABLISH_CONNECTION = 100,
 		SET_SUMMARY = 101,
 		GET_SUMMARY = 102,
 
-		INSERT_DOCUMENT = 200,
-		UPDATE_DOCUMENT = 201,
-		UPSERT_DOCUMENT = 202,
-		FIND_DOCUMENT_BY_ID = 203,
-		DELETE_DOCUMENT = 204,
-		LIST_DOCUMENTS = 205,
+		COMPOUND_DATABASE = 200,
+		INSERT_DOCUMENT = 201,
+		UPDATE_DOCUMENT = 202,
+		UPSERT_DOCUMENT = 203,
+		MERGE_INTO_DOCUMENT = 204,
+		MERGE_INSERT_DOCUMENT = 205,
+		FIND_DOCUMENT_BY_ID = 206,
+		DELETE_DOCUMENT = 207,
+		LIST_DOCUMENTS = 208,
 
 		CREATE_CHANNEL = 300,
 		CREATE_OBJECT = 301,
@@ -58,8 +59,8 @@ namespace Impunity.GameState
 		{
 			switch (type)
 			{
-				case ClientActionType.COMPOUND:
-					return typeof(CompoundAction);
+				case ClientActionType.COMPOUND_DATABASE:
+					return typeof(CompoundDatabaseAction);
 
 				case ClientActionType.ESTABLISH_CONNECTION:
 					return typeof(EstablishConnectionAction);
@@ -74,6 +75,10 @@ namespace Impunity.GameState
 					return typeof(UpdateDocumentAction);
 				case ClientActionType.UPSERT_DOCUMENT:
 					return typeof(UpsertDocumentAction);
+				case ClientActionType.MERGE_INTO_DOCUMENT:
+					return typeof(MergeIntoDocumentAction);
+				case ClientActionType.MERGE_INSERT_DOCUMENT:
+					return typeof(MergeInsertDocumentAction);
 				case ClientActionType.FIND_DOCUMENT_BY_ID:
 					return typeof(FindDocumentByIdAction);
 				case ClientActionType.DELETE_DOCUMENT:
@@ -115,8 +120,10 @@ namespace Impunity.GameState
 
 	public class NoOpAction : ClientActionResultlessBase
 	{
-		public NoOpAction() { }
+		public override bool IsDBOperation() { return false; }
 
+		public NoOpAction() { }
+		
 		public NoOpAction(ImpunityCallback onComplete)
 		{
 			OnCompleteCallback = onComplete;
@@ -132,6 +139,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	// Metadata operations
 
 	public class EstablishConnectionAction : ClientActionResultlessBase
 	{
@@ -145,6 +153,7 @@ namespace Impunity.GameState
 		public GameStateFormatData Format;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.ESTABLISH_CONNECTION; }
+		public override bool IsDBOperation() { return false; }
 
 		public EstablishConnectionAction() { }
 
@@ -168,6 +177,7 @@ namespace Impunity.GameState
 		public BsonDocument Summary;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.SET_SUMMARY; }
+		public override bool IsDBOperation() { return false; }
 
 		public SetGameSummaryAction() { }
 
@@ -186,6 +196,7 @@ namespace Impunity.GameState
 	public class GetGameSummaryAction : ClientActionResultBase<BsonDocument>
 	{
 		public override ushort GetActionType() { return (ushort)ClientActionType.GET_SUMMARY; }
+		public override bool IsDBOperation() { return true; }
 
 		public GetGameSummaryAction() { }
 
@@ -200,158 +211,19 @@ namespace Impunity.GameState
 		}
 	}
 
+	// Database operations
 
-	public class InsertDocumentAction : ClientActionResultBase<BsonValue>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-		[BsonField("d")]
-		public BsonDocument Doc;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.INSERT_DOCUMENT; }
-
-		public InsertDocumentAction() { }
-
-		public InsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete = null)
-		{
-			CollectionId = collectionId;
-			Doc = doc;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.InsertDocument(CollectionId, Doc);
-		}
-	}
-
-	public class UpdateDocumentAction : ClientActionResultBase<bool>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-		[BsonField("d")]
-		public BsonDocument Doc;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_DOCUMENT; }
-
-		public UpdateDocumentAction() { }
-
-		public UpdateDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
-		{
-			CollectionId = collectionId;
-			Doc = doc;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.UpdateDocument(CollectionId, Doc);
-		}
-	}
-
-	public class UpsertDocumentAction : ClientActionResultBase<bool>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-		[BsonField("d")]
-		public BsonDocument Doc;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.UPSERT_DOCUMENT; }
-
-		public UpsertDocumentAction() { }
-
-		public UpsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
-		{
-			CollectionId = collectionId;
-			Doc = doc;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.UpsertDocument(CollectionId, Doc);
-		}
-	}
-
-	public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-		[BsonField("did")]
-		public BsonValue Id;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.FIND_DOCUMENT_BY_ID; }
-
-		public FindDocumentByIdAction() { }
-
-		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete = null)
-		{
-			CollectionId = collectionId;
-			Id = id;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.FindDocumentById(CollectionId, Id);
-		}
-	}
-
-	public class DeleteDocumentAction : ClientActionResultBase<bool>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-		[BsonField("did")]
-		public BsonValue Id;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_DOCUMENT; }
-
-		public DeleteDocumentAction() { }
-
-		public DeleteDocumentAction(int collectionId, BsonValue id, ImpunityCallback<bool> onComplete = null)
-		{
-			CollectionId = collectionId;
-			Id = id;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.DeleteDocument(CollectionId, Id);
-		}
-	}
-
-	public class ListDocumentsAction : ClientActionResultBase<List<BsonDocument>>
-	{
-		[BsonField("cid")]
-		public int CollectionId;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.LIST_DOCUMENTS; }
-
-		public ListDocumentsAction() { }
-
-		public ListDocumentsAction(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
-		{
-			CollectionId = collectionId;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.DB.ListDocuments(CollectionId);
-		}
-	}
-
-	public class CompoundAction : ClientActionResultBase<List<ActionResult>>
+	public class CompoundDatabaseAction : ClientActionResultBase<List<ActionResult>>
 	{
 		[BsonField("as")]
 		public List<GameStateActionBase> Actions;
 
-		public override ushort GetActionType() { return (ushort)ClientActionType.COMPOUND; }
+		public override ushort GetActionType() { return (ushort)ClientActionType.COMPOUND_DATABASE; }
+		public override bool IsDBOperation() { return true; }
 
-		public CompoundAction() { }
+		public CompoundDatabaseAction() { }
 
-		public CompoundAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete = null)
+		public CompoundDatabaseAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete = null)
 		{
 			Actions = new List<GameStateActionBase>(actions);
 			OnCompleteCallback = onComplete;
@@ -364,6 +236,11 @@ namespace Impunity.GameState
 			int errors = 0;
 			foreach (GameStateActionBase action in Actions)
 			{
+				if (!action.IsDBOperation())
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Non-database action in a compound database command");
+				}
+
 				action.Run(game);
 
 				Result.Add(action.GetResult());
@@ -396,7 +273,7 @@ namespace Impunity.GameState
 
 			Result = new List<ActionResult>(resultArray.Count);
 
-			for(int i=0; i < Actions.Count; i++)
+			for (int i = 0; i < Actions.Count; i++)
 			{
 				GameStateActionBase action = Actions[i];
 				BsonDocument resultVal = resultArray[i].AsDocument;
@@ -408,6 +285,204 @@ namespace Impunity.GameState
 		}
 
 	}
+
+	public class InsertDocumentAction : ClientActionResultBase<BsonValue>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("d")]
+		public BsonDocument Doc;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.INSERT_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public InsertDocumentAction() { }
+
+		public InsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Doc = doc;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.InsertDocument(CollectionId, Doc);
+		}
+	}
+
+	public class UpdateDocumentAction : ClientActionResultBase<bool>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("d")]
+		public BsonDocument Doc;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public UpdateDocumentAction() { }
+
+		public UpdateDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Doc = doc;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.UpdateDocument(CollectionId, Doc);
+		}
+	}
+
+	public class UpsertDocumentAction : ClientActionResultBase<bool>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("d")]
+		public BsonDocument Doc;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.UPSERT_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public UpsertDocumentAction() { }
+
+		public UpsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Doc = doc;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.UpsertDocument(CollectionId, Doc);
+		}
+	}
+
+	public class MergeIntoDocumentAction : ClientActionResultBase<bool>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("d")]
+		public BsonDocument Doc;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INTO_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public MergeIntoDocumentAction() { }
+
+		public MergeIntoDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Doc = doc;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.MergeIntoDocument(CollectionId, Doc);
+		}
+	}
+
+	public class MergeInsertDocumentAction : ClientActionResultBase<bool>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("d")]
+		public BsonDocument Doc;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INTO_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public MergeInsertDocumentAction() { }
+
+		public MergeInsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Doc = doc;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.MergeInsertDocument(CollectionId, Doc);
+		}
+	}
+
+	public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("did")]
+		public BsonValue Id;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.FIND_DOCUMENT_BY_ID; }
+		public override bool IsDBOperation() { return true; }
+
+		public FindDocumentByIdAction() { }
+
+		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Id = id;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.FindDocumentById(CollectionId, Id);
+		}
+	}
+
+	public class DeleteDocumentAction : ClientActionResultBase<bool>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+		[BsonField("did")]
+		public BsonValue Id;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_DOCUMENT; }
+		public override bool IsDBOperation() { return true; }
+
+		public DeleteDocumentAction() { }
+
+		public DeleteDocumentAction(int collectionId, BsonValue id, ImpunityCallback<bool> onComplete = null)
+		{
+			CollectionId = collectionId;
+			Id = id;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.DeleteDocument(CollectionId, Id);
+		}
+	}
+
+	public class ListDocumentsAction : ClientActionResultBase<List<BsonDocument>>
+	{
+		[BsonField("cid")]
+		public int CollectionId;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.LIST_DOCUMENTS; }
+		public override bool IsDBOperation() { return true; }
+
+		public ListDocumentsAction() { }
+
+		public ListDocumentsAction(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
+		{
+			CollectionId = collectionId;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.ListDocuments(CollectionId);
+		}
+	}
+
 
 	// Entity actions
 
@@ -426,7 +501,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public CreateChannelAction() { }
 
@@ -460,7 +535,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public CreateObjectAction() { }
 
@@ -491,7 +566,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> UpdateBytes;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public UpdateEntityAction() { }
 
@@ -521,7 +596,7 @@ namespace Impunity.GameState
 		public BsonValue DeleteData;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public DeleteEntityAction() { }
 
@@ -551,7 +626,7 @@ namespace Impunity.GameState
 		public BsonValue EventData;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.EVENT_ENTITY; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public EventEntityAction() { }
 
@@ -578,7 +653,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_ENTITY; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public LockEntityAction() { }
 
@@ -604,7 +679,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_ENTITY; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public UnlockEntityAction() { }
 
@@ -630,7 +705,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_NAMED_LOCK; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public LockNamedLockAction() { }
 
@@ -656,7 +731,7 @@ namespace Impunity.GameState
 		public string Key;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNLOCK_NAMED_LOCK; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public UnlockNamedLockAction() { }
 
@@ -681,7 +756,7 @@ namespace Impunity.GameState
 		public string Name;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.SUBSCRIBE_CHANNEL; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public SubscribeChannelAction() { }
 
@@ -703,7 +778,7 @@ namespace Impunity.GameState
 		public uint ID;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UNSUBSCRIBE_CHANNEL; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public UnsubscribeChannelAction() { }
 
@@ -729,7 +804,7 @@ namespace Impunity.GameState
 		public BsonValue MessageBody;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.BROADCAST_MESSAGE; }
-		public override bool LiveDataQueue() { return true; }
+		public override bool IsDBOperation() { return false; }
 
 		public SendBroadcastMessageAction() { }
 

@@ -54,14 +54,15 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<List<ActionResult>> CompoundActionAsync(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
-		{
-			var t = new ImpunityTaskCompletionSource<List<ActionResult>>();
-			connection.CompoundAction(actions, t.OnComplete);
-			return t.Task;
-		}
 
 		// -------- DB actions
+
+		public static Task<List<ActionResult>> CompoundDatabaseActionAsync(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
+		{
+			var t = new ImpunityTaskCompletionSource<List<ActionResult>>();
+			connection.CompoundDatabaseAction(actions, t.OnComplete);
+			return t.Task;
+		}
 
 		public static Task SetGameSummaryAsync(this BaseGameConnection connection, BsonDocument summary)
 		{
@@ -104,6 +105,20 @@ namespace Impunity.Connection
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.UpsertDocument(collectionId, doc, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> MergeIntoDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.MergeIntoDocument(collectionId, doc, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> MergeInsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.MergeInsertDocument(collectionId, doc, t.OnComplete);
 			return t.Task;
 		}
 

@@ -23,6 +23,8 @@ namespace Impunity.GameState
 	// Actions that don't pass between client and server
 	public abstract class LocalGameStateAction : GameStateActionBase
 	{
+		public override bool IsDBOperation() { return false; }
+
 		public override void DeserializeResults(BsonDocument resultBody)
 		{
 			throw new NotImplementedException();
@@ -161,6 +163,7 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
+		// Called on live thread
 		public void EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
 		{
 			if (NewConnectionsDisabled)
@@ -198,6 +201,7 @@ namespace Impunity.GameState
 			return false;
 		}
 
+		// Called on live thread
 		public void UpdateFormat(GameStateFormatData format, bool isRemote)
 		{
 			if (format.Version == Metadata.Version && format.DataChecksum == Metadata.DataFormatChecksum)
@@ -218,16 +222,15 @@ namespace Impunity.GameState
 				}
 			}
 
-
-			DB.SetFormat(format.Collections);
 			Live.SetFormat(format.EntityTypes);
 
 			Metadata.Version = format.Version;
 			Metadata.DataFormatChecksum = format.DataChecksum;
 			Metadata.Collections = format.Collections;
 			Metadata.EntityTypes = format.EntityTypes;
-			DB.SaveMetadata(Metadata);
-
+			
+			UpdateDBFormatAction dbUpdateAction = new UpdateDBFormatAction(format.Collections, Metadata);
+			QueueAction(dbUpdateAction);
 
 			foreach (IGameStateListener listener in Listeners.Values)
 			{
@@ -247,11 +250,13 @@ namespace Impunity.GameState
 			return Metadata;
 		}
 
+		// Called from various threads
 		public BsonDocument GetGameSummary()
         {
 			return Summary;
         }
 
+		// Called on Live thread
 		public void SetGameSummary(BsonDocument summary)
 		{
 			Summary = summary;
@@ -406,13 +411,13 @@ namespace Impunity.GameState
 
 		public void QueueAction(GameStateActionBase action)
         {
-			if (action.LiveDataQueue())
+			if (action.IsDBOperation())
 			{
-				LiveActionQueue.Add(action);
+				DBActionQueue.Add(action);
 			}
 			else
 			{
-				DBActionQueue.Add(action);
+				LiveActionQueue.Add(action);
 			}
 		}
 

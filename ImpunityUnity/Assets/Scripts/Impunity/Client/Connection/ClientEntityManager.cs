@@ -167,6 +167,7 @@ namespace Impunity.Connection
 	{
 		public int DistributedTypeId;
 		public bool IsChannel;
+		public bool Persisted;
 		public Type ObjectType;
 		public Func<IDistributedEntity> Factory;
 		public DistributedTypeFieldInfo[] DistributedFields;
@@ -261,6 +262,10 @@ namespace Impunity.Connection
             {
 				throw new Exception("Channel must have name");
             }
+			if (name.Contains("/"))
+			{
+				throw new Exception("Channel name cannot contain forward slash");
+			}
 
 			if(SubscribedChannels.ContainsKey(name))
             {
@@ -335,6 +340,11 @@ namespace Impunity.Connection
 			if (distObj.IsClientAuthoritative)
 			{
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+			}
+
+			if (IsPersisted(distObj) && !IsPersisted(channel))
+			{
+				throw new Exception("Unable to create persisted object in non-persisted channel");
 			}
 
 			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, (ImpunityErrorResponse err, uint objectId) =>
@@ -433,7 +443,7 @@ namespace Impunity.Connection
 			DistributedTypeInfo internalTypeInfo = new DistributedTypeInfo();
 			internalTypeInfo.DistributedTypeId = entityData.Index;
 			internalTypeInfo.ObjectType = entityType;
-			
+			internalTypeInfo.Persisted = entityData.PersistedAs != null;
 			if (distAttr.FactoryMethod != null)
 			{
 				MethodInfo factoryMethod = entityType.GetMethod(distAttr.FactoryMethod, BindingFlags.Public | BindingFlags.Static);
@@ -594,6 +604,12 @@ namespace Impunity.Connection
 			return typeInfo;
 		}
 
+		private bool IsPersisted(IDistributedEntity entity)
+		{
+			DistributedTypeInfo typeInfo = GetDistributedTypeInfo(entity.DistributedEntityType);
+			return typeInfo.Persisted;
+		}
+
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, ArraySegment<byte> propData)
 		{
 			IDistributedChannel channel = null;
@@ -647,8 +663,15 @@ namespace Impunity.Connection
 
 			RegisterEntity(entity, objectId);
 
-			IDistributedChannel channel = (IDistributedChannel)DistributedObjects[channelId];
-			
+			IDistributedChannel channel = DistributedObjects[channelId] as IDistributedChannel;
+
+			if (channel == null)
+			{
+				throw new Exception("No channel with id " + channelId);
+			}
+
+
+
 			try
 			{
 				channel.OnObjectAdded(entity, newlyCreated);

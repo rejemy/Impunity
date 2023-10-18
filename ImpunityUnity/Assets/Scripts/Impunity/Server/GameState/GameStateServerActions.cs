@@ -1,5 +1,5 @@
 using System;
-
+using System.Collections.Generic;
 
 using UltraLiteDB;
 
@@ -195,5 +195,90 @@ namespace Impunity.GameState
 			handler.HandleBroadcastMessage(MessageType, MessageBody, SentBy);
 		}
 
+	}
+
+	// Actions sent to the DB from the Live server
+
+	public class UpdateDBFormatAction : ClientActionResultlessBase
+	{
+		public GameStateCollection[] Collections;
+		public GameMetadata Metadata;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public UpdateDBFormatAction(GameStateCollection[] collections, GameMetadata metadata)
+		{
+			Collections = collections;
+			Metadata = metadata;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.DB.SetFormat(Collections);
+			game.DB.SaveMetadata(Metadata);
+		}
+	}
+
+	public class LiveEntityPersistedPropertyData
+	{
+		public string PropertyName;
+		public BsonValue PropertyValue;
+
+		public LiveEntityPersistedPropertyData(string propName, BsonValue value)
+		{
+			PropertyName = propName;
+			PropertyValue = value;
+		}
+	}
+
+	public class CreatePersistedEntityAction : ClientActionResultlessBase
+	{
+		public string EntityId;
+		public string ChannelId;
+		public int EntityType;
+		public byte InstanceFlags;
+		public List<LiveEntityPersistedPropertyData> Properties;
+		
+
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public CreatePersistedEntityAction(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
+		{
+			EntityId = entityId;
+			ChannelId = channelId;
+			EntityType = entityType;
+			InstanceFlags = instanceFlags;
+			Properties = properties;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.DB.CreateLiveEntity(EntityId, ChannelId, EntityType, InstanceFlags, Properties);
+		}
+	}
+
+	public class UpdatePersistedEntityPropertiesAction : ClientActionResultlessBase
+	{
+		public string EntityId;
+		public string ChannelId;
+		public List<LiveEntityPersistedPropertyData> Properties;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public UpdatePersistedEntityPropertiesAction(string entityId, string channelId, List<LiveEntityPersistedPropertyData> properties)
+		{
+			EntityId = entityId;
+			ChannelId = channelId;
+			Properties = properties;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.DB.UpdateLiveEntityProperties(EntityId, ChannelId, Properties);
+		}
 	}
 }

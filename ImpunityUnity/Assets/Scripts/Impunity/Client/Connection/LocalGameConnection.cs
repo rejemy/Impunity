@@ -35,12 +35,13 @@ namespace Impunity.Connection
 			EstablishConnection(null, null, LocalFormat, onComplete);
 		}
 
-
+		// Called on Live thread
 		public void OnGameMetadataChanged(GameStateServer game)
 		{
 			// Doesn't need to do anything
         }
 
+		// Called on Live thread
 		public void OnGameSummaryChanged(GameStateServer game)
 		{
 			// Doesn't need to do anything

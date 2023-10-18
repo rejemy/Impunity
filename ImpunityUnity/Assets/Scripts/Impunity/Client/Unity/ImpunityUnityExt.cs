@@ -58,13 +58,6 @@ namespace Impunity.Unity
 	{
 		// ---------- API
 
-		public static ImpunityYield<List<ActionResult>> CompoundActionYield(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
-		{
-			var action = new ImpunityYield<List<ActionResult>>();
-			connection.CompoundAction(actions, action.OnComplete);
-			return action;
-		}
-
 		public static ImpunityYield ConnectYield(this BaseGameConnection connection)
 		{
 			var action = new ImpunityYield();
@@ -73,6 +66,14 @@ namespace Impunity.Unity
 		}
 
 		// -------- DB actions
+
+
+		public static ImpunityYield<List<ActionResult>> CompoundDatabaseActionYield(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
+		{
+			var action = new ImpunityYield<List<ActionResult>>();
+			connection.CompoundDatabaseAction(actions, action.OnComplete);
+			return action;
+		}
 
 		public static ImpunityYield SetGameSummaryYield(this BaseGameConnection connection, BsonDocument summary)
 		{
@@ -106,6 +107,20 @@ namespace Impunity.Unity
 		{
 			var action = new ImpunityYield<bool>();
 			connection.UpsertDocument(collectionId, doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> MergeIntoDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.MergeIntoDocument(collectionId, doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> MergeInsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.MergeInsertDocument(collectionId, doc, action.OnComplete);
 			return action;
 		}
 
