@@ -150,6 +150,11 @@ namespace Impunity.Networking
 		// Called on server thread
 		public void ReportActionResult(GameStateActionBase action)
 		{
+			if (!action.ResultsExpected)
+			{
+				return;
+			}
+
 			// Don't send on server thread, queue for send on network writer thread
 			NetworkServer.QueueNetworkAction(action);
 		}

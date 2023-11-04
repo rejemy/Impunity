@@ -136,7 +136,7 @@ namespace Impunity.Connection
 
 			NetworkClient.SendGuaranteedMessage(encodedMessage);
 
-			action.OnActionComplete();
+			action.Cleanup();
 		}
 
 		// On dotnet internal socket thread

@@ -123,6 +123,19 @@ namespace Impunity
 
 		public ImpunityErrorResponse() {}
 
+		public ImpunityErrorResponse(Exception e)
+		{
+			if(e is ImpunityServerException ise)
+			{
+				ErrorCode = ise.ErrorCode;
+			}
+			else
+			{
+				ErrorCode = ImpunityErrorCode.InternalServerError;
+			}
+			Message = e.Message;
+			Stacktrace = e.StackTrace;
+		}
 
 		public ImpunityErrorResponse(ImpunityServerException e)
 		{

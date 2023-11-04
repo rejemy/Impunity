@@ -281,4 +281,104 @@ namespace Impunity.GameState
 			game.DB.UpdateLiveEntityProperties(EntityId, ChannelId, Properties);
 		}
 	}
+
+	public class DeletePersistedChannelAction : ClientActionResultlessBase
+	{
+		public string ChannelId;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public DeletePersistedChannelAction(string channelId)
+		{
+			ChannelId = channelId;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.DB.DeleteLiveChannel(ChannelId);
+		}
+	}
+
+	public class DeletePersistedObjectAction : ClientActionResultlessBase
+	{
+		public string ObjectId;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public DeletePersistedObjectAction(string objectId)
+		{
+			ObjectId = objectId;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.DB.DeleteLiveObject(ObjectId);
+		}
+	}
+
+	public class LiveEntityData
+	{
+		public string EntityId;
+		public int EntityType;
+		public byte InstanceFlags;
+
+		public List<LiveEntityPersistedPropertyData> Properties;
+
+		public LiveEntityData(string entityId)
+		{
+			EntityId = entityId;
+		}
+	}
+
+	public class LiveChannelData : LiveEntityData
+	{
+		public List<LiveEntityData> ChannelObjects;
+
+		public LiveChannelData(string channelName) : base(channelName)
+		{
+			
+		}
+	}
+
+	public class LoadChannelAction : ClientActionResultBase<LiveChannelData>
+	{
+		public string ChannelId;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public LoadChannelAction(string channelId)
+		{
+			ChannelId = channelId;
+		}
+
+		// Run in DB thread
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.LoadChannelData(ChannelId);
+			game.QueueDBReply(this);
+		}
+	}
+
+	public class CheckEntityExistanceAction : ClientActionResultBase<bool>
+	{
+		public string Name;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public CheckEntityExistanceAction(string name)
+		{
+			Name = name;
+		}
+
+		// Run in DB thread
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.DoesNamedEntityExistInDB(Name);
+			game.QueueDBReply(this);
+		}
+	}
 }

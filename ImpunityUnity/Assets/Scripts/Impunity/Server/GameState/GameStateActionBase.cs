@@ -7,7 +7,7 @@ namespace Impunity.GameState
 {
 
 	public delegate void ImpunityActionCallback(GameStateActionBase action);
-
+	public delegate void ServerActionMethod(GameStateServer game);
 
 	public class ActionResult
 	{
@@ -32,6 +32,9 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public bool ResultsExpected { get; set; }
 
+		[BsonIgnore]
+		public bool AwaitingTask { get; set; } = false;
+
 		public abstract ushort GetActionType();
 		public abstract bool HasCallback();
 		public abstract bool IsDBOperation();
@@ -47,7 +50,7 @@ namespace Impunity.GameState
 		// Called from background thread
 		// Called when message has been encoded or processed and the input fields
 		// can be disposed of
-		public virtual void OnActionComplete() { }
+		public virtual void Cleanup() { }
 
 
 		// Executing the action
@@ -56,6 +59,28 @@ namespace Impunity.GameState
 			try
 			{
 				DoAction(game);
+			}
+			catch (ImpunityServerException e)
+			{
+				Error = new ImpunityErrorResponse(e);
+				if (e is ImpunityServerFatalException)
+				{
+					// Rethrow fatal errors so the connection can also handle them
+					throw e;
+				}
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError(e, "Exception running action");
+				Error = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
+			}
+		}
+
+		public void RunWithMethod(GameStateServer game, ServerActionMethod method)
+		{
+			try
+			{
+				method(game);
 			}
 			catch (ImpunityServerException e)
 			{

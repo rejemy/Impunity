@@ -196,10 +196,16 @@ namespace Impunity.Connection
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
 
-		public void CreateChannel(int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
-        {
-			DoAction(new CreateChannelAction(entityTypeId, instanceFlags, channelName, propBytes, onComplete));
-        }
+
+		public void SubcribeToChannel(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
+		{
+			DoAction(new SubscribeChannelAction(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, onComplete));
+		}
+
+		public void UnsubscribeFromChannel(uint channelId, ImpunityCallback onComplete)
+		{
+			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
+		}
 
 		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
 		{
@@ -229,16 +235,6 @@ namespace Impunity.Connection
 		public void UnlockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
 		{
 			DoAction(new UnlockEntityAction(entityId, key, onComplete));
-		}
-
-		public void SubcribeToChannel(string channelName, ImpunityCallback<uint> onComplete)
-		{
-			DoAction(new SubscribeChannelAction(channelName, onComplete));
-		}
-
-		public void UnsubscribeFromChannel(uint channelId, ImpunityCallback onComplete)
-		{
-			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
 		}
 
 		// -------- Broadcast

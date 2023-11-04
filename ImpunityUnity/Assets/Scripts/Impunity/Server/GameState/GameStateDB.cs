@@ -320,13 +320,20 @@ namespace Impunity.GameState
 
 		// Private API for use by the live entity system
 
-		public void CreateLiveEntity(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
+		public bool DoesNamedEntityExistInDB(string entityId)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			return collection.Collection.Exists(Query.EQ("_id", entityId));
+		}
+
+		public void CreateLiveEntity(string entityId, string channelName, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
 			BsonDocument entityDoc = new BsonDocument();
 			entityDoc["_id"] = entityId;
-			entityDoc["ch"] = channelId;
+			entityDoc["ch"] = channelName;
 			entityDoc["t"] = entityType;
 			entityDoc["f"] = (int)instanceFlags;
 
@@ -337,7 +344,7 @@ namespace Impunity.GameState
 				{
 					BsonDocument propDoc = new BsonDocument();
 					propDoc["_id"] = entityId + "/" + prop.PropertyName;
-					propDoc["ch"] = channelId;
+					propDoc["ch"] = channelName;
 					propDoc["v"] = prop.PropertyValue;
 
 					collection.Collection.Upsert(propDoc);
@@ -360,13 +367,103 @@ namespace Impunity.GameState
 			}
 		}
 
-		public List<BsonDocument> ListChannelContents(string channelId)
+		public void DeleteLiveChannel(string channelName)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
-			var data = collection.Collection.Find(Query.EQ("ch", channelId));
+			collection.Collection.Delete(Query.EQ("ch", channelName));
+		}
 
-			return null;
+		public void DeleteLiveObject(string entityId)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			collection.Collection.Delete(Query.StartsWith("_id", entityId));
+		}
+
+		public LiveChannelData LoadChannelData(string channelName)
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			var propertyRows = collection.Collection.Find(Query.EQ("ch", channelName));
+			if(propertyRows == null)
+			{
+				return null;
+			}
+
+			LiveChannelData channelData = null;
+			Dictionary<string, LiveEntityData> loadedEntities = null;
+
+			foreach(BsonDocument entDoc in propertyRows)
+			{
+				if (channelData == null)
+				{
+					channelData = new LiveChannelData(channelName);
+					loadedEntities = new Dictionary<string, LiveEntityData>();
+				}
+
+				string rowId = entDoc["_id"].AsString;
+				int sepIndex = rowId.IndexOf("/");
+				if (sepIndex < 0)
+				{
+					// Entity metdata record
+
+					LiveEntityData entData = null;
+					if (rowId == channelName)
+					{
+						entData = channelData;
+					}
+					else
+					{
+						entData = loadedEntities.GetValueOrDefault(rowId);
+					}
+
+					if (entData == null)
+					{
+						entData = new LiveEntityData(rowId);
+						loadedEntities[rowId] = entData;
+					}
+
+					entData.EntityType = entDoc["t"].AsInt32;
+					entData.InstanceFlags = (byte)entDoc["f"].AsInt32;
+				}
+				else
+				{
+					// property record
+					string entityId = rowId.Substring(0, sepIndex);
+					string propertyName = rowId.Substring(sepIndex+1);
+
+					LiveEntityData entData;
+					if (entityId == channelName)
+					{
+						entData = channelData;
+					}
+					else
+					{
+						entData = loadedEntities.GetValueOrDefault(entityId);
+					}
+
+					if (entData == null)
+					{
+						entData = new LiveEntityData(entityId);
+						loadedEntities[entityId] = entData;
+					}
+
+					if(entData.Properties == null)
+					{
+						entData.Properties = new List<LiveEntityPersistedPropertyData>();
+					}
+
+					entData.Properties.Add(new LiveEntityPersistedPropertyData(propertyName, entDoc["v"]));
+				}
+			}
+
+			if (loadedEntities != null && loadedEntities.Count > 0)
+			{
+				channelData.ChannelObjects = new List<LiveEntityData>(loadedEntities.Values);
+			}
+
+			return channelData;
 		}
 	}
 

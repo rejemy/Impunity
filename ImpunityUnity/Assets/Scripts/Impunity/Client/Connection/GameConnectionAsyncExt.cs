@@ -159,10 +159,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateChannelAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes)
+		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateChannel(entityTypeId, instanceFlags, channelName, propBytes, t.OnComplete);
+			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task UnsubscribeFromChannelAsync(this BaseGameConnection connection, uint channelId)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.UnsubscribeFromChannel(channelId, t.OnComplete);
 			return t.Task;
 		}
 
@@ -205,20 +212,6 @@ namespace Impunity.Connection
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.UnlockEntity(entityId, key, t.OnComplete);
-			return t.Task;
-		}
-
-		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName)
-		{
-			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.SubcribeToChannel(channelName, t.OnComplete);
-			return t.Task;
-		}
-
-		public static Task UnsubscribeFromChannelAsync(this BaseGameConnection connection, uint channelId)
-		{
-			var t = new ImpunityTaskCompletionSource();
-			connection.UnsubscribeFromChannel(channelId, t.OnComplete);
 			return t.Task;
 		}
 
@@ -272,12 +265,12 @@ namespace Impunity.Connection
 
 	public static class ClientEntityManagerAsyncExtensions
 	{
-		public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
+		/*public static Task<T> CreateChannelAsync<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
         {
 			var t = new ImpunityTaskCompletionSource<T>();
 			manager.CreateChannel<T>(channel, name, t.OnComplete);
 			return t.Task;
-        }
+        }*/
 
 		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
@@ -286,10 +279,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<T> SubscribeToChannelAsync<T>(this ClientEntityManager manager, string channelName) where T : class, IDistributedChannel
+		public static Task<T> SubscribeToChannelAsync<T>(this ClientEntityManager manager, string channelName, T createIfNeeded) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.SubscribeToChannel<T>(channelName, t.OnComplete);
+			manager.SubscribeToChannel<T>(channelName, createIfNeeded, t.OnComplete);
 			return t.Task;
 		}
 

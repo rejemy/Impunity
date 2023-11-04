@@ -256,6 +256,7 @@ namespace Impunity.Connection
 			return convertedEntityTypes;
         }
 
+		/*
 		public void CreateChannel<T>(T channel, string name, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
 			if (name == null)
@@ -294,9 +295,14 @@ namespace Impunity.Connection
 			if (channel.IsClientAuthoritative)
 			{
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+
+				if(DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a client authoritative channel that is also persisted");
+				}
 			}
 
-			Connection.CreateChannel(entityTypeId, instaceFlags, channel.ChannelName, propertyBytes, (ImpunityErrorResponse err, uint channelId) =>
+			Connection.CreateChannel(channel.ChannelName, entityTypeId, instaceFlags, propertyBytes, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
                 {
@@ -316,6 +322,7 @@ namespace Impunity.Connection
 				onComplete?.Invoke(err, channel);
 			});
 		}
+		*/
 
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
 		{
@@ -340,6 +347,11 @@ namespace Impunity.Connection
 			if (distObj.IsClientAuthoritative)
 			{
 				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a client authoritative object that is also persisted");
+				}
 			}
 
 			if (IsPersisted(distObj) && !IsPersisted(channel))
@@ -360,15 +372,62 @@ namespace Impunity.Connection
 			});
 		}
 
-		public void SubscribeToChannel<T>(string channelName, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
+		public void SubscribeToChannel<T>(string channelName, T createIfNeeded, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
+			if (channelName == null)
+			{
+				throw new Exception("Channel must have name");
+			}
+			if (channelName.Contains("/"))
+			{
+				throw new Exception("Channel name cannot contain forward slash");
+			}
+
 			if (SubscribedChannels.ContainsKey(channelName))
             {
 				onComplete(null, (T)SubscribedChannels[channelName]);
 				return;
             }
 
-			Connection.SubcribeToChannel(channelName, (ImpunityErrorResponse err, uint channelId) =>
+			bool createIfMising = false;
+			int entityTypeId = 0;
+			byte instaceFlags = 0;
+			ArraySegment<byte> propertyBytes = null;
+
+			if (createIfNeeded != null)
+			{
+				createIfMising = true;
+
+				createIfNeeded.ChannelName = channelName;
+
+				Type entityType = createIfNeeded.GetType();
+				DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
+				if (distAttr == null)
+				{
+					throw new Exception("Tried to create distributed channel type " + entityType.Name + " with no DistributedEntity attribute");
+				}
+
+				entityTypeId = distAttr.EntityId;
+				if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
+				{
+					throw new Exception("Tried to create distributed channel with invalid entity type id: " + entityTypeId);
+				}
+
+				createIfNeeded.DistributedEntityType = entityTypeId;
+				propertyBytes = GetPropertyBytes(createIfNeeded);
+
+				if (createIfNeeded.IsClientAuthoritative)
+				{
+					instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+
+					if (DistributedTypes[entityTypeId].Persisted)
+					{
+						throw new Exception("Can't create a client authoritative channel that is also persisted");
+					}
+				}
+			}
+
+			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
 				{

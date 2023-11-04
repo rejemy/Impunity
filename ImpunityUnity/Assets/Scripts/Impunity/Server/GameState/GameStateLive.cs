@@ -15,8 +15,9 @@ namespace Impunity.GameState
 
 		public string PersistedAs;
 
-		public GameStateEntityPropertyDef[] Properties;
-		public GameStateEntityPropertyDef[] PropertyLookup;
+		public GameStateEntityPropertyDef[] PackedProperties;
+		public GameStateEntityPropertyDef[] PropertyIndexLookup;
+		public Dictionary<string, GameStateEntityPropertyDef> PropertyPersistedAsLookup;
 	}
 
 	// One window into the game state, maps to a single computer, either local or over network
@@ -118,6 +119,7 @@ namespace Impunity.GameState
 		private ImpunityInstanceFlags Flags;
 		public byte FlagByte { get { return (byte)Flags; } }
 		public abstract string ChannelName { get; }
+		public bool InLoadingState { get; protected set; } = false;
 
 		protected GameStateLive LiveData;
 		public GameStateEntityType TypeInfo;
@@ -138,12 +140,12 @@ namespace Impunity.GameState
 
 			if (typeInfo != null)
 			{
-				if (typeInfo.Properties != null && typeInfo.Properties.Length > 0)
+				if (typeInfo.PackedProperties != null && typeInfo.PackedProperties.Length > 0)
 				{
-					int maxPropIndex = typeInfo.Properties[typeInfo.Properties.Length - 1].Index;
+					int maxPropIndex = typeInfo.PackedProperties[typeInfo.PackedProperties.Length - 1].Index;
 					Properties = new IStandardDistributableValueType[maxPropIndex + 1];
 
-					foreach (GameStateEntityPropertyDef propDef in typeInfo.Properties)
+					foreach (GameStateEntityPropertyDef propDef in typeInfo.PackedProperties)
 					{
 						GameStateEntityFieldType fieldType = (GameStateEntityFieldType)propDef.FieldType;
 						switch(fieldType)
@@ -232,7 +234,7 @@ namespace Impunity.GameState
 			}
 
 			List<LiveEntityPersistedPropertyData> persistedPropsSoFar = null;
-			var propLookup = TypeInfo.PropertyLookup;
+			var propLookup = TypeInfo.PropertyIndexLookup;
 
 			while(true)
 			{
@@ -265,9 +267,30 @@ namespace Impunity.GameState
 			persistedProps = persistedPropsSoFar;
 		}
 
+		public void SetPersistedProps(List<LiveEntityPersistedPropertyData> props)
+		{
+			if (props == null)
+			{
+				return;
+			}
+
+			foreach(LiveEntityPersistedPropertyData propData in props)
+			{
+				var propInfo = TypeInfo.PropertyPersistedAsLookup.GetValueOrDefault(propData.PropertyName);
+				if (propInfo == null)
+				{
+					// Type no longer has a persisted property, should have been updated during format update process
+					ImpunityLogger.LogError("Distributed type " + TypeInfo.Name + " has unknown persisted property name " + propData.PropertyName);
+					continue;
+				}
+				var propertyInstance = Properties[propInfo.Index];
+				propertyInstance.FromBsonValue(propData.PropertyValue);
+			}
+		}
+
 		public byte[] GetPropBytes()
 		{
-			if (TypeInfo == null || TypeInfo.Properties == null || TypeInfo.Properties.Length == 0)
+			if (TypeInfo == null || TypeInfo.PackedProperties == null || TypeInfo.PackedProperties.Length == 0)
 			{
 				return null;
 			}
@@ -275,7 +298,7 @@ namespace Impunity.GameState
 			BinaryWriter writer = LiveData.GetTempBufferWriter();
 			writer.BaseStream.Position = 0;
 
-			foreach(var propInfo in TypeInfo.Properties)
+			foreach(var propInfo in TypeInfo.PackedProperties)
 			{
 				writer.Write((byte)propInfo.Index);
 				Properties[propInfo.Index].WriteTo(writer);
@@ -337,7 +360,7 @@ namespace Impunity.GameState
 
 			Listeners.Add(replicant.Id, replicant);
 
-			if(!sendCreate)
+			if(!sendCreate || InLoadingState)
 			{
 				return;
 			}
@@ -345,7 +368,7 @@ namespace Impunity.GameState
 			ChannelCreateMessageAction channelCreate = new ChannelCreateMessageAction();
 			channelCreate.ChannelId = Id;
 			channelCreate.ChannelName = Name;
-			channelCreate.ChannelType = TypeInfo.Index;
+			channelCreate.ChannelType = TypeInfo != null ? TypeInfo.Index : 0;
 			channelCreate.PropBytes = GetPropBytes();
 			channelCreate.ObjectsInChannel = new ObjectCreateMessageAction[Members.Count];
 
@@ -436,13 +459,123 @@ namespace Impunity.GameState
 		}
 	}
 
+	public interface GameStateChannelLoadListener
+	{
+		void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse error, GameStateChannel loadedChannel);
+	}
+
+	public class GameStateChannelLoadProxy : GameStateEntity
+	{
+		public override string ChannelName { get { return Name; } }
+
+		// Create if missing values
+		bool CreateIfMissing;
+		GameStateReplicant Creator;
+		int CreateEntityTypeId;
+		byte CreateInstanceFlags;
+		ArraySegment<byte> CreatePropBytes;
+
+		List<GameStateChannelLoadListener> LoadListeners;
+
+		public GameStateChannelLoadProxy(GameStateLive liveData, string name)
+										: base(liveData, null, 0, name)
+		{
+			InLoadingState = true;
+			LoadListeners = new List<GameStateChannelLoadListener>();
+		}
+
+		public void AddListener(GameStateChannelLoadListener listener)
+		{
+			LoadListeners.Add(listener);
+		}
+
+		public void SetCreateIfMissing(GameStateReplicant creator, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		{
+			if (CreateIfMissing)
+			{
+				// First to set it wins
+				return;
+			}
+
+			CreateIfMissing = true;
+			Creator = creator;
+			CreateEntityTypeId = entityTypeId;
+			CreateInstanceFlags = instanceFlags;
+			CreatePropBytes = propBytes;
+		}
+
+		public void OnDataLoaded(ImpunityErrorResponse error, LiveChannelData channelData)
+		{
+			if (error == null && channelData == null && !CreateIfMissing)
+			{
+				error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "No channel with name " + Name);
+			}
+
+			if (error != null)
+			{
+				// DB error, or no channel in DB
+				foreach(GameStateChannelLoadListener listener in LoadListeners)
+				{
+					try
+					{
+						listener.OnChannelLoaded(LiveData.Server, error, null);
+					}
+					catch(Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in OnChannelLoad");
+					}
+				}
+
+				// No longer need the load proxy
+				LiveData.UnregisterEntity(this);
+				LoadListeners.Clear();
+
+				return;
+			}
+
+			GameStateChannel channel = null;
+			ImpunityErrorResponse createError = null;
+			try
+			{
+				if (channelData != null)
+				{
+					// Replaces this proxy with the newly loaded actual channel and all its objects
+					channel = LiveData.CreateChannel(this, channelData);
+				}
+				else
+				{
+					// No channel found, but we're all set to create it
+					LiveData.UnregisterEntity(this);
+					channel = LiveData.CreateChannel(Creator, ChannelName, CreateEntityTypeId, CreateInstanceFlags, CreatePropBytes);
+				}
+			}
+			catch (Exception e)
+			{
+				// error creating channel
+				createError = new ImpunityErrorResponse(e);
+			}
+
+			foreach (GameStateChannelLoadListener listener in LoadListeners)
+			{
+				try
+				{
+					listener.OnChannelLoaded(LiveData.Server, createError, channel);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in OnChannelLoad");
+				}
+			}
+		}
+	}
+
 	public class GameStateObject : GameStateEntity
 	{
 		public GameStateChannel Channel { get; private set; }
 		public override string ChannelName { get { return Channel.Name; } }
 
-		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, Guid dbid)
-			: base(liveData, typeInfo, instanceFlags, dbid.ToString())
+		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string dbid)
+			: base(liveData, typeInfo, instanceFlags, dbid)
 		{
 			Channel = null;
 		}
@@ -519,7 +652,7 @@ namespace Impunity.GameState
 	// Live gamestate in memory
 	public class GameStateLive
 	{
-		GameStateServer Server;
+		public GameStateServer Server { get; private set; }
 		GameStateEntityType[] EntityTypes;
 
 		Dictionary<uint, GameStateEntity> AllEntities;
@@ -573,12 +706,18 @@ namespace Impunity.GameState
 			etype.Index = def.Index;
 			etype.Name = def.Name;
 			etype.PersistedAs = def.PersistedAs;
-			etype.Properties = def.Properties;
-			int highestIndex = etype.Properties[etype.Properties.Length - 1].Index;
-			etype.PropertyLookup = new GameStateEntityPropertyDef[highestIndex+1];
-			foreach(var prop in etype.Properties)
+			etype.PackedProperties = def.Properties;
+			int highestIndex = etype.PackedProperties[etype.PackedProperties.Length - 1].Index;
+			etype.PropertyIndexLookup = new GameStateEntityPropertyDef[highestIndex+1];
+			etype.PropertyPersistedAsLookup = new Dictionary<string, GameStateEntityPropertyDef>();
+
+			foreach(var prop in etype.PackedProperties)
 			{
-				etype.PropertyLookup[prop.Index] = prop;
+				etype.PropertyIndexLookup[prop.Index] = prop;
+				if(prop.PersistedAs != null)
+				{
+					etype.PropertyPersistedAsLookup.Add(prop.PersistedAs, prop);
+				}
 			}
 			return etype;
 		}
@@ -610,6 +749,17 @@ namespace Impunity.GameState
 
 		}
 
+		public void SwapOutEntity(GameStateEntity oldEntity, GameStateEntity newEntity)
+		{
+			newEntity.Id = oldEntity.Id;
+			AllEntities[newEntity.Id] = newEntity;
+			if (newEntity.Name != null)
+			{
+				NamedEntities[newEntity.Name] = newEntity;
+			}
+
+		}
+
 		private void DestroyEntity(GameStateEntity entity, BsonValue deleteData)
 		{
 			UnregisterEntity(entity);
@@ -625,7 +775,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		private GameStateEntityType GetEntityType(int typeId)
+		public GameStateEntityType GetEntityType(int typeId)
 		{
 			if (typeId <= 0 || typeId >= EntityTypes.Length)
 			{
@@ -656,151 +806,72 @@ namespace Impunity.GameState
 			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, out persistedProps);
 		}
 
-		/*
-		private void ExtractPersistedProperties(GameStateEntityType typeInfo, ArraySegment<byte> propBytes, out BsonDocument updateDoc)
-		{
-			// Put prop data into a read buffer
-			TempBufferReader.BaseStream.Position = 0;
-			TempBufferReader.BaseStream.Write(propBytes);
-			TempBufferReader.BaseStream.Position = 0;
-
-			var typeProperties = typeInfo.Properties;
-
-			BsonDocument docSoFar = null;
-			while (true)
-			{
-				int propId = TempBufferReader.ReadByte();
-				if (propId == 0)
-				{
-					break;
-				}
-
-				if (propId >= typeProperties.Length)
-				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
-				}
-
-				var propDef = typeProperties[propId];
-				if (propDef.PersistedAs == null)
-				{
-					continue;
-				}
-
-			}
-
-			updateDoc = docSoFar;
-		}
-		*/
-
-		/*
-		private void SaveChannelInDB(GameStateChannel channel, ArraySegment<byte> propBytes)
-		{
-			BsonDocument channelData;
-			ExtractPersistedProperties(channel.TypeInfo, propBytes, out channelData);
-			if(channelData == null)
-			{
-				channelData = new BsonDocument();
-			}
-
-			new BsonDocument();
-			channelData["_id"] = channel.Name;
-			channelData["_fl"] = (int)channel.FlagByte;
-
-			UpsertDocumentAction createChannelAction = new UpsertDocumentAction((int)ImpunityInternalCollectionIds.Channels, channelData);
-			Server.QueueAction(createChannelAction);
-		}
-
-		private void UpdateChannelInDB(GameStateChannel channel, ArraySegment<byte> propBytes)
-		{
-			if (propBytes == null || propBytes.Count == 0)
-			{
-				return;
-			}
-
-			BsonDocument channelData;
-			ExtractPersistedProperties(channel.TypeInfo, propBytes, out channelData);
-
-			if(channelData == null)
-			{
-				// Nothing persisted changed
-				return;
-			}
-
-			channelData["_id"] = channel.Name;
-
-			UpdateDocumentAction updateChannelAction = new UpdateDocumentAction((int)ImpunityInternalCollectionIds.Channels, channelData);
-			Server.QueueAction(updateChannelAction);
-		}
-
-
-		private void SaveObjectInDB(GameStateObject dobj, ArraySegment<byte> propBytes)
-		{
-			BsonDocument objData = null;
-			ExtractPersistedProperties(dobj.TypeInfo, propBytes, out objData);
-			if(objData == null)
-			{
-				objData = new BsonDocument();
-			}
-
-			objData["_id"] = dobj.Name;
-			objData["_ch"] = dobj.Channel.Name;
-			objData["_fl"] = (int)dobj.FlagByte;
-
-			UpsertDocumentAction createObjectAction = new UpsertDocumentAction((int)ImpunityInternalCollectionIds.Entities, objData);
-			Server.QueueAction(createObjectAction);
-		}
-
-		private void UpdateObjectInDB(GameStateObject dobj, ArraySegment<byte> propBytes)
-		{
-			if (propBytes == null || propBytes.Count == 0)
-			{
-				return;
-			}
-
-			BsonDocument objData;
-			ExtractPersistedProperties(dobj.TypeInfo, propBytes, out objData);
-
-			if (objData == null)
-			{
-				// Nothing persisted changed
-				return;
-			}
-
-			objData["_id"] = dobj.Name;
-
-			UpdateDocumentAction updateObjectAction = new UpdateDocumentAction((int)ImpunityInternalCollectionIds.Entities, objData);
-			Server.QueueAction(updateObjectAction);
-		}
-		*/
-
 		// ----- Public API below
 
-
-		public uint CreateChannel(GameStateReplicant origin, int typeId, byte instanceFlags, string name, ArraySegment<byte> propBytes)
+		public GameStateEntity GetNamedEntity(string entityName)
 		{
-			if (name == null)
+			return NamedEntities.GetValueOrDefault(entityName);
+		}
+
+		public GameStateChannelLoadProxy LoadChannel(string channelName)
+		{
+			GameStateEntity entity = NamedEntities.GetValueOrDefault(channelName);
+			if (entity is GameStateChannelLoadProxy)
 			{
-				throw new Exception("Name must be set for channel");
+				return (GameStateChannelLoadProxy)entity;
+			}
+			else if(entity != null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Entity with name " + channelName + " already loaded");
 			}
 
-			if (NamedEntities.ContainsKey(name))
+			GameStateChannelLoadProxy loadProxy = new GameStateChannelLoadProxy(this, channelName);
+			RegisterEntity(loadProxy);
+
+			LoadChannelAction loadAction = new LoadChannelAction(channelName);
+
+			loadAction.OnCompleteCallback = loadProxy.OnDataLoaded;
+			Server.QueueAction(loadAction);
+
+			return loadProxy;
+		}
+
+		// Create channel from DB info
+		public GameStateChannel CreateChannel(GameStateChannelLoadProxy proxy, LiveChannelData channelData)
+		{
+			GameStateEntityType typeInfo = null;
+			if (channelData.EntityType != 0)
 			{
-				GameStateEntity existingEnt = NamedEntities[name];
-				if (existingEnt.TypeInfo != null && existingEnt.TypeInfo.Index == typeId)
-				{
-					// Existing channel of the same type already created
-					GameStateChannel existingChannel = (GameStateChannel)existingEnt;
+				typeInfo = GetEntityType(channelData.EntityType);
+			}
 
-					// subscribe to existing channel instead of erroring
-					existingChannel.AddListener(origin, true);
-					origin.AddSubscribedChannel(existingChannel);
+			GameStateChannel channel = new GameStateChannel(this, typeInfo, channelData.InstanceFlags, channelData.EntityId);
+			channel.SetPersistedProps(channelData.Properties);
 
-					return existingChannel.Id;
-				}
-				else
+			if(channelData.ChannelObjects != null)
+			{
+				foreach(var objData in channelData.ChannelObjects)
 				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Entity with name " + name + " already exists");
+					CreateObject(objData, channel);
 				}
+			}
+
+			SwapOutEntity(proxy, channel);
+
+			return channel;
+		}
+
+		// Create channel from client input
+		public GameStateChannel CreateChannel(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		{
+			if (channelName == null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Name must be set for channel");
+			}
+
+			if (NamedEntities.ContainsKey(channelName))
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Entity with name " + channelName + " already exists");
 			}
 
 			GameStateEntityType typeInfo = null;
@@ -809,13 +880,10 @@ namespace Impunity.GameState
 				typeInfo = GetEntityType(typeId);
 			}
 
-			GameStateChannel channel = new GameStateChannel(this, typeInfo, instanceFlags, name);
+			GameStateChannel channel = new GameStateChannel(this, typeInfo, instanceFlags, channelName);
 			List<LiveEntityPersistedPropertyData> persistedProps;
 			UpdateEntityProps(channel, propBytes, origin, out persistedProps);
 			RegisterEntity(channel);
-
-			channel.AddListener(origin, false);
-			origin.AddSubscribedChannel(channel);
 
 			if(channel.IsClientAuthoritative())
 			{
@@ -829,7 +897,32 @@ namespace Impunity.GameState
 				Server.QueueAction(action);
 			}
 
+			return channel;
+		}
+
+		public uint SubscribeToChannel(GameStateReplicant origin, string channelName)
+		{
+			GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
+			if (channel == null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with name " + channelName);
+			}
+
+			channel.AddListener(origin, true);
+
 			return channel.Id;
+		}
+
+
+		public void UnsubscribeFromChannel(GameStateReplicant origin, uint channelId)
+		{
+			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
+			if (channel == null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with id " + channelId);
+			}
+
+			channel.RemoveListener(origin);
 		}
 
 		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes)
@@ -837,12 +930,12 @@ namespace Impunity.GameState
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
 			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
-			if (channel == null)
+			if (channel == null || channel.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with ID " + channelId);
 			}
 			
-			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, Guid.NewGuid());
+			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, Guid.NewGuid().ToString());
 			List<LiveEntityPersistedPropertyData> persistedProps;
 			UpdateEntityProps(dobj, propBytes, origin, out persistedProps);
 			RegisterEntity(dobj);
@@ -852,7 +945,7 @@ namespace Impunity.GameState
 				dobj.Lock(origin.Id, origin);
 			}
 
-			// Will notify all listeners (expect origin) of new object
+			// Will notify all listeners (except origin) of new object
 			channel.AddObject(dobj, origin);
 
 			if (typeInfo.PersistedAs != null)
@@ -865,11 +958,24 @@ namespace Impunity.GameState
 			return dobj.Id;
 		}
 
+		public GameStateObject CreateObject(LiveEntityData objData, GameStateChannel channel)
+		{
+			GameStateEntityType typeInfo = GetEntityType(objData.EntityType);
+
+			GameStateObject dobj = new GameStateObject(this, typeInfo, objData.InstanceFlags, objData.EntityId);
+			dobj.SetPersistedProps(objData.Properties);
+
+			RegisterEntity(dobj);
+
+			channel.AddObject(dobj, null);
+
+			return dobj;
+		}
 
 		public bool UpdateEntity(GameStateReplicant origin, uint entityId, string key, ArraySegment<byte> propData)
 		{
 			GameStateEntity entity = AllEntities[entityId];
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
@@ -897,7 +1003,7 @@ namespace Impunity.GameState
 		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
@@ -908,7 +1014,7 @@ namespace Impunity.GameState
 		public bool DeleteEntity(uint entityId, string key, BsonValue deleteData)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
@@ -927,7 +1033,7 @@ namespace Impunity.GameState
 		public bool LockEntity(GameStateReplicant origin, uint entityId, string key)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
@@ -946,7 +1052,7 @@ namespace Impunity.GameState
 		public bool UnlockEntity(GameStateReplicant origin, uint entityId, string key)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
@@ -957,7 +1063,7 @@ namespace Impunity.GameState
 		public bool TryToLockNamedLock(GameStateReplicant origin, string name, string key)
 		{
 			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				// Create placeholder named lock object if no entity with that name exists
 				entity = new GameStateNamedLock(this, name);
@@ -973,7 +1079,7 @@ namespace Impunity.GameState
 		public bool UnlockNamedLock(GameStateReplicant origin, string name, string key)
 		{
 			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
-			if (entity == null)
+			if (entity == null || entity.InLoadingState)
 			{
 				return false;
 			}
@@ -990,30 +1096,6 @@ namespace Impunity.GameState
 			return unlocked;
 		}
 
-		public uint SubscribeToChannel(GameStateReplicant origin, string channelName)
-		{
-			GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
-			if (channel == null)
-			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with name " + channelName);
-			}
-
-			channel.AddListener(origin, true);
-
-			return channel.Id;
-		}
-
-		public void UnsubscribeFromChannel(GameStateReplicant origin, uint channelId)
-		{
-			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
-			if (channel == null)
-			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with id " + channelId);
-			}
-
-			channel.RemoveListener(origin);
-		}
-
 		public void SendBroadcastMessage(int messageType, BsonValue message, string fromConnectionId)
 		{
 			BroadcastMessageAction broadcastAction = new BroadcastMessageAction();
@@ -1027,5 +1109,7 @@ namespace Impunity.GameState
 				replica.SendMessageViaConnection(broadcastAction);
 			}
 		}
+
+
 	}
 }

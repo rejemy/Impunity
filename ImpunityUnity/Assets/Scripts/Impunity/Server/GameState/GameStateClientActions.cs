@@ -22,19 +22,18 @@ namespace Impunity.GameState
 		DELETE_DOCUMENT = 207,
 		LIST_DOCUMENTS = 208,
 
-		CREATE_CHANNEL = 300,
-		CREATE_OBJECT = 301,
-		UPDATE_ENTITY = 302,
-		DELETE_ENTITY = 303,
-		EVENT_ENTITY = 304,
-		LOCK_ENTITY = 305,
-		UNLOCK_ENTITY = 306,
-		LOCK_NAMED_LOCK = 307,
-		UNLOCK_NAMED_LOCK = 308,
+		SUBSCRIBE_CHANNEL = 300,
+		UNSUBSCRIBE_CHANNEL = 301,
+		CREATE_OBJECT = 302,
+		UPDATE_ENTITY = 303,
+		DELETE_ENTITY = 304,
+		EVENT_ENTITY = 305,
+		LOCK_ENTITY = 306,
+		UNLOCK_ENTITY = 307,
+		LOCK_NAMED_LOCK = 308,
+		UNLOCK_NAMED_LOCK = 309,
 
-		SUBSCRIBE_CHANNEL = 400,
-		UNSUBSCRIBE_CHANNEL = 401,
-		BROADCAST_MESSAGE = 402,
+		BROADCAST_MESSAGE = 400,
 	}
 
 	public static class ClientActionFactory
@@ -86,8 +85,6 @@ namespace Impunity.GameState
 				case ClientActionType.LIST_DOCUMENTS:
 					return typeof(ListDocumentsAction);
 
-				case ClientActionType.CREATE_CHANNEL:
-					return typeof(CreateChannelAction);
 				case ClientActionType.CREATE_OBJECT:
 					return typeof(CreateObjectAction);
 				case ClientActionType.UPDATE_ENTITY:
@@ -486,39 +483,115 @@ namespace Impunity.GameState
 
 	// Entity actions
 
-	public class CreateChannelAction : ClientActionResultBase<uint>
+	public class SubscribeChannelAction : ClientActionResultBase<uint>, GameStateChannelLoadListener
 	{
+		[BsonField("cn")]
+		public string Name;
+
+		[BsonField("cim")]
+		public bool CreateIfMissing;
+
 		[BsonField("t")]
 		public int EntityTypeId;
 
 		[BsonField("if")]
 		public byte InstanceFlags;
 
-		[BsonField("n")]
-		public string Name;
-
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
-		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_CHANNEL; }
+		public override ushort GetActionType() { return (ushort)ClientActionType.SUBSCRIBE_CHANNEL; }
 		public override bool IsDBOperation() { return false; }
 
-		public CreateChannelAction() { }
+		public SubscribeChannelAction() { }
 
-		public CreateChannelAction(int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
+		public SubscribeChannelAction(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
 		{
+			Name = channelName;
+			CreateIfMissing = createIfMissing;
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
-			Name = channelName;
 			PropBytes = propBytes;
 			OnCompleteCallback = onComplete;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.CreateChannel(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, Name, PropBytes);
+			GameStateEntity entity = game.Live.GetNamedEntity(Name);
+			if (entity == null)
+			{
+				AwaitingTask = true;
+
+				GameStateChannelLoadProxy loadProxy = game.Live.LoadChannel(Name);
+				loadProxy.AddListener(this);
+				if (CreateIfMissing)
+				{
+					loadProxy.SetCreateIfMissing(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, PropBytes);
+				}
+
+				return;
+			}
+			else if (entity is GameStateChannelLoadProxy loadProxy)
+			{
+				// Channel is currently loading, add ourselves as a listener
+
+				AwaitingTask = true;
+				loadProxy.AddListener(this);
+				if (CreateIfMissing)
+				{
+					loadProxy.SetCreateIfMissing(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, PropBytes);
+				}
+
+				return;
+			}
+
+			SubscribeToChannelAction(game);
+		}
+
+		public void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse error, GameStateChannel loadedChannel)
+		{
+			AwaitingTask = false;
+
+			if (error != null)
+			{
+				// Error loading from db or creating it, report it
+				Error = error;
+				game.SendActionResults(this);
+				return;
+			}
+
+			// Else the channel should now be loaded/created, try subscribing
+			game.RunActionMethod(this, SubscribeToChannelAction);
+		}
+
+		private void SubscribeToChannelAction(GameStateServer game)
+		{
+			Result = game.Live.SubscribeToChannel(Origin.ConnectionReplicant, Name);
 		}
 	}
+
+	public class UnsubscribeChannelAction : ClientActionResultlessBase
+	{
+		[BsonField("cid")]
+		public uint ID;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.UNSUBSCRIBE_CHANNEL; }
+		public override bool IsDBOperation() { return false; }
+
+		public UnsubscribeChannelAction() { }
+
+		public UnsubscribeChannelAction(uint channelId, ImpunityCallback onComplete = null)
+		{
+			ID = channelId;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.Live.UnsubscribeFromChannel(Origin.ConnectionReplicant, ID);
+		}
+	}
+
 
 	public class CreateObjectAction : ClientActionResultBase<uint>
 	{
@@ -747,53 +820,6 @@ namespace Impunity.GameState
 			Result = game.Live.UnlockNamedLock(Origin.ConnectionReplicant, Name, Key);
 		}
 	}
-
-
-
-	public class SubscribeChannelAction : ClientActionResultBase<uint>
-	{
-		[BsonField("cn")]
-		public string Name;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.SUBSCRIBE_CHANNEL; }
-		public override bool IsDBOperation() { return false; }
-
-		public SubscribeChannelAction() { }
-
-		public SubscribeChannelAction(string channelName, ImpunityCallback<uint> onComplete = null)
-		{
-			Name = channelName;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			Result = game.Live.SubscribeToChannel(Origin.ConnectionReplicant, Name);
-		}
-	}
-
-	public class UnsubscribeChannelAction : ClientActionResultlessBase
-	{
-		[BsonField("cid")]
-		public uint ID;
-
-		public override ushort GetActionType() { return (ushort)ClientActionType.UNSUBSCRIBE_CHANNEL; }
-		public override bool IsDBOperation() { return false; }
-
-		public UnsubscribeChannelAction() { }
-
-		public UnsubscribeChannelAction(uint channelId, ImpunityCallback onComplete = null)
-		{
-			ID = channelId;
-			OnCompleteCallback = onComplete;
-		}
-
-		protected override void DoAction(GameStateServer game)
-		{
-			game.Live.UnsubscribeFromChannel(Origin.ConnectionReplicant, ID);
-		}
-	}
-
 
 	public class SendBroadcastMessageAction : ClientActionResultlessBase
 	{

@@ -346,7 +346,7 @@ namespace Impunity.GameState
 				else
 				{
 					// Cleanup action
-					action.OnActionComplete();
+					action.Cleanup();
 				}
 
 				if (gotFatalException)
@@ -373,6 +373,22 @@ namespace Impunity.GameState
 					return;
 				}
 
+				if (action.IsDBOperation())
+				{
+					// If it's a DB operation in the live queue, it's actually a response.
+					// TODO - make this simpler and not a weird special case
+
+					try
+					{
+						action.InvokeOnCompleteCallback();
+					}
+					catch(Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+					}
+					continue;
+				}
+
 				// Run catches non-fatal exceptions in the action
 				bool gotFatalException = false;
 				try
@@ -386,25 +402,87 @@ namespace Impunity.GameState
 
 				if (action.ResultsExpected)
 				{
-					try
+					if (!action.AwaitingTask)
 					{
-						action.Origin.ReportActionResult(action);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+						try
+						{
+							action.Origin.ReportActionResult(action);
+						}
+						catch (Exception e)
+						{
+							ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+						}
 					}
 				}
 				else
 				{
 					// Cleanup action
-					action.OnActionComplete();
+					action.Cleanup();
 				}
 
 				if (gotFatalException)
 				{
 					action.Origin.CloseConnectionRequest();
 				}
+			}
+		}
+
+		public void RunActionMethod(GameStateActionBase action, ServerActionMethod method)
+		{
+			// Run catches non-fatal exceptions in the action
+			bool gotFatalException = false;
+			try
+			{
+				action.RunWithMethod(this, method);
+			}
+			catch (ImpunityServerFatalException)
+			{
+				gotFatalException = true;
+			}
+
+			if (action.ResultsExpected)
+			{
+				if (!action.AwaitingTask)
+				{
+					try
+					{
+						action.Origin.ReportActionResult(action);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+					}
+				}
+			}
+			else
+			{
+				// Cleanup action
+				action.Cleanup();
+			}
+
+			if (gotFatalException)
+			{
+				action.Origin.CloseConnectionRequest();
+			}
+		}
+
+		public void SendActionResults(GameStateActionBase action)
+		{
+			if (action.ResultsExpected)
+			{
+				try
+				{
+					action.Origin.ReportActionResult(action);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+				}
+			}
+			else
+			{
+				// Cleanup action
+				action.Cleanup();
 			}
 		}
 
@@ -419,6 +497,11 @@ namespace Impunity.GameState
 			{
 				LiveActionQueue.Add(action);
 			}
+		}
+
+		public void QueueDBReply(GameStateActionBase action)
+		{
+			LiveActionQueue.Add(action);
 		}
 
 		// Called by connection threads

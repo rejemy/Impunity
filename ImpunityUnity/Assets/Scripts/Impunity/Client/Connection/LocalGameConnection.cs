@@ -56,6 +56,11 @@ namespace Impunity.Connection
 		// Called on background thread
 		public void ReportActionResult(GameStateActionBase action)
         {
+			if (!action.ResultsExpected)
+			{
+				return;
+			}
+
 			CompletedActions.Enqueue(action);
 		}
 

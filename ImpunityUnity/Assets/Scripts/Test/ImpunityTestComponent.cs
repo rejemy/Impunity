@@ -585,14 +585,14 @@ public class ImpunityTestComponent : MonoBehaviour
 		c2.EntityManager.OnDistributedObjectCreated = Connection2ObjectCreated;
 
 		TestZone c1channel = new TestZone();
-		c1channel = await c1.EntityManager.CreateChannelAsync(c1channel, "testZone");
+		c1channel = await c1.EntityManager.SubscribeToChannelAsync("testZone", c1channel);
 		ImpunityLogger.LogInformation("C1 Made channel " + c1channel.DistributedEntityId);
 
 		TestPlayer c1player1 = new TestPlayer();
 		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel);
 		ImpunityLogger.LogInformation("C1 Made player: " + c1player1.DistributedEntityId);
 
-		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone");
+		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone", null);
 		ImpunityLogger.LogInformation("C2 subscribed to channel " + c2channel.DistributedEntityId);
 
 		TestPlayer c2player1 = new TestPlayer();

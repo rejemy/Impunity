@@ -161,10 +161,17 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateChannelYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, string channelName, ArraySegment<byte> propBytes)
+		public static ImpunityYield<uint> SubcribeToChannelYield(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateChannel(entityTypeId, instanceFlags, channelName, propBytes, action.OnComplete);
+			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield UnsubscribeFromChannelYield(this BaseGameConnection connection, uint channelId)
+		{
+			var action = new ImpunityYield();
+			connection.UnsubscribeFromChannel(channelId, action.OnComplete);
 			return action;
 		}
 
@@ -210,19 +217,6 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> SubcribeToChannelYield(this BaseGameConnection connection, string channelName)
-		{
-			var action = new ImpunityYield<uint>();
-			connection.SubcribeToChannel(channelName, action.OnComplete);
-			return action;
-		}
-
-		public static ImpunityYield UnsubscribeFromChannelYield(this BaseGameConnection connection, uint channelId)
-		{
-			var action = new ImpunityYield();
-			connection.UnsubscribeFromChannel(channelId, action.OnComplete);
-			return action;
-		}
 	}
 
 	public static class GameStateDBCollectionYieldExtensions
@@ -273,12 +267,12 @@ namespace Impunity.Unity
 
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateChannelYield<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
+		/*public static ImpunityYield<T> CreateChannelYield<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityYield<T>();
 			manager.CreateChannel<T>(channel, name, t.OnComplete);
 			return t;
-		}
+		}*/
 
 		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
@@ -287,10 +281,10 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield<T> SubscribeToChannelYield<T>(this ClientEntityManager manager, string channelName) where T : class, IDistributedChannel
+		public static ImpunityYield<T> SubscribeToChannelYield<T>(this ClientEntityManager manager, string channelName, T createIfNeeded) where T : class, IDistributedChannel
         {
 			var t = new ImpunityYield<T>();
-			manager.SubscribeToChannel<T>(channelName, t.OnComplete);
+			manager.SubscribeToChannel<T>(channelName, createIfNeeded, t.OnComplete);
 			return t;
 		}
 
