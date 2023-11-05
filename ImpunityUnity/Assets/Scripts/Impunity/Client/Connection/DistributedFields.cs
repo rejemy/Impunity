@@ -255,6 +255,8 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
+				Changes = new Dictionary<int, T>();
+
 				int arraySize = r.ReadUInt16();
 
 				T[] newValue = new T[arraySize];
@@ -473,6 +475,9 @@ namespace Impunity.Connection
 			}
 			else if(updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
+				NewValue = new Queue<T>();
+				Changes = new Queue<T>();
+
 				CurrentCapacity = r.ReadUInt16();
 				int numValues = r.ReadUInt16();
 
@@ -675,6 +680,9 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
+				NewValue = new Dictionary<int, T>();
+				Changes = new Dictionary<int, T>();
+
 				int numValues = r.ReadUInt16();
 				Dictionary<int, T> newValue = new Dictionary<int, T>();
 
@@ -872,6 +880,9 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
+				NewValue = new Dictionary<string, T>();
+				Changes = new Dictionary<string, T>();
+
 				int numValues = r.ReadUInt16();
 				Dictionary<string, T> newValue = new Dictionary<string, T>();
 

@@ -33,6 +33,8 @@ public static class TestEntityTypes
 	// 0 is reserved
 	public const int PLAYER = 1;
 	public const int ZONE = 2;
+	public const int PERSISTED_ZONE = 3;
+	public const int PERSISTED_ZONE_OBJECT = 4;
 }
 
 
@@ -145,6 +147,111 @@ public partial class TestZone : DistributedChannelBase
 	}
 }
 
+[DistributedEntity(TestEntityTypes.PERSISTED_ZONE, PersistAs = "zone")]
+public partial class PersistedTestZone : DistributedChannelBase
+{
+	enum DistributedPropIds
+	{
+		STATUS = 1,
+		SCALAR = 2,
+		GRID = 3,
+		CHAT = 4
+	}
+
+	[Distributed((int)DistributedPropIds.STATUS)]
+	private DistributedValue<DString> Status;
+
+	[Distributed((int)DistributedPropIds.SCALAR)]
+	private DistributedValue<DFloat> Scalar;
+
+	[Distributed((int)DistributedPropIds.GRID, PersistAs = "grid", OnChanged = "OnGridChanged", OnReplaced = "OnGridReplaced")]
+	private DistributedArray<DInt32> Grid;
+
+	private void OnGridChanged(int index, int oldValue, int newValue)
+	{
+		ImpunityLogger.LogInformation("Got grid change on PersistedTestZone, index " + index + " from " + oldValue + " to " + newValue);
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	private void OnGridReplaced(DInt32[] oldValue, DInt32[] newValue)
+	{
+		ImpunityLogger.LogInformation("Got grid replaced on PersistedTestZone");
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged", OnReplaced = "OnChatReplaced")]
+	private DistributedQueue<DString> Chat;
+
+	private void OnChatChanged(string newValue)
+	{
+		ImpunityLogger.LogInformation("Got chat change on PersistedTestZone: " + newValue);
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	private void OnChatReplaced(Queue<DString> oldValue, Queue<DString> newValue)
+	{
+		ImpunityLogger.LogInformation("Got chat replaced on PersistedTestZone");
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+}
+
+[DistributedEntity(TestEntityTypes.PERSISTED_ZONE_OBJECT, PersistAs = "zobj")]
+public partial class ZonePersistedObject : DistributedEntityBase
+{
+	enum DistributedPropIds
+	{
+		POSITION = 1,
+		DIRECTION = 2,
+		FLAGS = 3,
+		QUESTS = 4
+	}
+
+	[Distributed((int)DistributedPropIds.POSITION, PersistAs="pos", OnChanged = "OnPositionChanged")]
+	private DistributedValue<DVector2Int> Position;
+
+	private void OnPositionChanged(Vector2Int oldValue, Vector2Int newValue)
+	{
+		ImpunityLogger.LogInformation("Got position change on ZonePersistedObject, from " + oldValue.ToString() + " to " + newValue.ToString());
+	}
+
+	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
+	private DistributedValue<DVector3> Direction;
+
+	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
+	{
+		ImpunityLogger.LogInformation("Got direction change on ZonePersistedObject, from " + oldValue.ToString() + " to " + newValue.ToString());
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	[Distributed((int)DistributedPropIds.FLAGS, PersistAs="flags", OnChanged = "OnFlagsChanged")]
+	private DistributedIntDictionary<DString> Flags;
+
+	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
+	{
+		ImpunityLogger.LogInformation("Got flags change on ZonePersistedObject, key " + key + " from " + oldFlag + " to " + newFlag);
+	}
+
+	[Distributed((int)DistributedPropIds.QUESTS, OnChanged = "OnQuestsChanged")]
+	private DistributedStringDictionary<DString> Quests;
+
+	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
+	{
+		ImpunityLogger.LogInformation("Got quests change on ZonePersistedObject, key " + key + " from " + oldQuest + " to " + newQuest);
+	}
+
+	public override void OnEventTriggered(int eventType, BsonValue eventData)
+	{
+		ImpunityLogger.LogInformation("Got event " + eventType + " on ZonePersistedObject with data " + eventData.ToString());
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	public override void OnDeleted(BsonValue deleteData)
+	{
+		ImpunityLogger.LogInformation("ZonePersistedObject deleted: " + deleteData.ToString());
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+}
+
 public class ImpunityTestComponent : MonoBehaviour
 {
 	ImpunityOptions Options;
@@ -200,7 +307,9 @@ public class ImpunityTestComponent : MonoBehaviour
 			new Type[]
 			{
 				typeof(TestPlayer),
-				typeof(TestZone)
+				typeof(TestZone),
+				typeof(PersistedTestZone),
+				typeof(ZonePersistedObject)
 			}
 		);
 
@@ -254,7 +363,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		GameServer = GameStateServer.Create("testgame", null, GameStatePath, summary, Options);
 	}
 
-	void Cleanup()
+	void Cleanup(bool deleteFolder = true)
     {
 		LocalGame?.Dispose();
 		LocalGame = null;
@@ -268,7 +377,24 @@ public class ImpunityTestComponent : MonoBehaviour
 		GameServer?.Dispose();
 		GameServer = null;
 
-		DeleteFolder(GameStatePath);
+		if (deleteFolder)
+		{
+			DeleteFolder(GameStatePath);
+		}
+	}
+
+	async Task ResetServerAsync()
+	{
+		Cleanup(false);
+
+		await Task.Delay(100);
+
+		ImpunityLogger.LogInformation("Creating local game server");
+
+		BsonDocument summary = new BsonDocument();
+		summary["name"] = "Test Game";
+
+		GameServer = GameStateServer.Open("testgame", null, GameStatePath, Options);
 	}
 
 	IEnumerator LocalConnectionTest()
@@ -435,6 +561,15 @@ public class ImpunityTestComponent : MonoBehaviour
 		await SetupAsync();
 
 		await LiveDataTest();
+
+		await SetupAsync();
+
+		await SetupLivePersistedDataTest();
+
+		// Tears down and reopens server, doesn't delete on-disk data
+		await ResetServerAsync();
+
+		await VerifyLivePersistedDataTest();
 
 		ImpunityLogger.LogInformation("Completed async tests");
 	}
@@ -682,6 +817,148 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Live channel tests complete");
     }
+
+	async Task SetupLivePersistedDataTest()
+	{
+		ImpunityLogger.LogInformation("Running setup live persisted data test");
+
+		try
+		{
+			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
+
+			await LocalGame.ConnectAsync();
+
+			await SetupPersistedZoneAndObjects(LocalGame);
+
+			await Task.Delay(100);
+
+		}
+		catch (Exception e)
+		{
+			ImpunityLogger.LogError("Got exception in setup live persisted data test: " + e.ToString());
+		}
+
+
+		LocalGame.Dispose();
+		LocalGame = null;
+
+		ImpunityLogger.LogInformation("Completed setup live persisted data test");
+	}
+
+	async Task SetupPersistedZoneAndObjects(BaseGameConnection c)
+	{
+		ImpunityLogger.LogInformation("Setting up persisted zone and objects");
+
+		DInt32[] zoneGrid = new DInt32[100];
+		zoneGrid[0] = 25;
+		zoneGrid[10] = 4;
+		zoneGrid[90] = -2;
+
+		PersistedTestZone zone1 = new PersistedTestZone();
+		zone1.SetStatus("ready");
+		zone1.SetScalar(2.5f);
+		zone1.InitChat(200);
+		zone1.ReplaceGrid(zoneGrid);
+
+		zone1 = await c.EntityManager.SubscribeToChannelAsync("zone1", zone1);
+		ImpunityLogger.LogInformation("C1 Made persisted zone " + zone1.DistributedEntityId);
+
+		for (int i = 0; i < 10; i++)
+		{
+			ZonePersistedObject zobj = new ZonePersistedObject();
+			zobj.SetPosition(new Vector2Int(10, -2));
+			zobj.InitFlags();
+			zobj.AddFlags(34, "done");
+			zobj.InitQuests();
+			zobj.AddQuests("butt", "in progress");
+			zobj.SetDirection(new Vector3(0.0f, 1.0f, 2.0f));
+
+			await c.EntityManager.CreateObjectAsync(zobj, zone1);
+		}
+
+		ImpunityLogger.LogInformation("Done setting up persisted zone and objects");
+	}
+
+	async Task VerifyLivePersistedDataTest()
+	{
+		ImpunityLogger.LogInformation("Running verify live persisted data test");
+
+		try
+		{
+			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
+
+			await LocalGame.ConnectAsync();
+
+			TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+			TCPServer.Start();
+
+			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, null, null, CurrFormat, Options);
+			RemoteGame.OnNetworkError = OnNetworkError;
+
+			await Task.Delay(20);
+
+			await RemoteGame.ConnectAsync();
+
+			await VerifyPersistedZoneAndObjects(LocalGame, RemoteGame);
+
+		}
+		catch (Exception e)
+		{
+			ImpunityLogger.LogError("Got exception in verify live persisted data test: " + e.ToString());
+		}
+
+		RemoteGame.Dispose();
+		RemoteGame = null;
+
+		await Task.Delay(100);
+
+		TCPServer.Dispose();
+		TCPServer = null;
+
+		LocalGame.Dispose();
+		LocalGame = null;
+
+		ImpunityLogger.LogInformation("Completed verify live persisted data test");
+	}
+
+	async Task VerifyPersistedZoneAndObjects(BaseGameConnection c1, BaseGameConnection c2)
+	{
+		ImpunityLogger.LogInformation("Starting verifying persisted zone and objects");
+
+		Task<PersistedTestZone> c1Zone1T = c1.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", null);
+		Task<PersistedTestZone> c2Zone1T = c2.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", null);
+
+		PersistedTestZone c1Zone1 = await c1Zone1T;
+		PersistedTestZone c2Zone1 = await c2Zone1T;
+
+		ImpunityLogger.LogInformation("Both clients subscribed to zone1");
+
+		if (c1Zone1.GetGrid(0) != 25 || c2Zone1.GetGrid(0) != 25)
+		{
+			ImpunityLogger.LogError("Grid not initialized with loaded data");
+		}
+
+		Vector2Int expectedPos = new Vector2Int(10, -2);
+
+		foreach(var ent in c1Zone1.DistributedObjects.Values)
+		{
+			ZonePersistedObject c1zobj = (ZonePersistedObject)ent;
+			ZonePersistedObject c2zobj = (ZonePersistedObject)c1Zone1.DistributedObjects[c1zobj.DistributedEntityId];
+
+			if (c1zobj.GetPosition() != expectedPos || c2zobj.GetPosition() != expectedPos)
+			{
+				ImpunityLogger.LogError("Zobj position not set");
+			}
+
+			if (c1zobj.GetFlags(34) != "done" || c2zobj.GetFlags(34) != "done")
+			{
+				ImpunityLogger.LogError("Zobj flags not set");
+			}
+
+		}
+
+		ImpunityLogger.LogInformation("Done verifying persisted zone and objects");
+	}
 
 	async Task<bool> WaitForCount(string error)
 	{

@@ -516,6 +516,10 @@ namespace Impunity.GameState
 		// Called by connection threads
 		internal void ConnectionClosed(IServerSideConnectionProxy connectionProxy)
 		{
+			if (connectionProxy == null)
+			{
+				throw new Exception("Null connection proxy in ConnectionClosed");
+			}
 			ConnectionClosedAction action = new ConnectionClosedAction();
 			action.Origin = connectionProxy;
 			action.ResultsExpected = false;
