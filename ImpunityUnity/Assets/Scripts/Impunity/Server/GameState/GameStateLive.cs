@@ -342,12 +342,14 @@ namespace Impunity.GameState
 		Dictionary<uint, GameStateObject> Members;
 		Dictionary<string, GameStateReplicant> Listeners;
 		public override string ChannelName { get { return Name; } }
+		Dictionary<string, GameStateObject> UniqueNames;
 
 		public GameStateChannel(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string name)
 			: base(liveData, typeInfo, instanceFlags, name)
 		{
 			Members = new Dictionary<uint, GameStateObject>();
 			Listeners = new Dictionary<string, GameStateReplicant>();
+			UniqueNames = new Dictionary<string, GameStateObject>();
 		}
 
 		public void AddListener(GameStateReplicant replicant, bool sendCreate)
@@ -386,9 +388,18 @@ namespace Impunity.GameState
 			Listeners.Remove(replicant.Id);
 		}
 
+		public bool HasUniqueName(string name)
+		{
+			return UniqueNames.ContainsKey(name);
+		}
+
 		public void AddObject(GameStateObject obj, GameStateReplicant addedBy)
 		{
 			Members.Add(obj.Id, obj);
+			if (obj.Name != null)
+			{
+				UniqueNames.Add(obj.Name, obj);
+			}
 			obj.AddedToChannel(this);
 
 			ObjectCreateMessageAction createMessage = obj.MakeCreateMessage();
@@ -399,6 +410,10 @@ namespace Impunity.GameState
 		public void RemoveObject(GameStateObject obj)
 		{
 			Members.Remove(obj.Id);
+			if (obj.Name != null)
+			{
+				UniqueNames.Remove(obj.Name);
+			}
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy, out List<LiveEntityPersistedPropertyData> persistedProps)
@@ -592,7 +607,7 @@ namespace Impunity.GameState
 			message.ChannelId = Channel.Id;
 			message.ObjectType = TypeInfo.Index;
 			message.PropBytes = GetPropBytes();
-
+			message.UniqueName = Name;
 			return message;
 		}
 
@@ -925,7 +940,7 @@ namespace Impunity.GameState
 			channel.RemoveListener(origin);
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes)
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName)
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
@@ -934,8 +949,21 @@ namespace Impunity.GameState
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with ID " + channelId);
 			}
-			
-			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, Guid.NewGuid().ToString());
+
+			if (uniqueName != null && channel.HasUniqueName(uniqueName))
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Channel already has object with name " + uniqueName);
+			}
+
+			string dbid = uniqueName;
+			if (typeInfo.PersistedAs != null && dbid == null)
+			{
+				// If this is a persisted item and it doesn't have a unique name set, make one with a guid
+				dbid = Guid.NewGuid().ToString();
+			}
+
+			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, dbid);
+
 			List<LiveEntityPersistedPropertyData> persistedProps;
 			UpdateEntityProps(dobj, propBytes, origin, out persistedProps);
 			RegisterEntity(dobj);

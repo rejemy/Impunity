@@ -8,7 +8,7 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
-	public struct DSmallCustom : IStandardDistributableValueType
+	public struct DSmallCustom : IStandardDistributableValueType, IEquatable<DSmallCustom>
 	{
 		private ArraySegment<byte> Value;
 
@@ -46,7 +46,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DSmallNullableCustom : IStandardDistributableValueType
+	public struct DSmallNullableCustom : IStandardDistributableValueType, IEquatable<DSmallNullableCustom>
 	{
 		private ArraySegment<byte> Value;
 
@@ -93,7 +93,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DCustom : IStandardDistributableValueType
+	public struct DCustom : IStandardDistributableValueType, IEquatable<DCustom>
 	{
 		private ArraySegment<byte> Value;
 
@@ -131,7 +131,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DNullableCustom : IStandardDistributableValueType
+	public struct DNullableCustom : IStandardDistributableValueType, IEquatable<DNullableCustom>
 	{
 		private ArraySegment<byte> Value;
 

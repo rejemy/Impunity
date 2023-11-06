@@ -1,4 +1,4 @@
-
+using System;
 using System.IO;
 
 
@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace Impunity.GameState
 {
-	public struct DVector2 : IDistributableValueType
+	public struct DVector2 : IDistributableValueType, IEquatable<DVector2>
 	{
 		private Vector2 Value;
 
@@ -40,7 +40,7 @@ namespace Impunity.GameState
 		public bool Equals(DVector2 v) => Value == v.Value;
 	}
 
-	public struct DVector3 : IDistributableValueType
+	public struct DVector3 : IDistributableValueType, IEquatable<DVector3>
 	{
 		private Vector3 Value;
 
@@ -76,7 +76,7 @@ namespace Impunity.GameState
 		public bool Equals(DVector3 v) => Value == v.Value;
 	}
 
-	public struct DVector4 : IDistributableValueType
+	public struct DVector4 : IDistributableValueType, IEquatable<DVector4>
 	{
 		private Vector4 Value;
 
@@ -114,7 +114,7 @@ namespace Impunity.GameState
 		public bool Equals(DVector4 v) => Value == v.Value;
 	}
 
-	public struct DVector2Int : IDistributableValueType
+	public struct DVector2Int : IDistributableValueType, IEquatable<DVector2Int>
 	{
 		private Vector2Int Value;
 
@@ -148,7 +148,7 @@ namespace Impunity.GameState
 		public bool Equals(DVector2Int v) => Value == v.Value;
 	}
 
-	public struct DVector3Int : IDistributableValueType
+	public struct DVector3Int : IDistributableValueType, IEquatable<DVector3Int>
 	{
 		private Vector3Int Value;
 
@@ -184,7 +184,7 @@ namespace Impunity.GameState
 		public bool Equals(DVector3Int v) => Value == v.Value;
 	}
 
-	public struct DColor : IDistributableValueType
+	public struct DColor : IDistributableValueType, IEquatable<DColor>
 	{
 		private Color Value;
 
@@ -222,7 +222,7 @@ namespace Impunity.GameState
 		public bool Equals(DColor v) => Value == v.Value;
 	}
 
-	public struct DColor32 : IDistributableValueType
+	public struct DColor32 : IDistributableValueType, IEquatable<DColor32>
 	{
 		private Color32 Value;
 
@@ -260,7 +260,7 @@ namespace Impunity.GameState
 		public bool Equals(DColor32 v) => Value.Equals(v.Value);
 	}
 
-	public struct DMatrix4x4 : IDistributableValueType
+	public struct DMatrix4x4 : IDistributableValueType, IEquatable<DMatrix4x4>
 	{
 		private Matrix4x4 Value;
 
@@ -298,7 +298,7 @@ namespace Impunity.GameState
 		public bool Equals(DMatrix4x4 v) => Value == v.Value;
 	}
 
-	public struct DQuaternion : IDistributableValueType
+	public struct DQuaternion : IDistributableValueType, IEquatable<DQuaternion>
 	{
 		private Quaternion Value;
 

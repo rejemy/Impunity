@@ -91,9 +91,9 @@ namespace Impunity.Connection
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, propData);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
         {
-			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData, newlyCreated);
+			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData, uniqueName, newlyCreated);
 		}
 
 		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)
@@ -207,9 +207,9 @@ namespace Impunity.Connection
 			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
 		}
 
-		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, ImpunityCallback<uint> onComplete)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, onComplete));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, onComplete));
 		}
 
 		public void UpdateEntity(uint entityId, string key, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)

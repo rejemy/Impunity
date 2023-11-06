@@ -704,12 +704,12 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	void Connection1ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
     {
-		ImpunityLogger.LogInformation("Got new object on connection 1 in channel " + channel.ChannelName + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
+		ImpunityLogger.LogInformation("Got new object on connection 1 in channel " + channel.Name + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
     }
 
 	void Connection2ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
 	{
-		ImpunityLogger.LogInformation("Got new object on connection 2 in channel " + channel.ChannelName + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
+		ImpunityLogger.LogInformation("Got new object on connection 2 in channel " + channel.Name + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
 	}
 
 	async Task LiveChannelTests(BaseGameConnection c1, BaseGameConnection c2)
@@ -724,15 +724,29 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("C1 Made channel " + c1channel.DistributedEntityId);
 
 		TestPlayer c1player1 = new TestPlayer();
+		c1player1.Name = "player1";
 		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel);
 		ImpunityLogger.LogInformation("C1 Made player: " + c1player1.DistributedEntityId);
 
 		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone", null);
 		ImpunityLogger.LogInformation("C2 subscribed to channel " + c2channel.DistributedEntityId);
 
-		TestPlayer c2player1 = new TestPlayer();
-		c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c1channel);
-		ImpunityLogger.LogInformation("C2 Made player: " + c2player1.DistributedEntityId);
+		TestPlayer c2player2 = new TestPlayer();
+		c2player2.Name = "player2";
+		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c1channel);
+		ImpunityLogger.LogInformation("C2 Made player: " + c2player2.DistributedEntityId);
+
+		try
+		{
+			TestPlayer c2player1 = new TestPlayer();
+			c2player1.Name = "player1";
+			c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c2channel);
+			ImpunityLogger.LogError("C2 Made player1: " + c2player1.DistributedEntityId);
+		}
+		catch (ImpuntyErrorResponseException e)
+		{
+			ImpunityLogger.LogInformation("C2 prevented from making duplicate player1: " + e.Message);
+		}
 
 		WaitingForCount = 4;
 
@@ -750,7 +764,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		WaitingForCount = 2;
 
-		c2player1.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
+		c2player2.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
 
 		if (!await WaitForCount("Didn't get direction change callback"))
 		{
@@ -761,7 +775,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		WaitingForCount = 2;
 
-		c2player1.TriggerEvent(1, "Wooow!", null);
+		c2player2.TriggerEvent(1, "Wooow!", null);
 
 		if (!await WaitForCount("Didn't event trigger"))
 		{
@@ -781,16 +795,16 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Deletes happened");
 
 		
-		await c2player1.LockAsync("xyz");
+		await c2player2.LockAsync("xyz");
 
-		bool deleted = await c1.DeleteEntityAsync(c2player1.DistributedEntityId, null, null);
+		bool deleted = await c1.DeleteEntityAsync(c2player2.DistributedEntityId, null, null);
 		if (deleted)
 		{
 			ImpunityLogger.LogError("Was able to delete locked object");
 			return;
 		}
 
-		await c2player1.UnlockAsync("xyz");
+		await c2player2.UnlockAsync("xyz");
 		ImpunityLogger.LogInformation("Completed locking");
 
 

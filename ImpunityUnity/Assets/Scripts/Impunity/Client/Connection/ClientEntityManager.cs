@@ -38,6 +38,7 @@ namespace Impunity.Connection
 
 	public interface IDistributedEntity
 	{
+		string Name { get; set; }
 		uint DistributedEntityId { get; set; }
 		int DistributedEntityType { get; set; }
 		bool IsClientAuthoritative { get; set; }
@@ -60,7 +61,6 @@ namespace Impunity.Connection
 
 	public interface IDistributedChannel : IDistributedEntity
 	{
-		string ChannelName { get; set; }
 		Dictionary<uint, IDistributedEntity> DistributedObjects { get; }
 
 		void Unsubscribe(ImpunityCallback onComplete);
@@ -71,6 +71,7 @@ namespace Impunity.Connection
 
 	public abstract class DistributedEntityBase : IDistributedEntity
 	{
+		public string Name { get; set; }
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
@@ -117,7 +118,6 @@ namespace Impunity.Connection
 
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
 	{
-		public string ChannelName { get; set; }
 		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; }
 
 		public DistributedChannelBase()
@@ -259,6 +259,10 @@ namespace Impunity.Connection
 
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
 		{
+			if(distObj.Name != null && distObj.Name.Contains("/"))
+			{
+				throw new Exception("Object name cannot contain forward slash");
+			}
 
 			Type entityType = distObj.GetType();
 			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
@@ -292,7 +296,7 @@ namespace Impunity.Connection
 				throw new Exception("Unable to create persisted object in non-persisted channel");
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, (ImpunityErrorResponse err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.Name, (ImpunityErrorResponse err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -331,7 +335,7 @@ namespace Impunity.Connection
 			{
 				createIfMising = true;
 
-				createIfNeeded.ChannelName = channelName;
+				createIfNeeded.Name = channelName;
 
 				Type entityType = createIfNeeded.GetType();
 				DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
@@ -389,7 +393,7 @@ namespace Impunity.Connection
 					return;
                 }
 
-				SubscribedChannels.Remove(channel.ChannelName);
+				SubscribedChannels.Remove(channel.Name);
 
 				onComplete?.Invoke(null);
 			});
@@ -628,14 +632,14 @@ namespace Impunity.Connection
 			}
 
 			channel.DistributedEntityType = channelType;
-			channel.ChannelName = channelName;
+			channel.Name = channelName;
 
 			SetPropertyBytes(channel, propData);
 
 			RegisterEntity(channel, channelId);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
 		{
 			IDistributedEntity entity = null;
 
@@ -650,7 +654,7 @@ namespace Impunity.Connection
 			}
 
 			entity.DistributedEntityType = objectType;
-
+			entity.Name = uniqueName;
 			SetPropertyBytes(entity, propData);
 
 			RegisterEntity(entity, objectId);
@@ -697,7 +701,7 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				SubscribedChannels.Add(channel.ChannelName, channel);
+				SubscribedChannels.Add(channel.Name, channel);
 			}
 		}
 
@@ -707,7 +711,7 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				SubscribedChannels.Remove(channel.ChannelName);
+				SubscribedChannels.Remove(channel.Name);
 			}
 		}
 

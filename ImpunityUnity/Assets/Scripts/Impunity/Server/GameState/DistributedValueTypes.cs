@@ -23,7 +23,7 @@ namespace Impunity.GameState
 
 	// Single values
 
-	public struct DBool : IStandardDistributableValueType
+	public struct DBool : IStandardDistributableValueType, IEquatable<DBool>
 	{
 		private bool Value;
 
@@ -52,7 +52,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBoolean; }
 	}
 
-	public struct DInt8 : IStandardDistributableValueType
+	public struct DInt8 : IStandardDistributableValueType, IEquatable<DInt8>
 	{
 		private sbyte Value;
 
@@ -75,12 +75,13 @@ namespace Impunity.GameState
 
 		public static implicit operator sbyte(DInt8 d) => d.Value;
 		public static implicit operator DInt8(sbyte d) => new DInt8(d);
+		public bool Equals(DInt8 v) => Value == v.Value;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = (sbyte)value.AsInt32; }
 	}
 
-	public struct DUInt8 : IStandardDistributableValueType
+	public struct DUInt8 : IStandardDistributableValueType, IEquatable<DUInt8>
 	{
 		private byte Value;
 
@@ -109,7 +110,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (byte)value.AsInt32; }
 	}
 
-	public struct DInt16 : IStandardDistributableValueType
+	public struct DInt16 : IStandardDistributableValueType, IEquatable<DInt16>
 	{
 		private short Value;
 
@@ -138,7 +139,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (short)value.AsInt32; }
 	}
 
-	public struct DUInt16 : IStandardDistributableValueType
+	public struct DUInt16 : IStandardDistributableValueType, IEquatable<DUInt16>
 	{
 		private ushort Value;
 
@@ -167,7 +168,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (ushort)value.AsInt32; }
 	}
 
-	public struct DInt32 : IStandardDistributableValueType
+	public struct DInt32 : IStandardDistributableValueType, IEquatable<DInt32>
 	{
 		private int Value;
 
@@ -196,7 +197,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsInt32; }
 	}
 
-	public struct DUInt32 : IStandardDistributableValueType
+	public struct DUInt32 : IStandardDistributableValueType, IEquatable<DUInt32>
 	{
 		private uint Value;
 
@@ -225,7 +226,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (uint)value.AsInt32; }
 	}
 
-	public struct DInt64 : IStandardDistributableValueType
+	public struct DInt64 : IStandardDistributableValueType, IEquatable<DInt64>
 	{
 		private long Value;
 
@@ -254,7 +255,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsInt64; }
 	}
 
-	public struct DUInt64 : IStandardDistributableValueType
+	public struct DUInt64 : IStandardDistributableValueType, IEquatable<DUInt64>
 	{
 		private ulong Value;
 
@@ -283,7 +284,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (ulong)value.AsInt64; }
 	}
 
-	public struct DFloat : IStandardDistributableValueType
+	public struct DFloat : IStandardDistributableValueType, IEquatable<DFloat>
 	{
 		private float Value;
 
@@ -312,7 +313,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsSingle; }
 	}
 
-	public struct DDouble : IStandardDistributableValueType
+	public struct DDouble : IStandardDistributableValueType, IEquatable<DDouble>
 	{
 		private double Value;
 
@@ -341,7 +342,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsDouble; }
 	}
 
-	public struct DDecimal : IStandardDistributableValueType
+	public struct DDecimal : IStandardDistributableValueType, IEquatable<DDecimal>
 	{
 		private decimal Value;
 
@@ -370,7 +371,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsDecimal; }
 	}
 
-	public struct DChar : IStandardDistributableValueType
+	public struct DChar : IStandardDistributableValueType, IEquatable<DChar>
 	{
 		private char Value;
 
@@ -399,7 +400,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = (char)value.AsInt32; }
 	}
 
-	public struct DString : IStandardDistributableValueType
+	public struct DString : IStandardDistributableValueType, IEquatable<DString>
 	{
 		private string Value;
 
@@ -446,7 +447,7 @@ namespace Impunity.GameState
 
 	
 
-	public struct DBlob : IStandardDistributableValueType
+	public struct DBlob : IStandardDistributableValueType, IEquatable<DBlob>
 	{
 		private ArraySegment<byte> Value;
 
@@ -493,7 +494,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
-	public struct DDateTime : IStandardDistributableValueType
+	public struct DDateTime : IStandardDistributableValueType, IEquatable<DDateTime>
 	{
 		private DateTime Value;
 
@@ -522,7 +523,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsDateTime; }
 	}
 
-	public struct DTimeSpan : IStandardDistributableValueType
+	public struct DTimeSpan : IStandardDistributableValueType, IEquatable<DTimeSpan>
 	{
 		private TimeSpan Value;
 
@@ -551,7 +552,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = new TimeSpan(value.AsInt64); }
 	}
 
-	public struct DGuid : IStandardDistributableValueType
+	public struct DGuid : IStandardDistributableValueType, IEquatable<DGuid>
 	{
 		private Guid Value;
 

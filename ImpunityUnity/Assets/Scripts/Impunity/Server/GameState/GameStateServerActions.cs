@@ -92,7 +92,7 @@ namespace Impunity.GameState
 			handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, PropBytes);
 			foreach (ObjectCreateMessageAction objCreate in ObjectsInChannel)
 			{
-				handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.PropBytes, false);
+				handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.PropBytes, objCreate.UniqueName, false);
 			}
 		}
 	}
@@ -111,12 +111,15 @@ namespace Impunity.GameState
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
+		[BsonField("n")]
+		public string UniqueName;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, PropBytes, true);
+			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, PropBytes, UniqueName, true);
 		}
 	}
 

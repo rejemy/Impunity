@@ -607,23 +607,27 @@ namespace Impunity.GameState
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
+		[BsonField("n")]
+		public string UniqueName;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
 		public override bool IsDBOperation() { return false; }
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
+		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, ImpunityCallback<uint> onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
 			ChannelId = channelId;
 			PropBytes = propBytes;
+			UniqueName = uniqueName;
 			OnCompleteCallback = onComplete;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes);
+			Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName);
 		}
 	}
 

@@ -175,10 +175,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes)
+		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, action.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, action.OnComplete);
 			return action;
 		}
 
@@ -267,13 +267,6 @@ namespace Impunity.Unity
 
 	public static class ClientEntityManagerYieldExtensions
 	{
-		/*public static ImpunityYield<T> CreateChannelYield<T>(this ClientEntityManager manager, T channel, string name) where T : class, IDistributedChannel
-		{
-			var t = new ImpunityYield<T>();
-			manager.CreateChannel<T>(channel, name, t.OnComplete);
-			return t;
-		}*/
-
 		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityYield<T>();
