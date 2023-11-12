@@ -118,12 +118,7 @@ namespace Impunity.Connection
 
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
 	{
-		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; }
-
-		public DistributedChannelBase()
-        {
-			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
-		}
+		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedEntity>();
 
 		public void Unsubscribe(ImpunityCallback onComplete)
 		{
