@@ -458,22 +458,16 @@ namespace Impunity.Connection
 			List<DistributedTypeFieldInfo> distributedFields = new List<DistributedTypeFieldInfo>();
 
 			bool hasPersistedField = false;
-			foreach (var fieldInfo in entityType.GetRuntimeFields())
+
+			IEnumerable<FieldInfo> distributedFieldInfos = GetDistributedFields(entityType);
+			foreach (var fieldInfo in distributedFieldInfos)
 			{
-				if (fieldInfo.IsStatic)
-				{
-					continue;
-				}
 
 				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
-				if (fieldAttr == null)
-				{
-					continue;
-				}
 
 				if (fieldAttr.FieldId <= 0 || fieldAttr.FieldId >= 64)
 				{
-					throw new Exception("Field ID must be positive indeger under 64");
+					throw new Exception("Field ID must be positive integer under 64");
 				}
 
 				Type fieldType = fieldInfo.FieldType;
@@ -511,14 +505,14 @@ namespace Impunity.Connection
 				}
 
 
-				MethodInfo writeMethod = entityType.GetMethod("imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
 				{
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
 				dfield.WriteMethod = writeMethod;
 
-				MethodInfo updateMethod = entityType.GetMethod("imp_Update" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "imp_Update" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (updateMethod == null)
 				{
 					throw new Exception("Cant find update method for property " + fieldInfo.Name + " on type " + entityType.Name);
@@ -577,6 +571,55 @@ namespace Impunity.Connection
 
 			internalTypeInfoList.Add(internalTypeInfo);
 			return entityData;
+		}
+
+		private static IEnumerable<FieldInfo> GetDistributedFields(Type typeInfo)
+		{
+			List<FieldInfo> fields = new List<FieldInfo>();
+
+			AddDistributedFields(fields, typeInfo);
+
+			return fields;
+		}
+
+		private static void AddDistributedFields(List<FieldInfo> fields, Type typeInfo)
+		{
+			if (typeInfo.BaseType != typeof(object))
+			{
+				AddDistributedFields(fields, typeInfo.BaseType);
+			}
+
+			foreach (var fieldInfo in typeInfo.GetRuntimeFields())
+			{
+				if (fieldInfo.IsStatic)
+				{
+					continue;
+				}
+
+				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
+				if (fieldAttr == null)
+				{
+					continue;
+				}
+
+				fields.Add(fieldInfo);
+			}
+
+		}
+
+		private static MethodInfo GetTypeMethodInherited(Type typeInfo, string methodName, BindingFlags flags)
+		{
+			MethodInfo methodInfo = typeInfo.GetMethod(methodName, flags);
+			if (methodInfo != null)
+			{
+				return methodInfo;
+			}
+			else if (typeInfo.BaseType != typeof(object))
+			{
+				return GetTypeMethodInherited(typeInfo.BaseType, methodName, flags);
+			}
+
+			return null;
 		}
 
 		private DistributedTypeInfo GetDistributedTypeInfo(int typeId)

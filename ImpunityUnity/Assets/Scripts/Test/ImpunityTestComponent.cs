@@ -31,25 +31,46 @@ public static class TestCollectionTypes
 public static class TestEntityTypes
 {
 	// 0 is reserved
-	public const int PLAYER = 1;
-	public const int ZONE = 2;
-	public const int PERSISTED_ZONE = 3;
-	public const int PERSISTED_ZONE_OBJECT = 4;
+	public const int OBJ = 1;
+	public const int PLAYER = 2;
+	public const int ZONE = 3;
+	public const int PERSISTED_ZONE = 4;
+	public const int PERSISTED_ZONE_OBJECT = 5;
+}
+
+[DistributedEntity(TestEntityTypes.OBJ, FactoryMethod = "DistributedObjFactory")]
+public partial class TestDistObj : DistributedEntityBase
+{
+	enum DistributedPropIds
+	{
+		POS = 1
+	}
+
+	public static IDistributedEntity DistributedObjFactory() { return new TestDistObj(); }
+
+	[Distributed((int)DistributedPropIds.POS, OnChanged = "OnPositionChanged")]
+	private DistributedValue<DVector3> Position;
+
+	private void OnPositionChanged(Vector3 oldValue, Vector3 newValue)
+	{
+		ImpunityLogger.LogInformation("Got position change on TestDistObj, from " + oldValue.ToString() + " to " + newValue.ToString());
+		ImpunityTestComponent.WaitingForCount -= 1;
+	}
 }
 
 
-[DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "DistributedEntityFactory")]
-public partial class TestPlayer : DistributedEntityBase
+[DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "TestPlayerFactory")]
+public partial class TestPlayer : TestDistObj
 {
 	enum DistributedPropIds
     {
-		TESTBOOL = 1,
-		DIRECTION = 2,
-		FLAGS = 3,
-		QUESTS = 4
+		TESTBOOL = 10,
+		DIRECTION = 11,
+		FLAGS = 12,
+		QUESTS = 13
 	}
 
-	public static IDistributedEntity DistributedEntityFactory() { return new TestPlayer(); }
+	public static IDistributedEntity TestPlayerFactory() { return new TestPlayer(); }
 
 	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged = "OnTestBoolChanged")]
 	private DistributedValue<DBool> TestBool;
@@ -762,11 +783,12 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("c2channel got new status");
 
-		WaitingForCount = 2;
+		WaitingForCount = 4;
 
+		c1player1.SetPosition(new Vector3(5.0f, 5.0f, 5.0f));
 		c2player2.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
 
-		if (!await WaitForCount("Didn't get direction change callback"))
+		if (!await WaitForCount("Didn't get direction and/or position change callback"))
 		{
 			return;
 		}
