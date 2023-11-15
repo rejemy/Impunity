@@ -36,6 +36,13 @@ public static class TestEntityTypes
 	public const int ZONE = 3;
 	public const int PERSISTED_ZONE = 4;
 	public const int PERSISTED_ZONE_OBJECT = 5;
+	public const int EMPTY_OBJ = 10;
+}
+
+[DistributedEntity(TestEntityTypes.EMPTY_OBJ)]
+public partial class TestEmptyObj : DistributedEntityBase
+{
+
 }
 
 [DistributedEntity(TestEntityTypes.OBJ, FactoryMethod = "DistributedObjFactory")]
@@ -330,7 +337,8 @@ public class ImpunityTestComponent : MonoBehaviour
 				typeof(TestPlayer),
 				typeof(TestZone),
 				typeof(PersistedTestZone),
-				typeof(ZonePersistedObject)
+				typeof(ZonePersistedObject),
+				typeof(TestEmptyObj)
 			}
 		);
 
@@ -754,8 +762,11 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		TestPlayer c2player2 = new TestPlayer();
 		c2player2.Name = "player2";
-		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c1channel);
+		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c2channel);
 		ImpunityLogger.LogInformation("C2 Made player: " + c2player2.DistributedEntityId);
+
+		TestEmptyObj c1empty = new TestEmptyObj();
+		await c1.EntityManager.CreateObjectAsync(c1empty, c1channel);
 
 		try
 		{

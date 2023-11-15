@@ -721,19 +721,24 @@ namespace Impunity.GameState
 			etype.Index = def.Index;
 			etype.Name = def.Name;
 			etype.PersistedAs = def.PersistedAs;
+			
 			etype.PackedProperties = def.Properties;
-			int highestIndex = etype.PackedProperties[etype.PackedProperties.Length - 1].Index;
-			etype.PropertyIndexLookup = new GameStateEntityPropertyDef[highestIndex+1];
-			etype.PropertyPersistedAsLookup = new Dictionary<string, GameStateEntityPropertyDef>();
-
-			foreach(var prop in etype.PackedProperties)
+			if (etype.PackedProperties != null && etype.PackedProperties.Length > 0)
 			{
-				etype.PropertyIndexLookup[prop.Index] = prop;
-				if(prop.PersistedAs != null)
+				int highestIndex = etype.PackedProperties[etype.PackedProperties.Length - 1].Index;
+				etype.PropertyIndexLookup = new GameStateEntityPropertyDef[highestIndex+1];
+				etype.PropertyPersistedAsLookup = new Dictionary<string, GameStateEntityPropertyDef>();
+
+				foreach(var prop in etype.PackedProperties)
 				{
-					etype.PropertyPersistedAsLookup.Add(prop.PersistedAs, prop);
+					etype.PropertyIndexLookup[prop.Index] = prop;
+					if(prop.PersistedAs != null)
+					{
+						etype.PropertyPersistedAsLookup.Add(prop.PersistedAs, prop);
+					}
 				}
 			}
+
 			return etype;
 		}
 
