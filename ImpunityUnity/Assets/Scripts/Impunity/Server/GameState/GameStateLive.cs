@@ -537,7 +537,7 @@ namespace Impunity.GameState
 					}
 					catch(Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in OnChannelLoad");
+						ImpunityLogger.LogError("Exception in OnChannelLoad", e);
 					}
 				}
 
@@ -578,7 +578,7 @@ namespace Impunity.GameState
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in OnChannelLoad");
+					ImpunityLogger.LogError("Exception in OnChannelLoad", e);
 				}
 			}
 		}

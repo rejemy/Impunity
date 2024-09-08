@@ -112,7 +112,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in remote connection send attempt");
+					ImpunityLogger.LogError("Exception in remote connection send attempt", e);
 				}
 			}
 		}
@@ -192,7 +192,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Error deserializing reply message body for message type " + action.GetActionType() + " id " + messageId);
+				ImpunityLogger.LogError("Error deserializing reply message body for message type " + action.GetActionType() + " id " + messageId, e);
 				return;
 			}
 

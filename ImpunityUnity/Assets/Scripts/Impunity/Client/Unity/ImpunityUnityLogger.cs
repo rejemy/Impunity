@@ -39,13 +39,12 @@ namespace Impunity.Unity
 			Debug.Log(ThreadName() + message);
 		}
 
-		public void LogTrace(Exception exception, string message)
+		public void LogTrace(string message, Exception exception)
 		{
 			if (LogLevel > ImpunityLogLevel.TRACE)
 				return;
 
-			Debug.Log(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.Log(ThreadName() + message + "\n" + exception.ToString());
 		}
 
 		public void LogDebug(string message)
@@ -56,13 +55,12 @@ namespace Impunity.Unity
 			Debug.Log(ThreadName() + message);
 		}
 
-		public void LogDebug(Exception exception, string message)
+		public void LogDebug(string message, Exception exception)
 		{
 			if (LogLevel > ImpunityLogLevel.DEBUG)
 				return;
 
-			Debug.Log(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.Log(ThreadName() + message + "\n" + exception.ToString());
 		}
 
 		public void LogInformation(string message)
@@ -73,13 +71,12 @@ namespace Impunity.Unity
 			Debug.Log(ThreadName() + message);
 		}
 
-		public void LogInformation(Exception exception, string message)
+		public void LogInformation(string message, Exception exception)
 		{
 			if (LogLevel > ImpunityLogLevel.INFO)
 				return;
 
-			Debug.Log(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.Log(ThreadName() + message + "\n" + exception.ToString());
 		}
 
 		public void LogWarning(string message)
@@ -90,13 +87,12 @@ namespace Impunity.Unity
 			Debug.LogWarning(ThreadName() + message);
 		}
 
-		public void LogWarning(Exception exception, string message)
+		public void LogWarning(string message, Exception exception)
 		{
 			if (LogLevel > ImpunityLogLevel.WARN)
 				return;
 
-			Debug.LogWarning(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.LogWarning(ThreadName() + message + "\n" + exception.ToString());
 		}
 
 		public void LogError(string message)
@@ -107,13 +103,12 @@ namespace Impunity.Unity
 			Debug.LogError(ThreadName() + message);
 		}
 
-		public void LogError(Exception exception, string message)
+		public void LogError(string message, Exception exception)
 		{
 			if (LogLevel > ImpunityLogLevel.ERROR)
 				return;
 
-			Debug.LogError(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.LogError(ThreadName() + message + "\n" + exception.ToString());
 		}
 
 		public void LogCritical(string message)
@@ -121,10 +116,9 @@ namespace Impunity.Unity
 			Debug.LogError(ThreadName() + message);
 		}
 
-		public void LogCritical(Exception exception, string message)
+		public void LogCritical(string message, Exception exception)
 		{
-			Debug.LogError(ThreadName() + message);
-			Debug.LogException(exception);
+			Debug.LogError(ThreadName() + message + "\n" + exception.ToString());
 		}
 	}
 

@@ -87,7 +87,7 @@ namespace Impunity.Networking
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception processing onServerFound callback");
+					ImpunityLogger.LogError("Exception processing onServerFound callback", e);
 				}
 			}
 		}
@@ -122,7 +122,7 @@ namespace Impunity.Networking
 					return;
 				}
 
-				ImpunityLogger.LogError(e, "Socket error");
+				ImpunityLogger.LogError("Socket error", e);
 			}
 			finally
 			{
@@ -146,7 +146,7 @@ namespace Impunity.Networking
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception deserializing game summary");
+					ImpunityLogger.LogError("Exception deserializing game summary", e);
 					return;
 				}
 			}

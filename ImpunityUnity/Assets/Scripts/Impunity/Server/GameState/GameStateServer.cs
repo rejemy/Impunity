@@ -111,10 +111,10 @@ namespace Impunity.GameState
 			}
 
 			GameId = gameId;
-			GamePasswordHash = ImpunityUtil.HashPassword(gamePassword);
+			GamePasswordHash = gamePassword != null ? ImpunityUtil.HashPassword(gamePassword) : null;
 			Options = options;
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
-
+			
 			DB = gameDatabase;
 			Live = new GameStateLive(this);
 
@@ -149,6 +149,11 @@ namespace Impunity.GameState
 		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.Create(path, summary, options), options);
+		}
+
+		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
+		{
+			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
 		}
 
 		// Called by connection threads
@@ -240,7 +245,7 @@ namespace Impunity.GameState
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in OnGameStateFormatChanged handler");
+					ImpunityLogger.LogError("Exception in OnGameStateFormatChanged handler", e);
 				}
 			}
 		}
@@ -270,7 +275,7 @@ namespace Impunity.GameState
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in OnGameSummaryChanged handler");
+					ImpunityLogger.LogError("Exception in OnGameSummaryChanged handler", e);
 				}
 			}
 		}
@@ -340,7 +345,7 @@ namespace Impunity.GameState
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+						ImpunityLogger.LogError("Exception in game action onCompleteHandler", e);
 					}
 				}
 				else
@@ -384,7 +389,7 @@ namespace Impunity.GameState
 					}
 					catch(Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in game action onCompleteHandler");
+						ImpunityLogger.LogError("Exception in game action onCompleteHandler", e);
 					}
 					continue;
 				}
@@ -410,7 +415,7 @@ namespace Impunity.GameState
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+							ImpunityLogger.LogError("Exception in game action ReportActionResult", e);
 						}
 					}
 				}
@@ -450,7 +455,7 @@ namespace Impunity.GameState
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+						ImpunityLogger.LogError("Exception in game action ReportActionResult", e);
 					}
 				}
 			}
@@ -476,7 +481,7 @@ namespace Impunity.GameState
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in game action ReportActionResult");
+					ImpunityLogger.LogError("Exception in game action ReportActionResult", e);
 				}
 			}
 			else

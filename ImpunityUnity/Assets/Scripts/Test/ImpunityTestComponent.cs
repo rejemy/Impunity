@@ -308,7 +308,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Cons.Init();
 		Cons.Open();
 
-		ImpunityUnityLogger.Setup(ImpunityLogLevel.INFO);
+		ImpunityUnityLogger.Setup(ImpunityLogLevel.DEBUG);
 
 		GameStatePath = Path.Join(Application.persistentDataPath, "ImpTest", "TestGame");
 
@@ -343,8 +343,13 @@ public class ImpunityTestComponent : MonoBehaviour
 		);
 
 		StartCoroutine(ComboTest());
+		//StartCoroutine(StandaloneServerTest());
 	}
 
+	IEnumerator StandaloneServerTest()
+	{
+		yield return StandaloneServerTCPConnectionTest(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 29654), "world1");
+	}
 
 	IEnumerator ComboTest()
 	{
@@ -476,6 +481,22 @@ public class ImpunityTestComponent : MonoBehaviour
 		TCPServer = null;
 
 		ImpunityLogger.LogInformation("Done with TCP connection test");
+	}
+
+	IEnumerator StandaloneServerTCPConnectionTest(IPEndPoint serverhost, string gameId)
+	{
+		ImpunityLogger.LogInformation("Running standalone server tcp connection test to " + serverhost.ToString() + "/" + gameId);
+
+
+		RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(serverhost, gameId, "fuzzy-wuzzy", CurrFormat, Options);
+		RemoteGame.OnNetworkError = OnNetworkError;
+
+		yield return GenericConnectionTest(RemoteGame);
+
+		RemoteGame.Dispose();
+		RemoteGame = null;
+
+		ImpunityLogger.LogInformation("Done with standalone server TCP connection test");
 	}
 
 	IEnumerator GenericConnectionTest(BaseGameConnection connection)

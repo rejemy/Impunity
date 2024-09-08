@@ -114,7 +114,7 @@ namespace Impunity.Networking
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Error in OnMessageReceieved handler");
+						ImpunityLogger.LogError("Error in OnMessageReceieved handler", e);
 					}
 
 					bytesReceived = 0;
@@ -133,7 +133,7 @@ namespace Impunity.Networking
 					// Client socket is null on regular requested disonnect
 					OnNetworkError?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, e));
 
-					ImpunityLogger.LogError(e, "Client socket error");
+					ImpunityLogger.LogError("Client socket error", e);
 				}
 			}
 			finally

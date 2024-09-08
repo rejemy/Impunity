@@ -310,7 +310,7 @@ namespace Impunity.Networking
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception sending action result over network");
+					ImpunityLogger.LogError("Exception sending action result over network", e);
 				}
 				
 			}

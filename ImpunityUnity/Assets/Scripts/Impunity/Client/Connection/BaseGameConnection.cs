@@ -63,7 +63,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in action results callback");
+					ImpunityLogger.LogError("Exception in action results callback", e);
 				}
 			}
 
@@ -119,7 +119,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in OnBroadcastMessage handler");
+				ImpunityLogger.LogError("Exception in OnBroadcastMessage handler", e);
 			}
 		}
 

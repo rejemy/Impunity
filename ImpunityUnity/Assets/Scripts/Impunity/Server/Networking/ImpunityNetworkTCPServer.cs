@@ -51,31 +51,39 @@ namespace Impunity.Networking
 			return RemoteEndpoint.ToString();
 		}
 
-		private static async Task<int> ReadTimeout(int delayMS)
-		{
-			await Task.Delay(delayMS);
-			return -1;
-		}
 
 		public void Listen()
 		{
-			Task.WhenAny(ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize),
-				ReadTimeout(ConnectEstablishTimeout))
-				.ContinueWith(OnFirstDataRead);
+			CancellationTokenSource timeoutSource = new CancellationTokenSource();
+			timeoutSource.CancelAfter(ConnectEstablishTimeout);
+
+			ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize, timeoutSource.Token)
+				.ContinueWith( t => {
+					timeoutSource.Dispose();
+					OnDataRead(t);
+				});
 		}
 
-		private void OnFirstDataRead(Task<Task<int>> completedTask)
-		{
-			OnDataRead(completedTask.Result);
-			completedTask.Dispose();
-		}
 
 		// On socket thread
 		private void OnDataRead(Task<int> readTask)
 		{
+			if (readTask.IsCanceled)
+			{
+				ImpunityLogger.LogWarning("Closed connection because it took too long to send establish");
+				Disconnect();
+				return;
+			}
+
 			if (!readTask.IsCompletedSuccessfully)
 			{
-				ImpunityLogger.LogError(readTask.Exception, "Error reading socket");
+				if (Client == null)
+				{
+					// Socket was closed by server, causing ReadAsync to throw an exception
+					return;
+				}
+
+				ImpunityLogger.LogError("Error reading socket", readTask.Exception);
 
 				try
 				{
@@ -83,28 +91,29 @@ namespace Impunity.Networking
 				}
 				catch(Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in TCP socket error handler");
+					ImpunityLogger.LogError("Exception in TCP socket error handler", e);
 				}
 
-				readTask.Dispose();
 				return;
 			}
 
 			int bytesRead = readTask.Result;
-			readTask.Dispose();
 
-			if (bytesRead <= 0 || !Client.Connected)
+			if (bytesRead > 0)
 			{
-				if (bytesRead == -1)
-				{
-					ImpunityLogger.LogWarning("Closed connection because it took too long to send establish");
-				}
-				Disconnect();
-
-				return;
+				HandleDataRead(bytesRead);
 			}
 
-			HandleDataRead(bytesRead);
+			if (!ClientStream.CanRead || !Client.Connected)
+			{
+				if (Client == null)
+				{
+					return;
+				}
+
+				Disconnect();
+				return;
+			}
 
 			// And finish by going back to reading
 			ClientStream.ReadAsync(ReceiveBuffer, 0, MaxBytesToReceive)
@@ -139,7 +148,7 @@ namespace Impunity.Networking
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in TCP socket message handler");
+				ImpunityLogger.LogError("Exception in TCP socket message handler", e);
 			}
 		}
 
@@ -158,13 +167,14 @@ namespace Impunity.Networking
 		{
 			try
 			{
-				Client?.Close();
-				Client?.Dispose();
+				TcpClient client = Client;
 				Client = null;
+				client?.Close();
+				client?.Dispose();
 			}
 			catch(Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception closing TCP socket");
+				ImpunityLogger.LogError("Exception closing TCP socket", e);
 			}
 
 			Server.ClientDisconnected(this);
@@ -175,7 +185,7 @@ namespace Impunity.Networking
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in TCP socket disconnect handler");
+				ImpunityLogger.LogError("Exception in TCP socket disconnect handler", e);
 			}
 		}
 
@@ -188,6 +198,7 @@ namespace Impunity.Networking
 
 	class PerGameTCPServerData
 	{
+		public string GameTypeCode;
 		public string GameId;
 		public int GameStateFormatVersion;
 		public string GameStateFormatChecksum;
@@ -196,9 +207,10 @@ namespace Impunity.Networking
 
 		public ArraySegment<byte> AnnouncePacket;
 
-		public PerGameTCPServerData Copy()
+		public PerGameTCPServerData Clone()
 		{
 			PerGameTCPServerData copy = new PerGameTCPServerData();
+			copy.GameTypeCode = this.GameTypeCode;
 			copy.GameId = GameId;
 			copy.GameStateFormatVersion = GameStateFormatVersion;
 			copy.GameStateFormatChecksum = GameStateFormatChecksum;
@@ -230,14 +242,9 @@ namespace Impunity.Networking
 
 		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
 
-		public ImpunityTCPServer(ImpunityOptions options = null)
+		public ImpunityTCPServer(ImpunityOptions options)
 		{
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
 			Options = options;
-
 
 			PerGameData = new Dictionary<string, PerGameTCPServerData>();
 			Clients = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
@@ -247,14 +254,16 @@ namespace Impunity.Networking
 
 		public void AddGameServer(GameStateServer game)
 		{
-			PerGameTCPServerData tcpGameData = new PerGameTCPServerData();
+            PerGameTCPServerData tcpGameData = new PerGameTCPServerData
+            {
+                GameTypeCode = Options.GameTypeCode,
+                GameId = game.GameId,
+                AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]),
+                CurrGameSummary = game.GetGameSummary(),
+                PasswordProtected = game.GamePasswordHash != null
+            };
 
-			tcpGameData.GameId = game.GameId;
-			tcpGameData.AnnouncePacket = new ArraySegment<byte>(new byte[ImpunityConstants.MaxMessageSize]);
-			tcpGameData.CurrGameSummary = game.GetGameSummary();
-			tcpGameData.PasswordProtected = game.GamePasswordHash != null;
-
-			GameMetadata md = game.GetGameMetadata();
+            GameMetadata md = game.GetGameMetadata();
 			if (md != null)
 			{
 				tcpGameData.GameStateFormatVersion = md.Version;
@@ -270,7 +279,7 @@ namespace Impunity.Networking
 		public void SetGameSummary(string gameId, BsonDocument summary)
 		{
 			// Make copy so we can edit it without it being accessed by another thread
-			PerGameTCPServerData tcpGameData = PerGameData[gameId].Copy();
+			PerGameTCPServerData tcpGameData = PerGameData[gameId].Clone();
 			tcpGameData.CurrGameSummary = summary;
 			MakeAnnouncePacket(tcpGameData);
 			PerGameData[gameId] = tcpGameData;
@@ -280,7 +289,7 @@ namespace Impunity.Networking
 		public void SetGameStateFormat(string gameId, int version, string dataChecksum)
 		{
 			// Make copy so we can edit it without it being accessed by another thread
-			PerGameTCPServerData tcpGameData = PerGameData[gameId].Copy();
+			PerGameTCPServerData tcpGameData = PerGameData[gameId].Clone();
 			tcpGameData.GameStateFormatVersion = version;
 			tcpGameData.GameStateFormatChecksum = dataChecksum;
 
@@ -298,7 +307,7 @@ namespace Impunity.Networking
 			body["p"] = tcpGameData.PasswordProtected;
 
 			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array,
-				ImpunityConstants.ServerAnnouncePacketHeader + Options.GameTypeCode + ":", body);
+				ImpunityConstants.ServerAnnouncePacketHeader + tcpGameData.GameTypeCode + ":", body);
 		}
 
 		public IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients()
@@ -352,7 +361,7 @@ namespace Impunity.Networking
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in TCP client connected callback");
+						ImpunityLogger.LogError("Exception in TCP client connected callback", e);
 					}
 				}
 
@@ -366,7 +375,7 @@ namespace Impunity.Networking
 					return;
 				}
 
-				ImpunityLogger.LogError(e, "TCP Socket error:");
+				ImpunityLogger.LogError("TCP Socket error:", e);
 			}
 			finally
 			{
@@ -444,7 +453,7 @@ namespace Impunity.Networking
 					return;
 				}
 
-				ImpunityLogger.LogError(e, "UDP Socket error:");
+				ImpunityLogger.LogError("UDP Socket error:", e);
 			}
 			finally
 			{

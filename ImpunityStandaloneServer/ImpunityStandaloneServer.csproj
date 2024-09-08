@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <PackageId>ImpunityStandaloneServer</PackageId>
+    <Version>0.9</Version>
+    <AssemblyVersion>0.9</AssemblyVersion>
+    <FileVersion>0.9</FileVersion>
+    <VersionPrefix>0.9</VersionPrefix>
+    <Authors>Jeremy Friesen</Authors>
+    <Product>ImpunityNetworking</Product>
+    <Description>Impunity Networking - Unity library enabling networked save state and multiplayer</Description>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <Title>ImpunityNetworking</Title>
+    <PackageTags>unity network tcp udp save multiplayer</PackageTags>
+    <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
+
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UltraLiteDB">
+      <HintPath>../ImpunityUnity/Assets/Plugins/UltraLiteDB.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/Server/**/*.cs" />
+  </ItemGroup>
+
+</Project>

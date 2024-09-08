@@ -66,12 +66,12 @@ namespace Impunity.GameState
 				if (e is ImpunityServerFatalException)
 				{
 					// Rethrow fatal errors so the connection can also handle them
-					throw e;
+					throw new ImpunityServerFatalException((ImpunityServerFatalException)e);
 				}
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception running action");
+				ImpunityLogger.LogError("Exception running action", e);
 				Error = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
 			}
 		}
@@ -88,12 +88,12 @@ namespace Impunity.GameState
 				if (e is ImpunityServerFatalException)
 				{
 					// Rethrow fatal errors so the connection can also handle them
-					throw e;
+					throw new ImpunityServerFatalException((ImpunityServerFatalException)e);
 				}
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception running action");
+				ImpunityLogger.LogError("Exception running action", e);
 				Error = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
 			}
 		}

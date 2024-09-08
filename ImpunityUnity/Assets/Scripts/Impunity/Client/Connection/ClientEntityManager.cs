@@ -712,7 +712,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Excpetion in channel OnObjectAdded:");
+				ImpunityLogger.LogError("Excpetion in channel OnObjectAdded:", e);
 			}
 
 			try
@@ -721,7 +721,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
             {
-				ImpunityLogger.LogError(e, "Excpetion in OnDistributedObjectCreated handler:");
+				ImpunityLogger.LogError("Excpetion in OnDistributedObjectCreated handler:", e);
             }
 		}
 
@@ -780,7 +780,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in OnEventTriggered: ");
+				ImpunityLogger.LogError("Exception in OnEventTriggered: ", e);
 			}
 		}
 
@@ -805,7 +805,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in OnUndistributed: ");
+						ImpunityLogger.LogError("Exception in OnUndistributed: ", e);
 					}
 				}
 			}
@@ -817,7 +817,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in OnDeleted: ");
+				ImpunityLogger.LogError("Exception in OnDeleted: ", e);
 			}
 		}
 

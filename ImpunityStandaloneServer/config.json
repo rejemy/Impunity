@@ -1,0 +1,13 @@
+{
+	"game_type_code": "ImpTest",
+	"http_port" : 29653,
+	"tcp_port" : 29654,
+	"worlds":
+	[
+		{
+			"id": "world1",
+			"name": "Cool world",
+			"password": "fuzzy-wuzzy"
+		}
+	]
+}

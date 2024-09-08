@@ -32,8 +32,13 @@ namespace Impunity.GameState
 		private GameStateDB(string path)
 		{
 			RootDirectory = path;
-			DBFilename = Path.Combine(RootDirectory, GameDBFile);
+			DBFilename = GetDBFilename(RootDirectory);
 
+		}
+
+		private static string GetDBFilename(string path)
+		{
+			return Path.Combine(path, GameDBFile);
 		}
 
 		public static GameStateDB Open(string path, ImpunityOptions options = null)
@@ -72,6 +77,18 @@ namespace Impunity.GameState
 			game.SetGameSummary(summary);
 
 			return game;
+		}
+
+		public static GameStateDB OpenOrCreate(string path, BsonDocument summary, ImpunityOptions options = null)
+		{
+			if (File.Exists(GetDBFilename(path)))
+			{
+				return Open(path, options);
+			}
+			else
+			{
+				return Create(path, summary, options);
+			}
 		}
 
 		private void OpenDatabase(ImpunityOptions options)
@@ -159,6 +176,10 @@ namespace Impunity.GameState
 		// Called from live thread
 		public void SetGameSummary(BsonDocument summary)
 		{
+			if (summary == null)
+			{
+				return;
+			}
 			byte[] summaryBytes = BsonSerializer.Serialize(summary);
 			string summaryFile = Path.Combine(RootDirectory, GameSummaryFile);
 			File.WriteAllBytes(summaryFile, summaryBytes);

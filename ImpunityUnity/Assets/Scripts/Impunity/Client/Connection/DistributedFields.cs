@@ -41,7 +41,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onChange method");
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
 				CurrentValue = NewValue;
@@ -66,7 +66,7 @@ namespace Impunity.Connection
 			}
 			catch(Exception e)
 			{
-				ImpunityLogger.LogError(e, "Exception in onChange method");
+				ImpunityLogger.LogError("Exception in onChange method", e);
 			}
 		}
 
@@ -98,7 +98,7 @@ namespace Impunity.Connection
 				}
 				catch(Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 				CurrentValue = NewValue;
 			}
@@ -125,7 +125,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 				CurrentValue = NewValue;
 			}
@@ -157,7 +157,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -186,7 +186,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onChange method");
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
 				CurrentValue[index] = newValue;
@@ -248,7 +248,7 @@ namespace Impunity.Connection
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError(e, "Exception in onChange method");
+							ImpunityLogger.LogError("Exception in onChange method", e);
 						}
 					}
 				}
@@ -274,7 +274,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -311,7 +311,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentCapacity = NewCapacity;
@@ -339,7 +339,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentCapacity = NewCapacity;
@@ -392,7 +392,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -411,7 +411,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onChange method");
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 			}
 
@@ -468,7 +468,7 @@ namespace Impunity.Connection
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError(e, "Exception in onChange method");
+							ImpunityLogger.LogError("Exception in onChange method", e);
 						}
 					}
 				}
@@ -502,7 +502,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -537,7 +537,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentValue = NewValue;
@@ -558,7 +558,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentValue = NewValue;
@@ -578,7 +578,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -600,7 +600,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -671,7 +671,7 @@ namespace Impunity.Connection
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError(e, "Exception in onChange method");
+							ImpunityLogger.LogError("Exception in onChange method", e);
 						}
 					}
 
@@ -702,7 +702,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -737,7 +737,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentValue = NewValue;
@@ -758,7 +758,7 @@ namespace Impunity.Connection
 				}
 				catch (Exception e)
 				{
-					ImpunityLogger.LogError(e, "Exception in onSetMethod method");
+					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
 				CurrentValue = NewValue;
@@ -778,7 +778,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -800,7 +800,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
@@ -871,7 +871,7 @@ namespace Impunity.Connection
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError(e, "Exception in onChange method");
+							ImpunityLogger.LogError("Exception in onChange method", e);
 						}
 					}
 
@@ -902,7 +902,7 @@ namespace Impunity.Connection
 					}
 					catch (Exception e)
 					{
-						ImpunityLogger.LogError(e, "Exception in onChange method");
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 
