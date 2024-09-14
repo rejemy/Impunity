@@ -89,8 +89,6 @@ namespace Impunity
 	{
 		public ImpunityErrorCode ErrorCode { get; private set; }
 
-		public ImpunityServerException(ImpunityServerException e) : base(e.Message, e) {}
-
 		public ImpunityServerException(ImpunityErrorCode errorCode, string message) : base(message)
 		{
 			ErrorCode = errorCode;
@@ -99,8 +97,6 @@ namespace Impunity
 
 	public class ImpunityServerFatalException : ImpunityServerException
 	{
-		public ImpunityServerFatalException(ImpunityServerFatalException e) : base(e) {}
-
 		public ImpunityServerFatalException(ImpunityErrorCode errorCode, string message) : base(errorCode, message) {}
 	}
 

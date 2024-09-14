@@ -43,6 +43,7 @@ namespace Impunity.Connection
 			NetworkClient = networkClient;
 			NetworkClient.OnNetworkError = OnNetworkErrorReceived;
 			NetworkClient.OnMessageRecieved = OnNetworkMessageReceived;
+			NetworkClient.OnDisconnectedByServer = OnDisconnectedByServer;
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 		}
@@ -170,6 +171,10 @@ namespace Impunity.Connection
 			CompletedActions.Enqueue(new NoOpAction(OnNetworkError));
 		}
 
+		private void OnDisconnectedByServer(int reason)
+		{
+			ImpunityLogger.LogInformation("Disconnected by server with code " + reason);
+		}
 
 		private void HandleReplyMessage(ushort messageId, BsonDocument replyBody)
 		{

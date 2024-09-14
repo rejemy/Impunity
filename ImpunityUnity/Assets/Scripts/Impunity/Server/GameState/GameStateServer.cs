@@ -325,17 +325,8 @@ namespace Impunity.GameState
 				}
 
 
-				// Run catches non-fatal exceptions in the action
-				bool gotFatalException = false;
-				try
-				{
-					action.Run(this);
-				}
-				catch (ImpunityServerFatalException)
-				{
-					gotFatalException = true;
-				}
-				
+				action.Run(this);
+
 
 				if (action.ResultsExpected)
 				{
@@ -352,11 +343,11 @@ namespace Impunity.GameState
 				{
 					// Cleanup action
 					action.Cleanup();
-				}
 
-				if (gotFatalException)
-				{
-					action.Origin.CloseConnectionRequest();
+					if (action.CloseConnectionOnComplete)
+					{
+						action.Origin.CloseConnectionRequest();
+					}
 				}
 			}
 		}
@@ -524,6 +515,11 @@ namespace Impunity.GameState
 			if (connectionProxy == null)
 			{
 				throw new Exception("Null connection proxy in ConnectionClosed");
+			}
+			if (connectionProxy.ConnectionReplicant == null)
+			{
+				// IF we haven't even setup a replicant for this connection yet, don't send the action
+				return;
 			}
 			ConnectionClosedAction action = new ConnectionClosedAction();
 			action.Origin = connectionProxy;

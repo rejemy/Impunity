@@ -9,6 +9,7 @@ namespace Impunity.Networking
 	{
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		public ImpunityCallback OnNetworkError { get; set; }
+		public Action<int> OnDisconnectedByServer { get; set; }
 
 		private IPEndPoint ServerEndpoint;
 		private ImpunityOptions Options;
@@ -143,6 +144,15 @@ namespace Impunity.Networking
 					ClientSocket.Close();
 					ClientSocket.Dispose();
 					ClientSocket = null;
+
+					try
+					{
+						OnDisconnectedByServer?.Invoke(0);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Error in OnDisconnectedByServer handler: ", e);
+					}
 				}
 			}
 

@@ -8,6 +8,7 @@ namespace Impunity.Networking
 	{
 		ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		ImpunityCallback OnNetworkError { get; set; }
+		Action<int> OnDisconnectedByServer { get; set; }
 
 		void Connect(ImpunityCallback onComplete);
 		void Disconnect();

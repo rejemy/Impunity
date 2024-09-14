@@ -76,15 +76,28 @@ namespace Impunity.Networking
 			action.Origin = this;
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
 
+			// Special handling for first request. If an error happens here, we report the result inline and disconnect,
+			// since the GameServer doesn't even know about this connection yet.
 			if (GameServer == null)
 			{
 				// Establish connection is only legal action here
+				if (action is not EstablishConnectionAction)
+				{
+					ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " sent " + action.GetActionType() + " on connection");
+					action.CloseConnectionOnComplete = true;
+					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Failed to establish connection");
+					ReportActionResult(action);
+					return;
+				}
+
 				EstablishConnectionAction establish = (EstablishConnectionAction)action;
 				GameServer = NetworkServer.GetGameStateServer(establish.GameId);
 				if (GameServer == null)
 				{
 					ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get invalid game id " + establish.GameId);
-					context.Disconnect();
+					action.CloseConnectionOnComplete = true;
+					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Invalid game id");
+					ReportActionResult(action);
 					return;
 				}
 
@@ -93,7 +106,9 @@ namespace Impunity.Networking
 					if (GameServer.GamePasswordHash != establish.PasswordHash)
 					{
 						ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get into a game with an invalid password");
-						context.Disconnect();
+						action.CloseConnectionOnComplete = true;
+						action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Invalid password");
+						ReportActionResult(action);
 						return;
 					}
 				}
@@ -125,26 +140,28 @@ namespace Impunity.Networking
 
 		public void ProcessCloseConnnection()
 		{
+			SendLock.WaitOne();
+
 			ClientContext.Disconnect();
+
+			SendLock.Release();
 		}
 
 		// Called on TCP socket thread
 		private void OnDataWritten(Task writeTask)
 		{
+			// Unlock send buffer
+			SendLock.Release();
+
 			if (!writeTask.IsCompletedSuccessfully)
 			{
-				ImpunityLogger.LogError("Error writing to socket: " + writeTask.Exception?.Message);
-				writeTask.Dispose();
+				ImpunityLogger.LogError("Error writing to socket: ", writeTask.Exception);
 
 				// Close socket or something?
 
 				return;
 			}
-
-			writeTask.Dispose();
-
-			// Unlock send buffer
-			SendLock.Release();
+			
 		}
 
 		// Called on server thread
@@ -312,7 +329,7 @@ namespace Impunity.Networking
 				{
 					ImpunityLogger.LogError("Exception sending action result over network", e);
 				}
-				
+
 			}
 
 			PendingWrite.Dispose();
@@ -339,7 +356,11 @@ namespace Impunity.Networking
 				BsonDocument results = action.SerializeResults();
 				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, results);
 			}
-			
+
+			if(action.CloseConnectionOnComplete)
+			{
+				clientInfo.ProcessCloseConnnection();
+			}
 		}
 
 		// Called on socket thread

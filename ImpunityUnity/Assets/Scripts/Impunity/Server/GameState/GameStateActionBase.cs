@@ -33,6 +33,9 @@ namespace Impunity.GameState
 		public bool ResultsExpected { get; set; }
 
 		[BsonIgnore]
+		public bool CloseConnectionOnComplete { get; set; }
+
+		[BsonIgnore]
 		public bool AwaitingTask { get; set; } = false;
 
 		public abstract ushort GetActionType();
@@ -65,8 +68,7 @@ namespace Impunity.GameState
 				Error = new ImpunityErrorResponse(e);
 				if (e is ImpunityServerFatalException)
 				{
-					// Rethrow fatal errors so the connection can also handle them
-					throw new ImpunityServerFatalException((ImpunityServerFatalException)e);
+					CloseConnectionOnComplete = true;
 				}
 			}
 			catch (Exception e)
@@ -87,8 +89,7 @@ namespace Impunity.GameState
 				Error = new ImpunityErrorResponse(e);
 				if (e is ImpunityServerFatalException)
 				{
-					// Rethrow fatal errors so the connection can also handle them
-					throw new ImpunityServerFatalException((ImpunityServerFatalException)e);
+					CloseConnectionOnComplete = true;
 				}
 			}
 			catch (Exception e)
