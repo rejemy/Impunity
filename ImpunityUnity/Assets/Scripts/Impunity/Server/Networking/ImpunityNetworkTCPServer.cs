@@ -233,6 +233,7 @@ namespace Impunity.Networking
 
 		Thread UDPListenerThread;
 		UdpClient ServerUdpSocket;
+		CancellationTokenSource ShutdownToken;
 
 		bool Running;
 		byte[] SearchPacket;
@@ -248,6 +249,7 @@ namespace Impunity.Networking
 
 			PerGameData = new Dictionary<string, PerGameTCPServerData>();
 			Clients = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
+			ShutdownToken = new CancellationTokenSource();
 
 			Running = true;
 		}
@@ -415,11 +417,12 @@ namespace Impunity.Networking
 			UdpClient socket = ServerUdpSocket;
 			ServerUdpSocket = null;
 			socket.Close();
-			socket.Dispose();
 
+			UDPListenerThread.Join();
+			UDPListenerThread = null;
 		}
 
-		private void UDPListener()
+		private async void UDPListener()
 		{
 			ServerUdpSocket = null;
 
@@ -437,7 +440,8 @@ namespace Impunity.Networking
 
 				while (ServerUdpSocket != null)
 				{
-					byte[] packet = ServerUdpSocket.Receive(ref groupEP);
+					var receiveTask = await ServerUdpSocket.ReceiveAsync();
+					byte[] packet = receiveTask.Buffer;
 					ImpunityLogger.LogInformation("Got bytes");
 					if (ImpunityUtil.StartsWith(packet, SearchPacket))
 					{
@@ -447,19 +451,14 @@ namespace Impunity.Networking
 			}
 			catch (SocketException e)
 			{
-				if (ServerUdpSocket == null)
-				{
-					ImpunityLogger.LogInformation("Server UDP Socket listener closed");
-					return;
-				}
-
 				ImpunityLogger.LogError("UDP Socket error:", e);
 			}
 			finally
 			{
 				if (ServerUdpSocket != null)
 				{
-					ServerUdpSocket.Dispose();
+					ImpunityLogger.LogInformation("Server UDP Socket listener closed");
+					ServerUdpSocket.Close();
 					ServerUdpSocket = null;
 				}
 			}
@@ -492,7 +491,6 @@ namespace Impunity.Networking
 		public void Dispose()
 		{
 			Running = false;
-
 			StopUDPListen();
 
 			foreach (ImpunityTCPServerClientContext client in Clients.Values)

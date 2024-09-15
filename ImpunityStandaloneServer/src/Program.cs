@@ -7,6 +7,8 @@ using Microsoft.Extensions.Logging;
 
 using Impunity;
 using Impunity.StandaloneServer;
+using Microsoft.Extensions.Hosting.Internal;
+using Microsoft.Extensions.Hosting;
 
 // dotnet 6 style bare program with no static class oh em gee what?
 
@@ -108,6 +110,7 @@ if (config.tcp_port != 0)
 builder.Services.AddSingleton(new InfoService());
 
 // --------------- Setup AspNetCore web server ---------------------
+builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
     {
@@ -142,6 +145,8 @@ serverLogger.LogInformation("Impunity Standalone Server starting up");
 app.Run();
 
 // --------------- Shutdown server ---------------------
+
+serverLogger.LogInformation("Shutting down");
 
 if (tcpConnectionService != null)
 {
