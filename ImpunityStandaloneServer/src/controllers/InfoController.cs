@@ -9,10 +9,12 @@ using Microsoft.AspNetCore.Mvc;
 namespace Impunity.StandaloneServer;
 
 [ApiController]
-public class InfoController(InfoService infoService, WorldService worldService) : ControllerBase
+public class InfoController(InfoService infoService, WorldService worldService, TCPConnectionService tcpService) : ControllerBase
 {
 	private readonly InfoService infoService = infoService;
 	private readonly WorldService worldService = worldService;
+	private readonly TCPConnectionService tcpService = tcpService;
+
 
     [HttpGet("/")]
 	public ActionResult<ServerStatus> GetStatus()
@@ -51,21 +53,28 @@ public class InfoController(InfoService infoService, WorldService worldService) 
 	}
 
 	[HttpGet("worlds")]
-	public ActionResult<WorldsInfo> GetWorlds()
+	public ActionResult<StandaloneServerWorldsInfo> GetWorlds()
 	{
-		WorldsInfo result = new WorldsInfo();
-
+		StandaloneServerWorldsInfo result = new StandaloneServerWorldsInfo();
+		result.ImpunityVersion = ImpunityConstants.ImpunityVersion;
+		result.GameType = infoService.Options.GameTypeCode;
+		result.TCPPort = tcpService.Port;
 		var worldDatas = worldService.GetWorldDatas();
-		result.Worlds = new List<WorldInfo>(worldDatas.Count);
+		result.Worlds = new List<StandaloneServerWorldInfo>(worldDatas.Count);
 
 		foreach(var worldData in worldDatas)
 		{
-            var info = new WorldInfo
+			var gameMetadata = worldData.GameState.GetGameMetadata();
+
+            var info = new StandaloneServerWorldInfo
             {
                 WorldId = worldData.ID,
                 WorldName = worldData.Name,
+				PasswordProtected = worldData.Password != null,
                 CurrentPlayers = 0,
-                MaxPlayers = worldData.MaxPlayers
+                MaxPlayers = worldData.MaxPlayers,
+				GameSummary = worldData.GetGameSummaryAsJson(),
+				DataFormatChecksum = gameMetadata.DataFormatChecksum
             };
             result.Worlds.Add(info);
 		}
@@ -74,7 +83,7 @@ public class InfoController(InfoService infoService, WorldService worldService) 
 	}
 
 	[HttpGet("world/{worldId}")]
-	public ActionResult<WorldInfo> GetWorldInfo(string worldId)
+	public ActionResult<StandaloneServerWorldInfo> GetWorldInfo(string worldId)
 	{
 		var worldData = worldService.GetWorldData(worldId);
 		if (worldData == null)
@@ -82,12 +91,17 @@ public class InfoController(InfoService infoService, WorldService worldService) 
 			return NotFound();
 		}
 
-		var info = new WorldInfo
+		var gameMetadata = worldData.GameState.GetGameMetadata();
+
+		var info = new StandaloneServerWorldInfo
             {
                 WorldId = worldData.ID,
                 WorldName = worldData.Name,
+				PasswordProtected = worldData.Password != null,
                 CurrentPlayers = 0,
-                MaxPlayers = worldData.MaxPlayers
+                MaxPlayers = worldData.MaxPlayers,
+				GameSummary = worldData.GetGameSummaryAsJson(),
+				DataFormatChecksum = gameMetadata.DataFormatChecksum
             };
 		
 		return info;

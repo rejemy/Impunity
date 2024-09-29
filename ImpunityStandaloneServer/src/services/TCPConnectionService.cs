@@ -11,6 +11,11 @@ public class TCPConnectionService
 	private readonly WorldService Worlds;
 	private readonly ImpunityServer TCPServer;
 
+	public int Port { get
+	{
+		return TCPServer.Options.ServerPort;
+	}}
+
 	public TCPConnectionService(WorldService worldService, ImpunityOptions options)
 	{
 		Worlds = worldService;

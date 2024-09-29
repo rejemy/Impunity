@@ -11,6 +11,7 @@
     <Product>ImpunityNetworking</Product>
     <Description>Impunity Networking Code Generator</Description>
     <NeutralLanguage>en-US</NeutralLanguage>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
   </PropertyGroup>
 
   <ItemGroup>

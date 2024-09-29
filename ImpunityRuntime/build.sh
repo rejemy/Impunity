@@ -5,12 +5,12 @@ dotnet build -c Release
 dotnet build -c Debug
 
 echo "Copying Impunity Runtime dlls into bin directory"
-mkdir -p ../bin/Release
-cp bin/Release/netstandard2.1/Impunity.dll ../bin/Release
-cp bin/Release/netstandard2.1/Impunity.pdb ../bin/Release
-cp bin/Release/netstandard2.1/Impunity.xml ../bin/Release
+mkdir -p ../bin/Runtime/Release
+cp bin/Release/netstandard2.1/Impunity.dll ../bin/Runtime/Release
+cp bin/Release/netstandard2.1/Impunity.pdb ../bin/Runtime/Release
+cp bin/Release/netstandard2.1/Impunity.xml ../bin/Runtime/Release
 
-mkdir -p ../bin/Debug
-cp bin/Debug/netstandard2.1/Impunity.dll ../bin/Debug
-cp bin/Debug/netstandard2.1/Impunity.pdb ../bin/Debug
-cp bin/Debug/netstandard2.1/Impunity.xml ../bin/Debug
+mkdir -p ../bin/Runtime/Debug
+cp bin/Debug/netstandard2.1/Impunity.dll ../bin/Runtime/Debug
+cp bin/Debug/netstandard2.1/Impunity.pdb ../bin/Runtime/Debug
+cp bin/Debug/netstandard2.1/Impunity.xml ../bin/Runtime/Debug

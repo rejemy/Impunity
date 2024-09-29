@@ -7,10 +7,11 @@ namespace Impunity.StandaloneServer;
 public class InfoService
 {
 	private readonly DateTimeOffset StartupTime = DateTimeOffset.UtcNow;
+	public ImpunityOptions Options { get; init; }
 
-	public InfoService()
+	public InfoService(ImpunityOptions options)
 	{
-
+		Options = options;
 	}
 
 	public TimeSpan GetUptime()

@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Net;
+
 using Impunity.GameState;
 using UltraLiteDB;
 
@@ -340,5 +343,35 @@ namespace Impunity
 		public GameStateEntityPropertyDef[] Properties;
 	}
 
+	public class StandaloneServerWorldInfo
+	{
+		public string WorldId { get; set; }
+		public string WorldName { get; set; }
+		public bool PasswordProtected { get; set; }
+		public int CurrentPlayers { get; set; }
+		public int MaxPlayers { get; set; }
+		public string GameSummary {get; set;}
+		public int GameVersion {get; set;}
+		public string DataFormatChecksum { get; set;}
+	}
 
+	public class StandaloneServerWorldsInfo
+	{
+		public string ImpunityVersion { get; set; }
+		public string GameType {get; set;}
+		public int? TCPPort { get; set; }
+		public List<StandaloneServerWorldInfo> Worlds { get; set; }
+	}
+
+	public class ServerInfo
+	{
+		public IPEndPoint Address;
+		public string GameId;
+		public bool PasswordProtected;
+
+		public int GameStateFormatVersion;
+		public string GameStateFormatChecksum;
+		public BsonDocument GameSummary;
+
+	}
 }

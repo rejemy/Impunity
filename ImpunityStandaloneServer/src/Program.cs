@@ -92,7 +92,8 @@ ImpunityOptions impOptions = new()
 {
     DBPassword = null,
     RemoteUpgradeAllowed = true,
-    ServerPort = config.tcp_port
+    ServerPort = config.tcp_port,
+	GameTypeCode = config.game_type_code
 };
 
 WorldService worldService = new WorldService(config.datapath, config.worlds, impOptions);
@@ -107,7 +108,7 @@ if (config.tcp_port != 0)
 	serverLogger.LogInformation($"Listening for TCP on port {config.tcp_port}");
 }
 
-builder.Services.AddSingleton(new InfoService());
+builder.Services.AddSingleton(new InfoService(impOptions));
 
 // --------------- Setup AspNetCore web server ---------------------
 builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();

@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
+using UltraLiteDB;
 
 using Impunity.GameState;
 using System.Linq;
@@ -37,6 +38,14 @@ public class WorldData
 		GameState = GameStateServer.OpenOrCreate(ID, Password, BaseDirectory, null, options);
 	}
 
+	public string? GetGameSummaryAsJson()
+	{
+		if (GameState.GetGameSummary() == null)
+		{
+			return null;
+		}
+		return JsonSerializer.Serialize(GameState.GetGameSummary());
+	}
 }
 
 public class WorldService

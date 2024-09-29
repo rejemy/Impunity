@@ -24,6 +24,7 @@
     <DocumentationFile>bin/$(Configuration)/$(TargetFramework)/Impunity.xml</DocumentationFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <NoWarn>1591</NoWarn>
+    <LangVersion>9.0</LangVersion>
   </PropertyGroup>
 
 <ItemGroup>

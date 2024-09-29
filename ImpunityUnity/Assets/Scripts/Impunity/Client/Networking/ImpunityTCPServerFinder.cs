@@ -11,17 +11,6 @@ using UltraLiteDB;
 namespace Impunity.Networking
 {
 
-	public class ServerInfo
-	{
-		public IPEndPoint Address;
-		public string GameId;
-		public bool PasswordProtected;
-
-		public int GameStateFormatVersion;
-		public string GameStateFormatChecksum;
-		public BsonDocument GameSummary;
-		
-	}
 
 	public class ImpunityTCPServerFinder : IDisposable
 	{
