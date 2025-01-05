@@ -18,7 +18,7 @@ namespace Impunity.Networking
 		public ImpunityServerMessageHandler OnMessageRecieved { get; set; }
 		public ImpunityServerErrorCallback OnNetworkError { get; set; }
 		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
-		public object ClientInfo { get; set; }
+
 		private const int ConnectEstablishTimeout = 1000;
 
 		ImpunityTCPServer Server;
@@ -222,7 +222,7 @@ namespace Impunity.Networking
 		}
 	}
 
-	public class ImpunityTCPServer : IImpunityNetworkServer
+	public class ImpunityTCPServer
 	{
 		public ImpunityServerClientContextCallback OnClientConnected { get; set; }
 
@@ -312,10 +312,6 @@ namespace Impunity.Networking
 				ImpunityConstants.ServerAnnouncePacketHeader + tcpGameData.GameTypeCode + ":", body);
 		}
 
-		public IEnumerable<IImpunityNetworkServerClientContext> ConnectedClients()
-		{
-			return Clients.Values;
-		}
 
 		public IPEndPoint Listen()
 		{

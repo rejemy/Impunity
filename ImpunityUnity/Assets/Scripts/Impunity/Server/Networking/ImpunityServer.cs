@@ -22,7 +22,7 @@ namespace Impunity.Networking
 		}
 	}
 
-	internal class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
+	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
 	{
 		IImpunityNetworkServerClientContext ClientContext;
 		ImpunityServer NetworkServer;
@@ -203,16 +203,18 @@ namespace Impunity.Networking
 		// Called on socket thread
 		private void ClientDisconnected(IImpunityNetworkServerClientContext client)
 		{
+			NetworkServer.ClientDisconnected(this);
 			GameServer?.ConnectionClosed(this);
 		}
 	}
 
 	public class ImpunityServer : IDisposable, IGameStateListener
 	{
-		IImpunityNetworkServer NetworkServer;
+		ImpunityTCPServer TCPServer;
 		public ImpunityOptions Options { get; private set; }
 
 		Dictionary<string, GameStateServer> GameServers;
+		ConcurrentDictionary<string, ServerSideNetworkConnectionProxy> Clients;
 
 		BlockingCollection<GameStateActionBase> PendingWrite;
 
@@ -221,15 +223,24 @@ namespace Impunity.Networking
 
 		public IPEndPoint TCPEndpoint { get; private set; }
 
-
-		public ImpunityServer(IEnumerable<GameStateServer> gameStates, IImpunityNetworkServer networkServer, ImpunityOptions options)
+		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer>{gameState}, options)
 		{
+		}
+
+		public ImpunityServer(IEnumerable<GameStateServer> gameStates, ImpunityOptions options)
+		{
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
+			Clients = new ConcurrentDictionary<string, ServerSideNetworkConnectionProxy>();
 			GameServers = new Dictionary<string, GameStateServer>();
 
 			Options = options;
 
-			NetworkServer = networkServer;
-			NetworkServer.OnClientConnected = ClientConnected;
+			TCPServer =  new ImpunityTCPServer(options);
+			TCPServer.OnClientConnected = ClientConnected;
 			
 			PendingWrite = new BlockingCollection<GameStateActionBase>();
 
@@ -237,29 +248,11 @@ namespace Impunity.Networking
 			{
 				GameServers.Add(game.GameId, game);
 
-				NetworkServer.AddGameServer(game);
+				TCPServer.AddGameServer(game);
 
 				game.AddListener(this);
 			}
 			
-		}
-
-		public static ImpunityServer MakeTCPServer(GameStateServer gameState, ImpunityOptions options = null)
-		{
-			return MakeTCPServer(new GameStateServer[] { gameState }, options);
-		}
-
-		public static ImpunityServer MakeTCPServer(IEnumerable<GameStateServer> gameStates, ImpunityOptions options = null)
-		{
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
-
-			ImpunityTCPServer tcpserver = new ImpunityTCPServer(options);
-			ImpunityServer server = new ImpunityServer(gameStates, tcpserver, options);
-
-			return server;
 		}
 
 		// Called on live thread
@@ -268,14 +261,14 @@ namespace Impunity.Networking
 			GameMetadata md = game.GetGameMetadata();
 			if (md != null)
 			{
-				NetworkServer.SetGameStateFormat(game.GameId, md.Version, md.DataFormatChecksum);
+				TCPServer.SetGameStateFormat(game.GameId, md.Version, md.DataFormatChecksum);
 			}
 		}
 
 		// Called on Live thread
 		public void OnGameSummaryChanged(GameStateServer game)
 		{
-			NetworkServer.SetGameSummary(game.GameId, game.GetGameSummary());
+			TCPServer.SetGameSummary(game.GameId, game.GetGameSummary());
 		}
 
 		public GameStateServer GetGameStateServer(string gameId)
@@ -302,7 +295,7 @@ namespace Impunity.Networking
 			NetworkWriterThread.Name = "Network write";
 			NetworkWriterThread.Start();
 
-			TCPEndpoint = NetworkServer.Listen();
+			TCPEndpoint = TCPServer.Listen();
 		}
 
 		private void WriterThreadMain()
@@ -364,10 +357,20 @@ namespace Impunity.Networking
 		}
 
 		// Called on socket thread
-		private void ClientConnected(IImpunityNetworkServerClientContext client)
+		public void ClientConnected(IImpunityNetworkServerClientContext client)
 		{
 			ServerSideNetworkConnectionProxy proxy = new ServerSideNetworkConnectionProxy(this, client);
-			client.ClientInfo = proxy;
+			Clients.TryAdd(proxy.ConnectionId, proxy);
+		}
+
+		// Called on socket thread
+		public void ClientDisconnected(ServerSideNetworkConnectionProxy proxy)
+		{
+			if (!Clients.TryRemove(proxy.ConnectionId, out _))
+			{
+				ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + proxy.ConnectionId);
+				return;
+			}
 		}
 
 
@@ -381,8 +384,8 @@ namespace Impunity.Networking
 
 		public void Dispose()
 		{
-			NetworkServer?.Dispose();
-			NetworkServer = null;
+			TCPServer.Dispose();
+			TCPServer = null;
 
 			Running = false;
 			PendingWrite?.CompleteAdding();
@@ -394,7 +397,7 @@ namespace Impunity.Networking
 				game.RemoveListener(this);
 			}
 			GameServers.Clear();
-
+			Clients.Clear();
 		}
 	}
 

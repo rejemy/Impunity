@@ -99,14 +99,11 @@ ImpunityOptions impOptions = new()
 WorldService worldService = new WorldService(config.datapath, config.worlds, impOptions);
 builder.Services.AddSingleton(worldService);
 
-TCPConnectionService? tcpConnectionService = null;
-if (config.tcp_port != 0)
-{
-	tcpConnectionService = new TCPConnectionService(worldService, impOptions);
-	builder.Services.AddSingleton(tcpConnectionService);
-	tcpConnectionService.Start();
-	serverLogger.LogInformation($"Listening for TCP on port {config.tcp_port}");
-}
+ConnectionService connectionService = new ConnectionService(worldService, impOptions);
+builder.Services.AddSingleton(connectionService);
+connectionService.Start();
+serverLogger.LogInformation($"Listening for TCP on port {impOptions.ServerPort}");
+
 
 builder.Services.AddSingleton(new InfoService(impOptions));
 
@@ -149,10 +146,7 @@ app.Run();
 
 serverLogger.LogInformation("Shutting down");
 
-if (tcpConnectionService != null)
-{
-	tcpConnectionService.Stop();
-}
+connectionService.Stop();
 
 worldService.Stop();
 

@@ -9,11 +9,11 @@ using Microsoft.AspNetCore.Mvc;
 namespace Impunity.StandaloneServer;
 
 [ApiController]
-public class InfoController(InfoService infoService, WorldService worldService, TCPConnectionService tcpService) : ControllerBase
+public class InfoController(InfoService infoService, WorldService worldService, ConnectionService tcpService) : ControllerBase
 {
 	private readonly InfoService infoService = infoService;
 	private readonly WorldService worldService = worldService;
-	private readonly TCPConnectionService tcpService = tcpService;
+	private readonly ConnectionService tcpService = tcpService;
 
 
     [HttpGet("/")]

@@ -196,7 +196,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Creating TCP game server");
 
-		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+		TCPServer = new ImpunityServer(GameServer, Options);
 		TCPServer.Start();
 
 		yield return new WaitForSeconds(0.1f);
@@ -234,7 +234,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Creating TCP game server");
 
-		TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+		TCPServer = new ImpunityServer(GameServer, Options);
 		TCPServer.Start();
 
 		yield return new WaitForSeconds(0.1f);
@@ -448,7 +448,7 @@ public class ImpunityTestComponent : MonoBehaviour
 			await LocalGame.ConnectAsync();
 			//await LocalGame.EnsureFormatAsync(CurrFormat);
 
-			TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+			TCPServer = new ImpunityServer(GameServer, Options);
 			TCPServer.Start();
 
 			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, null, "yorb", CurrFormat, Options);
@@ -740,7 +740,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 			await LocalGame.ConnectAsync();
 
-			TCPServer = ImpunityServer.MakeTCPServer(GameServer, Options);
+			TCPServer = new ImpunityServer(GameServer, Options);
 			TCPServer.Start();
 
 			RemoteGame = RemoteGameConnection.MakeTCPRemoteConnection(TCPServer.TCPEndpoint, null, "yorb", CurrFormat, Options);
