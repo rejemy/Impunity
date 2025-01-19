@@ -794,7 +794,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		foreach(var ent in c1Zone1.DistributedObjects.Values)
 		{
 			ZonePersistedObject c1zobj = (ZonePersistedObject)ent;
-			ZonePersistedObject c2zobj = (ZonePersistedObject)c1Zone1.DistributedObjects[c1zobj.DistributedEntityId];
+			ZonePersistedObject c2zobj = (ZonePersistedObject)c2Zone1.DistributedObjects[c1zobj.DistributedEntityId];
 
 			if (c1zobj.GetPosition() != expectedPos || c2zobj.GetPosition() != expectedPos)
 			{

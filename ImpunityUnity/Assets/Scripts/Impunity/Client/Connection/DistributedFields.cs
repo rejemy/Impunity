@@ -35,16 +35,17 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				T oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onChangedMethod?.Invoke(CurrentValue, NewValue);
+					onChangedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
-
-				CurrentValue = NewValue;
 			}
 
 			return true;
@@ -60,6 +61,7 @@ namespace Impunity.Connection
 		{
 			T oldValue = CurrentValue;
 			CurrentValue.ReadFrom(r);
+
 			try
 			{
 				onChangedMethod?.Invoke(oldValue, CurrentValue);
@@ -92,15 +94,17 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				T[] oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch(Exception e)
 				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
+					ImpunityLogger.LogError("Exception in OnReplacedHandler method", e);
 				}
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -119,15 +123,17 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				T[] oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
-				catch (Exception e)
+				catch(Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -149,19 +155,20 @@ namespace Impunity.Connection
 					return false;
 				}
 
-				if (immediate && onChangedMethod != null)
+				T oldValue = NewValue[index];
+				NewValue[index] = newValue;
+
+				if (immediate)
 				{
 					try
 					{
-						onChangedMethod.Invoke(index, CurrentValue[index], newValue);
+						onChangedMethod?.Invoke(index, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
 						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
-
-				NewValue[index] = newValue;
 
 				return true;
 			}
@@ -180,16 +187,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				T oldValue = CurrentValue[index];
+				CurrentValue[index] = newValue;
+
 				try
 				{
-					onChangedMethod?.Invoke(index, CurrentValue[index], newValue);
+					onChangedMethod?.Invoke(index, oldValue, newValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
-				CurrentValue[index] = newValue;
 			}
 
 			return true;
@@ -240,16 +249,13 @@ namespace Impunity.Connection
 					CurrentValue[index].ReadFrom(r);
 					T newValue = CurrentValue[index];
 
-					if (onChangedMethod != null)
+					try
 					{
-						try
-						{
-							onChangedMethod.Invoke(index, oldValue, newValue);
-						}
-						catch (Exception e)
-						{
-							ImpunityLogger.LogError("Exception in onChange method", e);
-						}
+						onChangedMethod?.Invoke(index, oldValue, newValue);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 			}
@@ -259,6 +265,7 @@ namespace Impunity.Connection
 
 				int arraySize = r.ReadUInt16();
 
+				T[] oldValue = CurrentValue;
 				T[] newValue = new T[arraySize];
 
 				for (int index = 0; index < arraySize; index++)
@@ -266,19 +273,17 @@ namespace Impunity.Connection
 					newValue[index].ReadFrom(r);
 				}
 
-				if(onReplacedMethod != null)
-				{
-					try
-					{
-						onReplacedMethod.Invoke(CurrentValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-				}
-
 				CurrentValue = newValue;
+
+				try
+				{
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
+				}
+				
 			}
 		}
 
@@ -296,7 +301,7 @@ namespace Impunity.Connection
 		int NewCapacity;
 		Queue<T> NewValue;
 		Queue<T> Changes;
-		
+
 		public void Init(int capacity, bool immediate, Action<Queue<T>, Queue<T>> onReplacedMethod = null)
 		{
 			NewCapacity = capacity;
@@ -305,17 +310,19 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				CurrentCapacity = NewCapacity;
+				Queue<T> oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
-				CurrentCapacity = NewCapacity;
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -333,17 +340,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				CurrentCapacity = NewCapacity;
+				Queue<T> oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
-
-				CurrentCapacity = NewCapacity;
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -384,11 +392,11 @@ namespace Impunity.Connection
 			{
 				AddToNew(newValue);
 
-				if (immediate && onChangedMethod != null)
+				if (immediate)
 				{
 					try
 					{
-						onChangedMethod.Invoke(newValue);
+						onChangedMethod?.Invoke(newValue);
 					}
 					catch (Exception e)
 					{
@@ -413,6 +421,7 @@ namespace Impunity.Connection
 				{
 					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
+
 			}
 
 		}
@@ -470,6 +479,7 @@ namespace Impunity.Connection
 						{
 							ImpunityLogger.LogError("Exception in onChange method", e);
 						}
+
 					}
 				}
 			}
@@ -482,6 +492,8 @@ namespace Impunity.Connection
 				int numValues = r.ReadUInt16();
 
 				Queue<T> newValue = new Queue<T>(numValues);
+				Queue<T> oldValue = CurrentValue;
+				CurrentValue = newValue;
 
 				for (int index = 0; index < numValues; index++)
 				{
@@ -494,19 +506,15 @@ namespace Impunity.Connection
 					newValue.Enqueue(val);
 				}
 
-				if (onReplacedMethod != null)
+				try
 				{
-					try
-					{
-						onReplacedMethod.Invoke(CurrentValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
-				CurrentValue = newValue;
 			}
 			
 		}
@@ -524,23 +532,26 @@ namespace Impunity.Connection
 		Dictionary<int, T> NewValue;
 		Dictionary<int, T> Changes;
 
+
 		public void Init(bool immediate, Action<Dictionary<int,T>, Dictionary<int,T>> onReplacedMethod = null)
 		{
 			NewValue = new Dictionary<int, T>();
 			Changes = new Dictionary<int, T>();
-
+			
 			if (immediate)
 			{
+				Dictionary<int,T> oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -552,16 +563,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				Dictionary<int,T> oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -569,20 +582,21 @@ namespace Impunity.Connection
 		{
 			if (NewValue != null)
 			{
-				if (immediate && onChangedMethod != null)
+				T oldValue = NewValue.GetValueOrDefault(key);
+				NewValue[key] = newValue;
+
+				if (immediate)
 				{
-					T oldValue = NewValue.GetValueOrDefault(key);
 					try
 					{
-						onChangedMethod.Invoke(key, oldValue, newValue);
+						onChangedMethod?.Invoke(key, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
 						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
-				}
 
-				NewValue[key] = newValue;
+				}
 
 				return;
 			}
@@ -591,20 +605,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
-				if (onChangedMethod != null)
+				T oldValue = CurrentValue.GetValueOrDefault(key);
+				CurrentValue[key] = newValue;
+
+				try
 				{
-					T oldValue = CurrentValue.GetValueOrDefault(key);
-					try
-					{
-						onChangedMethod.Invoke(key, oldValue, oldValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					onChangedMethod?.Invoke(key, oldValue, newValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
-				CurrentValue[key] = newValue;
 			}
 
 		}
@@ -662,20 +674,18 @@ namespace Impunity.Connection
 					T val = default(T);
 					val.ReadFrom(r);
 					
-					if (onChangedMethod != null)
-					{
-						T oldVal = CurrentValue.GetValueOrDefault(key);
-						try
-						{
-							onChangedMethod.Invoke(key, oldVal, val);
-						}
-						catch (Exception e)
-						{
-							ImpunityLogger.LogError("Exception in onChange method", e);
-						}
-					}
-
+					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
+
+					try
+					{
+						onChangedMethod?.Invoke(key, oldVal, val);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in onChange method", e);
+					}
+					
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -694,19 +704,18 @@ namespace Impunity.Connection
 					newValue[key] = val;
 				}
 
-				if (onReplacedMethod != null)
+				var oldValue = CurrentValue;
+				CurrentValue = newValue;
+
+				try
 				{
-					try
-					{
-						onReplacedMethod.Invoke(CurrentValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
-				CurrentValue = newValue;
 			}
 
 		}
@@ -724,6 +733,7 @@ namespace Impunity.Connection
 		Dictionary<string, T> NewValue;
 		Dictionary<string, T> Changes;
 
+		
 		public void Init(bool immediate, Action<Dictionary<string, T>, Dictionary<string, T>> onReplacedMethod = null)
 		{
 			NewValue = new Dictionary<string, T>();
@@ -731,16 +741,17 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				var oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
-
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -752,16 +763,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
+				var oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
 				try
 				{
-					onReplacedMethod?.Invoke(CurrentValue, NewValue);
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in onSetMethod method", e);
 				}
 
-				CurrentValue = NewValue;
 			}
 		}
 
@@ -769,20 +782,21 @@ namespace Impunity.Connection
 		{
 			if (NewValue != null)
 			{
-				if (immediate && onChangedMethod != null)
+				T oldValue = NewValue.GetValueOrDefault(key);
+				NewValue[key] = newValue;
+
+				if (immediate)
 				{
-					T oldValue = NewValue.GetValueOrDefault(key);
 					try
 					{
-						onChangedMethod.Invoke(key, oldValue, newValue);
+						onChangedMethod?.Invoke(key, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
 						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
-				}
 
-				NewValue[key] = newValue;
+				}
 
 				return;
 			}
@@ -791,20 +805,18 @@ namespace Impunity.Connection
 
 			if (immediate)
 			{
-				if (onChangedMethod != null)
+				T oldValue = CurrentValue.GetValueOrDefault(key);
+				CurrentValue[key] = newValue;
+
+				try
 				{
-					T oldValue = CurrentValue.GetValueOrDefault(key);
-					try
-					{
-						onChangedMethod.Invoke(key, oldValue, oldValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					onChangedMethod?.Invoke(key, oldValue, newValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
 				}
 
-				CurrentValue[key] = newValue;
 			}
 
 		}
@@ -862,20 +874,18 @@ namespace Impunity.Connection
 					T val = default(T);
 					val.ReadFrom(r);
 
-					if (onChangedMethod != null)
+					T oldVal = CurrentValue.GetValueOrDefault(key);
+					CurrentValue[key] = val;
+
+					try
 					{
-						T oldVal = CurrentValue.GetValueOrDefault(key);
-						try
-						{
-							onChangedMethod.Invoke(key, oldVal, val);
-						}
-						catch (Exception e)
-						{
-							ImpunityLogger.LogError("Exception in onChange method", e);
-						}
+						onChangedMethod?.Invoke(key, oldVal, val);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 
-					CurrentValue[key] = val;
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -894,19 +904,18 @@ namespace Impunity.Connection
 					newValue[key] = val;
 				}
 
-				if (onReplacedMethod != null)
-				{
-					try
-					{
-						onReplacedMethod.Invoke(CurrentValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-				}
-
+				var oldValue = CurrentValue;
 				CurrentValue = newValue;
+
+				try
+				{
+					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in onChange method", e);
+				}
+				
 			}
 
 		}
