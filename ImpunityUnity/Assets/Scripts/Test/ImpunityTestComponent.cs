@@ -586,10 +586,10 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		WaitingForCount = 4;
 
-		c1channel.SetScalar(2.0f);
-		c1channel.SetStatus("New status");
-		c1channel.InitGrid(100);
-		c1channel.InitChat(100);
+		c1channel.Scalar.Set(2.0f);
+		c1channel.Status.Set("New status");
+		c1channel.Grid.Init(100);
+		c1channel.Chat.Init(100);
 
 		if (!await WaitForCount("Didn't get distributed status"))
 		{
@@ -600,8 +600,8 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		WaitingForCount = 4;
 
-		c1player1.SetPosition(new Vector3(5.0f, 5.0f, 5.0f));
-		c2player2.SetDirection(new Vector3(1.0f, 1.0f, 1.0f));
+		c1player1.Position.Set(new Vector3(5.0f, 5.0f, 5.0f));
+		c2player2.Direction.Set(new Vector3(1.0f, 1.0f, 1.0f));
 
 		if (!await WaitForCount("Didn't get direction and/or position change callback"))
 		{
@@ -648,7 +648,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Distributed array tests:");
 
 		WaitingForCount = 2;
-		c1channel.SetGrid(10, 32);
+		c1channel.Grid.Set(10, 32);
 
 		if (!await WaitForCount("Didn't get array callbacks"))
 		{
@@ -700,16 +700,16 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		ImpunityLogger.LogInformation("Setting up persisted zone and objects");
 
-		DInt32[] zoneGrid = new DInt32[100];
+		int[] zoneGrid = new int[100];
 		zoneGrid[0] = 25;
 		zoneGrid[10] = 4;
 		zoneGrid[90] = -2;
 
 		PersistedTestZone zone1 = new PersistedTestZone();
-		zone1.SetStatus("ready");
-		zone1.SetScalar(2.5f);
-		zone1.InitChat(200);
-		zone1.ReplaceGrid(zoneGrid);
+		zone1.Status.Set("ready");
+		zone1.Scalar.Set(2.5f);
+		zone1.Chat.Init(200);
+		zone1.Grid.Replace(zoneGrid);
 
 		zone1 = await c.EntityManager.SubscribeToChannelAsync("zone1", zone1);
 		ImpunityLogger.LogInformation("C1 Made persisted zone " + zone1.DistributedEntityId);
@@ -717,12 +717,12 @@ public class ImpunityTestComponent : MonoBehaviour
 		for (int i = 0; i < 10; i++)
 		{
 			ZonePersistedObject zobj = new ZonePersistedObject();
-			zobj.SetPosition(new Vector2Int(10, -2));
-			zobj.InitFlags();
-			zobj.AddFlags(34, "done");
-			zobj.InitQuests();
-			zobj.AddQuests("butt", "in progress");
-			zobj.SetDirection(new Vector3(0.0f, 1.0f, 2.0f));
+			zobj.Position.Set(new Vector2Int(10, -2));
+			zobj.Flags.Init();
+			zobj.Flags.Add(34, "done");
+			zobj.Quests.Init();
+			zobj.Quests.Add("butt", "in progress");
+			zobj.Direction.Set(new Vector3(0.0f, 1.0f, 2.0f));
 
 			await c.EntityManager.CreateObjectAsync(zobj, zone1);
 		}
@@ -784,7 +784,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Both clients subscribed to zone1");
 
-		if (c1Zone1.GetGrid(0) != 25 || c2Zone1.GetGrid(0) != 25)
+		if (c1Zone1.Grid.Get(0) != 25 || c2Zone1.Grid.Get(0) != 25)
 		{
 			ImpunityLogger.LogError("Grid not initialized with loaded data");
 		}
@@ -796,12 +796,12 @@ public class ImpunityTestComponent : MonoBehaviour
 			ZonePersistedObject c1zobj = (ZonePersistedObject)ent;
 			ZonePersistedObject c2zobj = (ZonePersistedObject)c2Zone1.DistributedObjects[c1zobj.DistributedEntityId];
 
-			if (c1zobj.GetPosition() != expectedPos || c2zobj.GetPosition() != expectedPos)
+			if (c1zobj.Position.Get() != expectedPos || c2zobj.Position.Get() != expectedPos)
 			{
 				ImpunityLogger.LogError("Zobj position not set");
 			}
 
-			if (c1zobj.GetFlags(34) != "done" || c2zobj.GetFlags(34) != "done")
+			if (c1zobj.Flags.Get(34) != "done" || c2zobj.Flags.Get(34) != "done")
 			{
 				ImpunityLogger.LogError("Zobj flags not set");
 			}

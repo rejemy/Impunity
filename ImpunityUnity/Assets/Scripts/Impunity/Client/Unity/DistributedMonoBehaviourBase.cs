@@ -20,7 +20,7 @@ namespace Impunity.Unity
 		public IDistributedChannel Channel { get; set; }
 
 		public ulong DirtyBits { get; private set; }
-		public void SetDirty(int fieldId)
+		public void SetDirty(byte fieldId)
 		{
 			DirtyBits |= 1ul << (fieldId - 1);
 			Manager?.SetDirty(this);
@@ -30,6 +30,8 @@ namespace Impunity.Unity
 		{
 			DirtyBits = 0ul;
 		}
+
+		public virtual void InitializeDistributedFields() {}
 
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{

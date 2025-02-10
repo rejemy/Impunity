@@ -3,29 +3,38 @@ using System.Collections.Generic;
 using System.IO;
 
 
-using Impunity.GameState;
-
 namespace Impunity.Connection
 {
-
+	
 	public interface IDistributedField
 	{
 		GameStateEntityFieldType FieldType { get; }
 		GameStateEntityPropertyValueType ValueType { get; }
-
 	}
 
-	public struct DistributedValue<T> : IDistributedField where T : struct, IDistributableValueType
+	public struct DistributedValue<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
+		public event Action<T,T> OnChanged;
+		private static readonly S Serializer;
+		
+		IDistributedEntity Entity;
+		byte FieldId;
+
 		T CurrentValue;
 		T NewValue;
+
+		public void Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
 
 		public T Get()
         {
 			return CurrentValue;
         }
 
-		public bool Set(T newValue, bool immediate, Action<T, T> onChangedMethod = null)
+		public bool Set(T newValue)
 		{
 			NewValue = newValue;
 			if (NewValue.Equals(CurrentValue))
@@ -33,14 +42,16 @@ namespace Impunity.Connection
 				return false;
 			}
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onChangedMethod?.Invoke(oldValue, CurrentValue);
+					OnChanged?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -53,18 +64,18 @@ namespace Impunity.Connection
 
 		public void WriteChangesTo(BinaryWriter w)
 		{
-			NewValue.WriteTo(w);
+			Serializer.WriteTo(NewValue, w);
 		}
 
 
-		public void ReadChangesFrom(BinaryReader r, Action<T,T> onChangedMethod = null)
+		public void ReadChangesFrom(BinaryReader r)
 		{
 			T oldValue = CurrentValue;
-			CurrentValue.ReadFrom(r);
+			CurrentValue = Serializer.ReadFrom(r);
 
 			try
 			{
-				onChangedMethod?.Invoke(oldValue, CurrentValue);
+				OnChanged?.Invoke(oldValue, CurrentValue);
 			}
 			catch(Exception e)
 			{
@@ -73,33 +84,45 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
-		public GameStateEntityPropertyValueType ValueType { get => CurrentValue.ValueType; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator T(DistributedValue<T> d) => d.CurrentValue;
+		public static implicit operator T(DistributedValue<T,S> d) => d.CurrentValue;
 	}
 
-
-	public struct DistributedArray<T> : IDistributedField where T : struct, IDistributableValueType
+	public struct DistributedArray<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
-		T[] CurrentValue;
+		public event Action<T[],T[]> OnReplaced;
+		public event Action<int,T,T> OnChanged;
+		private static readonly S Serializer;
 
+		T[] CurrentValue;
 		T[] NewValue;
 		Dictionary<int, T> Changes;
 
+		IDistributedEntity Entity;
+		byte FieldId;
 
-		public void Init(int size, bool immediate, Action<T[], T[]> onReplacedMethod = null)
+		public void Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
+
+		public void Init(int size)
 		{
 			NewValue = new T[size];
 			Changes = new Dictionary<int, T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch(Exception e)
 				{
@@ -109,7 +132,7 @@ namespace Impunity.Connection
 		}
 
 
-		public void Replace(IReadOnlyCollection<T> newArray, bool immediate, Action<T[], T[]> onReplacedMethod = null)
+		public void Replace(IReadOnlyCollection<T> newArray)
 		{
 			NewValue = new T[newArray.Count];
 
@@ -121,14 +144,16 @@ namespace Impunity.Connection
 
 			Changes = new Dictionary<int, T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch(Exception e)
 				{
@@ -146,7 +171,7 @@ namespace Impunity.Connection
 			return CurrentValue[index];
 		}
 
-		public bool Set(int index, T newValue, bool immediate, Action<int, T, T> onChangedMethod = null)
+		public bool Set(int index, T newValue)
 		{
 			if (NewValue != null)
 			{
@@ -158,11 +183,13 @@ namespace Impunity.Connection
 				T oldValue = NewValue[index];
 				NewValue[index] = newValue;
 
-				if (immediate)
+				Entity.SetDirty(FieldId);
+
+				if (Entity.IsClientAuthoritative)
 				{
 					try
 					{
-						onChangedMethod?.Invoke(index, oldValue, newValue);
+						OnChanged?.Invoke(index, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
@@ -185,14 +212,16 @@ namespace Impunity.Connection
 
 			Changes.Add(index, newValue);
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T oldValue = CurrentValue[index];
 				CurrentValue[index] = newValue;
 
 				try
 				{
-					onChangedMethod?.Invoke(index, oldValue, newValue);
+					OnChanged?.Invoke(index, oldValue, newValue);
 				}
 				catch (Exception e)
 				{
@@ -213,7 +242,7 @@ namespace Impunity.Connection
 				w.Write((ushort)NewValue.Length);
 				for(int index = 0; index < NewValue.Length; index++)
 				{
-					NewValue[index].WriteTo(w);
+					Serializer.WriteTo(NewValue[index], w);
 				}
 				NewValue = null;
 			}
@@ -225,7 +254,7 @@ namespace Impunity.Connection
 				foreach (var change in Changes)
 				{
 					w.Write((ushort)change.Key);
-					change.Value.WriteTo(w);
+					Serializer.WriteTo(change.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -236,7 +265,7 @@ namespace Impunity.Connection
 		}
 
 
-		public void ReadChangesFrom(BinaryReader r, Action<int, T, T> onChangedMethod = null, Action<T[], T[]> onReplacedMethod = null)
+		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
 			if (updateType == (byte)DistributedCollectionUpdateType.Update)
@@ -246,12 +275,12 @@ namespace Impunity.Connection
 				{
 					int index = r.ReadUInt16();
 					T oldValue = CurrentValue[index];
-					CurrentValue[index].ReadFrom(r);
+					CurrentValue[index] = Serializer.ReadFrom(r);
 					T newValue = CurrentValue[index];
 
 					try
 					{
-						onChangedMethod?.Invoke(index, oldValue, newValue);
+						OnChanged?.Invoke(index, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
@@ -270,14 +299,14 @@ namespace Impunity.Connection
 
 				for (int index = 0; index < arraySize; index++)
 				{
-					newValue[index].ReadFrom(r);
+					newValue[index] = Serializer.ReadFrom(r);
 				}
 
 				CurrentValue = newValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -288,13 +317,18 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Array; }
-		public GameStateEntityPropertyValueType ValueType { get => new T().ValueType; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator T[](DistributedArray<T> d) => d.CurrentValue;
+		public static implicit operator T[](DistributedArray<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedQueue<T> : IDistributedField where T : struct, IDistributableValueType
+	public struct DistributedQueue<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
+		public event Action<T> OnChanged;
+		public event Action<Queue<T>, Queue<T>> OnReplaced;
+
+		private static readonly S Serializer;
+
 		int CurrentCapacity;
 		Queue<T> CurrentValue;
 
@@ -302,13 +336,24 @@ namespace Impunity.Connection
 		Queue<T> NewValue;
 		Queue<T> Changes;
 
-		public void Init(int capacity, bool immediate, Action<Queue<T>, Queue<T>> onReplacedMethod = null)
+		IDistributedEntity Entity;
+		byte FieldId;
+
+		public void Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
+
+		public void Init(int capacity)
 		{
 			NewCapacity = capacity;
 			NewValue = new Queue<T>();
 			Changes = new Queue<T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				CurrentCapacity = NewCapacity;
 				Queue<T> oldValue = CurrentValue;
@@ -316,7 +361,7 @@ namespace Impunity.Connection
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -327,7 +372,7 @@ namespace Impunity.Connection
 		}
 
 
-		public void Replace(int capacity, IEnumerable<T> initialValues, bool immediate, Action<Queue<T>, Queue<T>> onReplacedMethod = null)
+		public void Replace(int capacity, IEnumerable<T> initialValues)
 		{
 			NewCapacity = capacity;
 			NewValue = new Queue<T>();
@@ -338,7 +383,9 @@ namespace Impunity.Connection
 				AddToNew(val);
 			}
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				CurrentCapacity = NewCapacity;
 				Queue<T> oldValue = CurrentValue;
@@ -346,7 +393,7 @@ namespace Impunity.Connection
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -386,17 +433,19 @@ namespace Impunity.Connection
 		}
 
 
-		public void Add(T newValue, bool immediate, Action<T> onChangedMethod = null)
+		public void Add(T newValue)
 		{
 			if (NewValue != null)
 			{
 				AddToNew(newValue);
 
-				if (immediate)
+				Entity.SetDirty(FieldId);
+
+				if (Entity.IsClientAuthoritative)
 				{
 					try
 					{
-						onChangedMethod?.Invoke(newValue);
+						OnChanged?.Invoke(newValue);
 					}
 					catch (Exception e)
 					{
@@ -409,13 +458,15 @@ namespace Impunity.Connection
 
 			AddToChanges(newValue);
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				AddToCurrent(newValue);
 
 				try
 				{
-					onChangedMethod?.Invoke(newValue);
+					OnChanged?.Invoke(newValue);
 				}
 				catch (Exception e)
 				{
@@ -436,7 +487,7 @@ namespace Impunity.Connection
 				w.Write((ushort)NewValue.Count);
 				foreach (T value in NewValue)
 				{
-					value.WriteTo(w);
+					Serializer.WriteTo(value, w);
 				}
 				NewValue = null;
 			}
@@ -447,7 +498,7 @@ namespace Impunity.Connection
 				w.Write((ushort)Changes.Count);
 				foreach (var change in Changes)
 				{
-					change.WriteTo(w);
+					Serializer.WriteTo(change, w);
 				}
 				Changes.Clear();
 			}
@@ -457,7 +508,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r, Action<T> onChangedMethod = null, Action<Queue<T>, Queue<T>> onReplacedMethod = null)
+		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
 			if (updateType == (byte)DistributedCollectionUpdateType.Update)
@@ -465,21 +516,16 @@ namespace Impunity.Connection
 				int numChanges = r.ReadUInt16();
 				for (int i = 0; i < numChanges; i++)
 				{
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 					AddToCurrent(val);
 
-					if (onChangedMethod != null)
+					try
 					{
-						try
-						{
-							onChangedMethod.Invoke(val);
-						}
-						catch (Exception e)
-						{
-							ImpunityLogger.LogError("Exception in onChange method", e);
-						}
-
+						OnChanged?.Invoke(val);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in onChange method", e);
 					}
 				}
 			}
@@ -497,8 +543,7 @@ namespace Impunity.Connection
 
 				for (int index = 0; index < numValues; index++)
 				{
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 					if (newValue.Count == CurrentCapacity)
 					{
 						newValue.Dequeue();
@@ -508,7 +553,7 @@ namespace Impunity.Connection
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -520,32 +565,47 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Queue; }
-		public GameStateEntityPropertyValueType ValueType { get => new T().ValueType; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator Queue<T>(DistributedQueue<T> d) => d.CurrentValue;
+		public static implicit operator Queue<T>(DistributedQueue<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedIntDictionary<T> : IDistributedField where T : struct, IDistributableValueType
+	public struct DistributedIntDictionary<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
+		public event Action<int,T,T> OnChanged;
+		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
+
+		private static readonly S Serializer;
+
 		Dictionary<int,T> CurrentValue;
 
 		Dictionary<int, T> NewValue;
 		Dictionary<int, T> Changes;
 
+		IDistributedEntity Entity;
+		byte FieldId;
 
-		public void Init(bool immediate, Action<Dictionary<int,T>, Dictionary<int,T>> onReplacedMethod = null)
+		public void Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
+
+		public void Init()
 		{
 			NewValue = new Dictionary<int, T>();
 			Changes = new Dictionary<int, T>();
 			
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -556,19 +616,21 @@ namespace Impunity.Connection
 		}
 
 
-		public void Replace(IReadOnlyDictionary<int,T> initialValues, bool immediate, Action<Dictionary<int,T>, Dictionary<int,T>> onReplacedMethod = null)
+		public void Replace(IReadOnlyDictionary<int,T> initialValues)
 		{
 			NewValue = new Dictionary<int, T>(initialValues);
 			Changes = new Dictionary<int, T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -578,18 +640,20 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void Add(int key, T newValue, bool immediate, Action<int,T,T> onChangedMethod = null)
+		public void Add(int key, T newValue)
 		{
 			if (NewValue != null)
 			{
 				T oldValue = NewValue.GetValueOrDefault(key);
 				NewValue[key] = newValue;
 
-				if (immediate)
+				Entity.SetDirty(FieldId);
+
+				if (Entity.IsClientAuthoritative)
 				{
 					try
 					{
-						onChangedMethod?.Invoke(key, oldValue, newValue);
+						OnChanged?.Invoke(key, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
@@ -603,14 +667,16 @@ namespace Impunity.Connection
 
 			Changes[key] = newValue;
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
 
 				try
 				{
-					onChangedMethod?.Invoke(key, oldValue, newValue);
+					OnChanged?.Invoke(key, oldValue, newValue);
 				}
 				catch (Exception e)
 				{
@@ -640,7 +706,7 @@ namespace Impunity.Connection
 				foreach (var pair in NewValue)
 				{
 					w.Write(pair.Key);
-					pair.Value.WriteTo(w);
+					Serializer.WriteTo(pair.Value, w);
 				}
 				NewValue = null;
 			}
@@ -652,7 +718,7 @@ namespace Impunity.Connection
 				foreach (var pair in Changes)
 				{
 					w.Write(pair.Key);
-					pair.Value.WriteTo(w);
+					Serializer.WriteTo(pair.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -662,7 +728,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r, Action<int,T,T> onChangedMethod = null, Action<Dictionary<int,T>,Dictionary<int,T>> onReplacedMethod = null)
+		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
 			if (updateType == (byte)DistributedCollectionUpdateType.Update)
@@ -671,15 +737,14 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					int key = r.ReadInt32();
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 					
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
 
 					try
 					{
-						onChangedMethod?.Invoke(key, oldVal, val);
+						OnChanged?.Invoke(key, oldVal, val);
 					}
 					catch (Exception e)
 					{
@@ -699,8 +764,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					int key = r.ReadInt32();
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 					newValue[key] = val;
 				}
 
@@ -709,7 +773,7 @@ namespace Impunity.Connection
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -721,32 +785,47 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.IntDictionary; }
-		public GameStateEntityPropertyValueType ValueType { get => new T().ValueType; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T> d) => d.CurrentValue;
+		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedStringDictionary<T> : IDistributedField where T : struct, IDistributableValueType
+	public struct DistributedStringDictionary<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
+		public event Action<string,T,T> OnChanged;
+		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
+
+		private static readonly S Serializer;
+
 		Dictionary<string, T> CurrentValue;
 
 		Dictionary<string, T> NewValue;
 		Dictionary<string, T> Changes;
 
-		
-		public void Init(bool immediate, Action<Dictionary<string, T>, Dictionary<string, T>> onReplacedMethod = null)
+		IDistributedEntity Entity;
+		byte FieldId;
+
+		public void Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
+
+		public void Init()
 		{
 			NewValue = new Dictionary<string, T>();
 			Changes = new Dictionary<string, T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -756,19 +835,21 @@ namespace Impunity.Connection
 		}
 
 
-		public void Replace(IReadOnlyDictionary<string, T> initialValues, bool immediate, Action<Dictionary<string, T>, Dictionary<string, T>> onReplacedMethod = null)
+		public void Replace(IReadOnlyDictionary<string, T> initialValues)
 		{
 			NewValue = new Dictionary<string, T>(initialValues);
 			Changes = new Dictionary<string, T>();
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -778,18 +859,20 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void Add(string key, T newValue, bool immediate, Action<string, T, T> onChangedMethod = null)
+		public void Add(string key, T newValue)
 		{
 			if (NewValue != null)
 			{
 				T oldValue = NewValue.GetValueOrDefault(key);
 				NewValue[key] = newValue;
 
-				if (immediate)
+				Entity.SetDirty(FieldId);
+
+				if (Entity.IsClientAuthoritative)
 				{
 					try
 					{
-						onChangedMethod?.Invoke(key, oldValue, newValue);
+						OnChanged?.Invoke(key, oldValue, newValue);
 					}
 					catch (Exception e)
 					{
@@ -803,14 +886,16 @@ namespace Impunity.Connection
 
 			Changes[key] = newValue;
 
-			if (immediate)
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
 			{
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
 
 				try
 				{
-					onChangedMethod?.Invoke(key, oldValue, newValue);
+					OnChanged?.Invoke(key, oldValue, newValue);
 				}
 				catch (Exception e)
 				{
@@ -840,7 +925,7 @@ namespace Impunity.Connection
 				foreach (var pair in NewValue)
 				{
 					w.Write(pair.Key);
-					pair.Value.WriteTo(w);
+					Serializer.WriteTo(pair.Value, w);
 				}
 				NewValue = null;
 			}
@@ -852,7 +937,7 @@ namespace Impunity.Connection
 				foreach (var pair in Changes)
 				{
 					w.Write(pair.Key);
-					pair.Value.WriteTo(w);
+					Serializer.WriteTo(pair.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -862,7 +947,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void ReadChangesFrom(BinaryReader r, Action<string, T, T> onChangedMethod = null, Action<Dictionary<string, T>, Dictionary<string, T>> onReplacedMethod = null)
+		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
 			if (updateType == (byte)DistributedCollectionUpdateType.Update)
@@ -871,15 +956,14 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					string key = r.ReadString();
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
 
 					try
 					{
-						onChangedMethod?.Invoke(key, oldVal, val);
+						OnChanged?.Invoke(key, oldVal, val);
 					}
 					catch (Exception e)
 					{
@@ -899,8 +983,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					string key = r.ReadString();
-					T val = default(T);
-					val.ReadFrom(r);
+					T val = Serializer.ReadFrom(r);
 					newValue[key] = val;
 				}
 
@@ -909,7 +992,7 @@ namespace Impunity.Connection
 
 				try
 				{
-					onReplacedMethod?.Invoke(oldValue, CurrentValue);
+					OnReplaced?.Invoke(oldValue, CurrentValue);
 				}
 				catch (Exception e)
 				{
@@ -921,9 +1004,9 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.StringDictionary; }
-		public GameStateEntityPropertyValueType ValueType { get => new T().ValueType; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator Dictionary<string, T>(DistributedStringDictionary<T> d) => d.CurrentValue;
+		public static implicit operator Dictionary<string, T>(DistributedStringDictionary<T,S> d) => d.CurrentValue;
 	}
 
 }

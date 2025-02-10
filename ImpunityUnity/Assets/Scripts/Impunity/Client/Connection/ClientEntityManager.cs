@@ -24,12 +24,10 @@ namespace Impunity.Connection
 	[AttributeUsage(AttributeTargets.Field)]
 	public class Distributed : Attribute
 	{
-		internal int FieldId;
-		public string OnChanged { get; set; }
-		public string OnReplaced { get; set; }
+		internal byte FieldId;
 		public string PersistAs { get; set; }
 
-		public Distributed(int fieldId)
+		public Distributed(byte fieldId)
 		{
 			FieldId = fieldId;
 		}
@@ -44,10 +42,13 @@ namespace Impunity.Connection
 		bool IsClientAuthoritative { get; set; }
 
 		ClientEntityManager Manager { get; set; }
+
 		ulong DirtyBits { get; }
 
-		void SetDirty(int fieldId);
+		void SetDirty(byte fieldId);
 		void ClearDirty();
+
+		void InitializeDistributedFields();
 
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
@@ -80,7 +81,7 @@ namespace Impunity.Connection
 		public IDistributedChannel Channel { get; set; }
 
 		public ulong DirtyBits { get; private set; }
-		public void SetDirty(int fieldId)
+		public void SetDirty(byte fieldId)
         {
 			DirtyBits |= 1ul << (fieldId - 1);
 			Manager?.SetDirty(this);
@@ -90,6 +91,8 @@ namespace Impunity.Connection
         {
 			DirtyBits = 0ul;
 		}
+
+		public virtual void InitializeDistributedFields() {}
 
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
@@ -149,7 +152,7 @@ namespace Impunity.Connection
 
 	public class DistributedTypeFieldInfo
 	{
-		public int FieldId;
+		public byte FieldId;
 		public string FieldName;
 		public string PersistedAs;
 		public GameStateEntityFieldType FieldType;
@@ -505,14 +508,14 @@ namespace Impunity.Connection
 				}
 
 
-				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "imp_Write"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
 				{
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
 				dfield.WriteMethod = writeMethod;
 
-				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "imp_Update" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "_imp_ReadWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (updateMethod == null)
 				{
 					throw new Exception("Cant find update method for property " + fieldInfo.Name + " on type " + entityType.Name);
@@ -584,17 +587,17 @@ namespace Impunity.Connection
 
 		private static void AddDistributedFields(List<FieldInfo> fields, Type typeInfo)
 		{
-			if (typeInfo.BaseType != typeof(object))
-			{
-				AddDistributedFields(fields, typeInfo.BaseType);
-			}
+			//if (typeInfo.BaseType != typeof(object))
+			//{
+			//	AddDistributedFields(fields, typeInfo.BaseType);
+			//}
 
-			foreach (var fieldInfo in typeInfo.GetRuntimeFields())
+			foreach (var fieldInfo in typeInfo.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
 			{
-				if (fieldInfo.IsStatic)
-				{
-					continue;
-				}
+				//if (fieldInfo.IsStatic)
+				//{
+				//	continue;
+				//}
 
 				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
 				if (fieldAttr == null)

@@ -3,10 +3,10 @@
 using System.Collections.Generic;
 
 using Impunity;
-using Impunity.GameState;
 using Impunity.Connection;
 
 using UltraLiteDB;
+using Impunity.Unity;
 
 
 public static class TestCollectionTypes
@@ -35,15 +35,21 @@ public partial class TestEmptyObj : DistributedEntityBase
 [DistributedEntity(TestEntityTypes.OBJ, FactoryMethod = "DistributedObjFactory")]
 public partial class TestDistObj : DistributedEntityBase
 {
-	enum DistributedPropIds
+	enum DistributedPropIds : byte
 	{
 		POS = 1
 	}
 
 	public static IDistributedEntity DistributedObjFactory() { return new TestDistObj(); }
 
-	[Distributed((int)DistributedPropIds.POS, OnChanged = "OnPositionChanged")]
-	private DistributedValue<DVector3> Position;
+	[Distributed((byte)DistributedPropIds.POS)]
+	public DistributedValue<Vector3, Vector3Serializer> Position;
+
+	public TestDistObj()
+	{
+		InitializeDistributedFields();
+		Position.OnChanged += OnPositionChanged;
+	}
 
 	private void OnPositionChanged(Vector3 oldValue, Vector3 newValue)
 	{
@@ -56,7 +62,7 @@ public partial class TestDistObj : DistributedEntityBase
 [DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "TestPlayerFactory")]
 public partial class TestPlayer : TestDistObj
 {
-	enum DistributedPropIds
+	enum DistributedPropIds : byte
 	{
 		TESTBOOL = 10,
 		DIRECTION = 11,
@@ -66,16 +72,28 @@ public partial class TestPlayer : TestDistObj
 
 	public static IDistributedEntity TestPlayerFactory() { return new TestPlayer(); }
 
-	[Distributed((int)DistributedPropIds.TESTBOOL, OnChanged = "OnTestBoolChanged")]
-	private DistributedValue<DBool> TestBool;
+	public TestPlayer()
+	{
+		InitializeDistributedFields();
+		base.InitializeDistributedFields();
+		
+		TestBool.OnChanged += OnTestBoolChanged;
+		Direction.OnChanged += OnDirectionChanged;
+		Flags.OnChanged += OnFlagsChanged;
+		Quests.OnChanged += OnQuestsChanged;
+	}
+
+
+	[Distributed((byte)DistributedPropIds.TESTBOOL)]
+	public DistributedValue<bool, BoolSerializer> TestBool;
 
 	private void OnTestBoolChanged(bool oldValue, bool newValue)
 	{
 		ImpunityLogger.LogInformation("Got testbool change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
 	}
 
-	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
-	private DistributedValue<DVector3> Direction;
+	[Distributed((byte)DistributedPropIds.DIRECTION)]
+	public DistributedValue<Vector3, Vector3Serializer> Direction;
 
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
 	{
@@ -83,16 +101,16 @@ public partial class TestPlayer : TestDistObj
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((int)DistributedPropIds.FLAGS, OnChanged = "OnFlagsChanged")]
-	private DistributedIntDictionary<DString> Flags;
+	[Distributed((byte)DistributedPropIds.FLAGS)]
+	public DistributedIntDictionary<string, StringSerializer> Flags;
 
 	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
 	{
 		ImpunityLogger.LogInformation("Got flags change on TestPlayer, key " + key + " from " + oldFlag + " to " + newFlag);
 	}
 
-	[Distributed((int)DistributedPropIds.QUESTS, OnChanged = "OnQuestsChanged")]
-	private DistributedStringDictionary<DString> Quests;
+	[Distributed((byte)DistributedPropIds.QUESTS)]
+	public DistributedStringDictionary<string, StringSerializer> Quests;
 
 	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
 	{
@@ -116,7 +134,7 @@ public partial class TestPlayer : TestDistObj
 [DistributedEntity(TestEntityTypes.ZONE)]
 public partial class TestZone : DistributedChannelBase
 {
-	enum DistributedPropIds
+	enum DistributedPropIds : byte
 	{
 		STATUS = 1,
 		SCALAR = 2,
@@ -124,15 +142,25 @@ public partial class TestZone : DistributedChannelBase
 		CHAT = 4
 	}
 
-	[Distributed((int)DistributedPropIds.STATUS)]
-	private DistributedValue<DString> Status;
+	public TestZone()
+	{
+		InitializeDistributedFields();
+
+		Grid.OnChanged += OnGridChanged;
+		Grid.OnReplaced += OnGridReplaced;
+		Chat.OnChanged += OnChatChanged;
+		Chat.OnReplaced += OnChatReplaced;
+	}
+
+	[Distributed((byte)DistributedPropIds.STATUS)]
+	public DistributedValue<string, StringSerializer> Status;
 
 
-	[Distributed((int)DistributedPropIds.SCALAR)]
-	private DistributedValue<DFloat> Scalar;
+	[Distributed((byte)DistributedPropIds.SCALAR)]
+	public DistributedValue<float, FloatSerializer> Scalar;
 
-	[Distributed((int)DistributedPropIds.GRID, OnChanged = "OnGridChanged", OnReplaced = "OnGridReplaced")]
-	private DistributedArray<DInt32> Grid;
+	[Distributed((byte)DistributedPropIds.GRID)]
+	public DistributedArray<int, Int32Serializer> Grid;
 
 	private void OnGridChanged(int index, int oldValue, int newValue)
 	{
@@ -140,14 +168,14 @@ public partial class TestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	private void OnGridReplaced(DInt32[] oldValue, DInt32[] newValue)
+	private void OnGridReplaced(int[] oldValue, int[] newValue)
 	{
 		ImpunityLogger.LogInformation("Got grid replaced on TestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged", OnReplaced = "OnChatReplaced")]
-	private DistributedQueue<DString> Chat;
+	[Distributed((byte)DistributedPropIds.CHAT)]
+	public DistributedQueue<string, StringSerializer> Chat;
 
 	private void OnChatChanged(string newValue)
 	{
@@ -155,7 +183,7 @@ public partial class TestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	private void OnChatReplaced(Queue<DString> oldValue, Queue<DString> newValue)
+	private void OnChatReplaced(Queue<string> oldValue, Queue<string> newValue)
 	{
 		ImpunityLogger.LogInformation("Got chat replaced on TestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
@@ -165,7 +193,7 @@ public partial class TestZone : DistributedChannelBase
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE, PersistAs = "zone")]
 public partial class PersistedTestZone : DistributedChannelBase
 {
-	enum DistributedPropIds
+	enum DistributedPropIds : byte
 	{
 		STATUS = 1,
 		SCALAR = 2,
@@ -173,14 +201,25 @@ public partial class PersistedTestZone : DistributedChannelBase
 		CHAT = 4
 	}
 
-	[Distributed((int)DistributedPropIds.STATUS)]
-	private DistributedValue<DString> Status;
 
-	[Distributed((int)DistributedPropIds.SCALAR)]
-	private DistributedValue<DFloat> Scalar;
+	public PersistedTestZone()
+	{
+		InitializeDistributedFields();
 
-	[Distributed((int)DistributedPropIds.GRID, PersistAs = "grid", OnChanged = "OnGridChanged", OnReplaced = "OnGridReplaced")]
-	private DistributedArray<DInt32> Grid;
+		Grid.OnChanged += OnGridChanged;
+		Grid.OnReplaced += OnGridReplaced;
+		Chat.OnChanged += OnChatChanged;
+		Chat.OnReplaced += OnChatReplaced;
+	}
+
+	[Distributed((byte)DistributedPropIds.STATUS)]
+	public DistributedValue<string, StringSerializer> Status;
+
+	[Distributed((byte)DistributedPropIds.SCALAR)]
+	public DistributedValue<float, FloatSerializer> Scalar;
+
+	[Distributed((byte)DistributedPropIds.GRID, PersistAs = "grid")]
+	public DistributedArray<int, Int32Serializer> Grid;
 
 	private void OnGridChanged(int index, int oldValue, int newValue)
 	{
@@ -188,14 +227,14 @@ public partial class PersistedTestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	private void OnGridReplaced(DInt32[] oldValue, DInt32[] newValue)
+	private void OnGridReplaced(int[] oldValue, int[] newValue)
 	{
 		ImpunityLogger.LogInformation("Got grid replaced on PersistedTestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((int)DistributedPropIds.CHAT, OnChanged = "OnChatChanged", OnReplaced = "OnChatReplaced")]
-	private DistributedQueue<DString> Chat;
+	[Distributed((byte)DistributedPropIds.CHAT)]
+	public DistributedQueue<string, StringSerializer> Chat;
 
 	private void OnChatChanged(string newValue)
 	{
@@ -203,7 +242,7 @@ public partial class PersistedTestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	private void OnChatReplaced(Queue<DString> oldValue, Queue<DString> newValue)
+	private void OnChatReplaced(Queue<string> oldValue, Queue<string> newValue)
 	{
 		ImpunityLogger.LogInformation("Got chat replaced on PersistedTestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
@@ -213,7 +252,7 @@ public partial class PersistedTestZone : DistributedChannelBase
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE_OBJECT, PersistAs = "zobj")]
 public partial class ZonePersistedObject : DistributedEntityBase
 {
-	enum DistributedPropIds
+	enum DistributedPropIds : byte
 	{
 		POSITION = 1,
 		DIRECTION = 2,
@@ -221,16 +260,26 @@ public partial class ZonePersistedObject : DistributedEntityBase
 		QUESTS = 4
 	}
 
-	[Distributed((int)DistributedPropIds.POSITION, PersistAs = "pos", OnChanged = "OnPositionChanged")]
-	private DistributedValue<DVector2Int> Position;
+	public ZonePersistedObject()
+	{
+		InitializeDistributedFields();
+
+		Position.OnChanged += OnPositionChanged;
+		Direction.OnChanged += OnDirectionChanged;
+		Flags.OnChanged += OnFlagsChanged;
+		Quests.OnChanged += OnQuestsChanged;
+	}
+
+	[Distributed((byte)DistributedPropIds.POSITION, PersistAs = "pos")]
+	public DistributedValue<Vector2Int, Vector2IntSerializer> Position;
 
 	private void OnPositionChanged(Vector2Int oldValue, Vector2Int newValue)
 	{
 		ImpunityLogger.LogInformation("Got position change on ZonePersistedObject, from " + oldValue.ToString() + " to " + newValue.ToString());
 	}
 
-	[Distributed((int)DistributedPropIds.DIRECTION, OnChanged = "OnDirectionChanged")]
-	private DistributedValue<DVector3> Direction;
+	[Distributed((byte)DistributedPropIds.DIRECTION)]
+	public DistributedValue<Vector3, Vector3Serializer> Direction;
 
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
 	{
@@ -238,16 +287,16 @@ public partial class ZonePersistedObject : DistributedEntityBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((int)DistributedPropIds.FLAGS, PersistAs = "flags", OnChanged = "OnFlagsChanged")]
-	private DistributedIntDictionary<DString> Flags;
+	[Distributed((byte)DistributedPropIds.FLAGS, PersistAs = "flags")]
+	public DistributedIntDictionary<string, StringSerializer> Flags;
 
 	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
 	{
 		ImpunityLogger.LogInformation("Got flags change on ZonePersistedObject, key " + key + " from " + oldFlag + " to " + newFlag);
 	}
 
-	[Distributed((int)DistributedPropIds.QUESTS, OnChanged = "OnQuestsChanged")]
-	private DistributedStringDictionary<DString> Quests;
+	[Distributed((byte)DistributedPropIds.QUESTS)]
+	public DistributedStringDictionary<string, StringSerializer> Quests;
 
 	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
 	{

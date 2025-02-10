@@ -15,8 +15,7 @@ namespace SourceGenerator
 		public string PropertyFieldType { get; set; }
 		public string PropertyDType { get; set; }
 		public string PropertyId { get; set; }
-		public string OnReplacedMethodName { get; set; }
-		public string OnChangedMethodName { get; set; }
+
 
 		public DistributedPropertyInfo(string name, string fieldType, string dtype, string propId)
 		{
@@ -26,10 +25,6 @@ namespace SourceGenerator
 			PropertyId = propId;
 		}
 
-		public string GetAnyMethodName()
-		{
-			return OnChangedMethodName != null ? OnChangedMethodName : OnReplacedMethodName;
-		}
 	}
 
 	public class DistributedClassInfo
@@ -115,7 +110,7 @@ namespace SourceGenerator
 			Output.Clear();
 			Info.Clear();
 
-			WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
+			//WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
 			
 			foreach (var syntaxTree in context.Compilation.SyntaxTrees)
 			{
@@ -150,7 +145,7 @@ namespace SourceGenerator
 
 		private void WriteInfo()
 		{
-			string infoFilename = "ImpunityGenInfo.txt";
+			string infoFilename = "/tmp/ImpunityGenInfo.txt";
 
 			using (StreamWriter outputFile = new StreamWriter(infoFilename))
 			{
@@ -181,7 +176,6 @@ namespace SourceGenerator
 
 			Output.AppendLine("using System.Collections.Generic;");
 			Output.AppendLine("using System.IO;");
-			Output.AppendLine("using Impunity.GameState;\n");
 			
 			string currentNamespace = null;
 			foreach(DistributedClassInfo classInfo in DistributedClasses)
@@ -211,6 +205,8 @@ namespace SourceGenerator
 		{
 			Output.AppendLine("\tpublic partial class " + classInfo.ClassName + "\n\t{");
 
+			GenerateClassFieldInitializer(classInfo);
+
 			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
 				if(propInfo.PropertyFieldType == "DistributedValue")
@@ -238,196 +234,67 @@ namespace SourceGenerator
 			Output.AppendLine("\t}\n");
 		}
 
-		private void GenerateDistributedValueCode(DistributedPropertyInfo propInfo)
+		private void GenerateClassFieldInitializer(DistributedClassInfo classInfo)
 		{
-			string onChangedMethodName = "null";
+			Output.AppendLine("		public override void InitializeDistributedFields()\n		{\n");
 
-			if (propInfo.GetAnyMethodName() != null)
+			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
-				onChangedMethodName = "imp_OnChangedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onChangedMethodName}({propInfo.PropertyDType} ov, {propInfo.PropertyDType} nv) {{ {propInfo.GetAnyMethodName()}(ov, nv);}}");
+				Output.AppendLine($"        {propInfo.PropertyName}.Initialize(this, {propInfo.PropertyId});\n");
 			}
 
-			Output.AppendLine($@"		public void Set{propInfo.PropertyName}({propInfo.PropertyDType} v)
-		{{
-			if ({propInfo.PropertyName}.Set(v, IsClientAuthoritative, {onChangedMethodName}))
-			{{
-				SetDirty({propInfo.PropertyId});
-			}}
-		}}");
+			Output.AppendLine("		}\n");
+		}
 
-			Output.AppendLine($@"		public {propInfo.PropertyDType} Get{propInfo.PropertyName}()
-		{{
-			return ({propInfo.PropertyDType}){propInfo.PropertyName};
-		}}
-		private void imp_Write{propInfo.PropertyName}(BinaryWriter w)
+		private void GenerateDistributedValueCode(DistributedPropertyInfo propInfo)
+		{
+			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
 		{{
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
-			Output.AppendLine($@"		private void imp_Update{propInfo.PropertyName}(BinaryReader r)
+			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r, {onChangedMethodName});
+			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
 		}
 
 		private void GenerateDistributedArrayCode(DistributedPropertyInfo propInfo)
 		{
-			string onReplacedMethodName = "null";
-			string onChangedMethodName = "null";
-
-			if (propInfo.OnReplacedMethodName != null)
-			{
-				onReplacedMethodName = "imp_OnReplacedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onReplacedMethodName}({propInfo.PropertyDType}[] ov, {propInfo.PropertyDType}[] nv) {{ {propInfo.OnReplacedMethodName}(ov, nv);}}");
-			}
-
-			if (propInfo.OnChangedMethodName != null)
-			{
-				onChangedMethodName = "imp_OnChangedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onChangedMethodName}(int index, {propInfo.PropertyDType} ov, {propInfo.PropertyDType} nv) {{ {propInfo.OnChangedMethodName}(index, ov, nv);}}");
-			}
-
-			Output.AppendLine($@"		public void Init{propInfo.PropertyName}(int size)
-		{{
-			{propInfo.PropertyName}.Init(size, IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Replace{propInfo.PropertyName}(IReadOnlyCollection<{propInfo.PropertyDType}> newArray)
-		{{
-			{propInfo.PropertyName}.Replace(newArray, IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Set{propInfo.PropertyName}(int index, {propInfo.PropertyDType} v)
-		{{
-			if ({propInfo.PropertyName}.Set(index, v, IsClientAuthoritative, {onChangedMethodName}))
-			{{
-				SetDirty({propInfo.PropertyId});
-			}}
-		}}");
-
-			Output.AppendLine($@"		public {propInfo.PropertyDType}[] Get{propInfo.PropertyName}()
-		{{
-			return ({propInfo.PropertyDType}[]){propInfo.PropertyName};
-		}}
-		public {propInfo.PropertyDType} Get{propInfo.PropertyName}(int index)
-		{{
-			return {propInfo.PropertyName}.Get(index);
-		}}
-		private void imp_Write{propInfo.PropertyName}(BinaryWriter w)
+			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
 		{{
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
-			Output.AppendLine($@"		private void imp_Update{propInfo.PropertyName}(BinaryReader r)
+			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r, {onChangedMethodName}, {onReplacedMethodName});
+			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
 		}
 
 		private void GenerateDistributedQueueCode(DistributedPropertyInfo propInfo)
 		{
-			string onReplacedMethodName = "null";
-			string onChangedMethodName = "null";
-
-			if (propInfo.OnReplacedMethodName != null)
-			{
-				onReplacedMethodName = "imp_OnReplacedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onReplacedMethodName}(Queue<{propInfo.PropertyDType}> ov, Queue<{propInfo.PropertyDType}> nv) {{ {propInfo.OnReplacedMethodName}(ov, nv);}}");
-			}
-
-			if (propInfo.OnChangedMethodName != null)
-			{
-				onChangedMethodName = "imp_OnChangedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onChangedMethodName}({propInfo.PropertyDType} nv) {{ {propInfo.OnChangedMethodName}(nv);}}");
-			}
-
-			Output.AppendLine($@"		public void Init{propInfo.PropertyName}(int capacity)
-		{{
-			{propInfo.PropertyName}.Init(capacity, IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Replace{propInfo.PropertyName}(int capacity, IEnumerable<{propInfo.PropertyDType}> initialValues)
-		{{
-			{propInfo.PropertyName}.Replace(capacity, initialValues, IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Add{propInfo.PropertyName}({propInfo.PropertyDType} v)
-		{{
-			{propInfo.PropertyName}.Add(v, IsClientAuthoritative, {onChangedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public Queue<{propInfo.PropertyDType}> Get{propInfo.PropertyName}()
-		{{
-			return (Queue<{propInfo.PropertyDType}>){propInfo.PropertyName};
-		}}
-		private void imp_Write{propInfo.PropertyName}(BinaryWriter w)
+			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
 		{{
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
-			Output.AppendLine($@"		private void imp_Update{propInfo.PropertyName}(BinaryReader r)
+			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r, {onChangedMethodName}, {onReplacedMethodName});
+			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
 		}
 
 		private void GenerateDistributedDictionaryCode(DistributedPropertyInfo propInfo, string keyType)
 		{
-			string onReplacedMethodName = "null";
-			string onChangedMethodName = "null";
-
-			if (propInfo.OnReplacedMethodName != null)
-			{
-				onReplacedMethodName = "imp_OnReplacedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onReplacedMethodName}(Dictionary<{keyType},{propInfo.PropertyDType}> ov, Dictionary<{keyType},{propInfo.PropertyDType}> nv) {{ {propInfo.OnReplacedMethodName}(ov, nv);}}");
-			}
-
-			if (propInfo.OnChangedMethodName != null)
-			{
-				onChangedMethodName = "imp_OnChangedWrapper" + propInfo.PropertyName;
-				Output.AppendLine($@"		private void {onChangedMethodName}({keyType} key, {propInfo.PropertyDType} ov, {propInfo.PropertyDType} nv) {{ {propInfo.OnChangedMethodName}(key, ov, nv);}}");
-			}
-
-			Output.AppendLine($@"		public void Init{propInfo.PropertyName}()
-		{{
-			{propInfo.PropertyName}.Init(IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Replace{propInfo.PropertyName}(IReadOnlyDictionary<{keyType},{propInfo.PropertyDType}> initialValues)
-		{{
-			{propInfo.PropertyName}.Replace(initialValues, IsClientAuthoritative, {onReplacedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public void Add{propInfo.PropertyName}({keyType} key, {propInfo.PropertyDType} v)
-		{{
-			{propInfo.PropertyName}.Add(key, v, IsClientAuthoritative, {onChangedMethodName});
-			SetDirty({propInfo.PropertyId});
-		}}");
-
-			Output.AppendLine($@"		public Dictionary<{keyType},{propInfo.PropertyDType}> Get{propInfo.PropertyName}()
-		{{
-			return (Dictionary<{keyType},{propInfo.PropertyDType}>){propInfo.PropertyName};
-		}}
-		public {propInfo.PropertyDType} Get{propInfo.PropertyName}({keyType} key)
-		{{
-			return {propInfo.PropertyName}.Get(key);
-		}}
-		private void imp_Write{propInfo.PropertyName}(BinaryWriter w)
+			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
 		{{
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
-			Output.AppendLine($@"		private void imp_Update{propInfo.PropertyName}(BinaryReader r)
+			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r, {onChangedMethodName}, {onReplacedMethodName});
+			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
 		}
 
@@ -498,8 +365,6 @@ namespace SourceGenerator
 		private void AnalyseDistributedField(GeneratorExecutionContext context, FieldDeclarationSyntax fd, AttributeSyntax attr, DistributedClassInfo classInfo)
 		{
 			string distributedPropertyId = null;
-			string onReplacedMethodName = null;
-			string onChangedMethodName = null;
 
 			var distributeArguments = attr.DescendantNodes().OfType<AttributeArgumentSyntax>();
 			foreach (AttributeArgumentSyntax argSyntax in distributeArguments)
@@ -521,30 +386,23 @@ namespace SourceGenerator
 					// propertyId
 					distributedPropertyId = argValue;
 				}
-				else if(argName == "OnReplaced")
-				{
-					if (argValue.StartsWith("\"") && argValue.EndsWith("\""))
-					{
-						onReplacedMethodName = argValue.Substring(1, argValue.Length - 2).Trim();
-					}
-				}
-				else if(argName == "OnChanged")
-				{
-					if (argValue.StartsWith("\"") && argValue.EndsWith("\""))
-					{
-						onChangedMethodName = argValue.Substring(1, argValue.Length - 2).Trim();
-					}
-				}
 			}
 
 			VariableDeclarationSyntax vd = fd.ChildNodes().OfType<VariableDeclarationSyntax>().First();
+			if (vd.Variables.Count != 1) {
+				var msg = new DiagnosticDescriptor("IMP2", "Multple variable declaration", "Declaring multiple variables per type not supported", "Mismatch", DiagnosticSeverity.Error, true);
+				context.ReportDiagnostic(Diagnostic.Create(msg, vd.GetLocation()));
+
+				return;
+			}
+
 			VariableDeclaratorSyntax varDef = vd.Variables.First();
 
 			GenericNameSyntax genericField = vd.ChildNodes().OfType<GenericNameSyntax>().FirstOrDefault();
 			if (genericField == null)
 			{
 				var msg = new DiagnosticDescriptor("IMP2", "Invalid Distributed Type", "Distributed attribute on an unsupported field type", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, attr.GetLocation()));
+				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
 
 				return;
 			}
@@ -558,18 +416,23 @@ namespace SourceGenerator
 				return;
 			}
 
-			var dTypeIdentifier = genericField.DescendantNodes().OfType<IdentifierNameSyntax>().First();
+			TypeArgumentListSyntax genericArgsList = genericField.ChildNodes().OfType<TypeArgumentListSyntax>().First();
+			if (genericArgsList == null)
+			{
+				var msg = new DiagnosticDescriptor("IMP1", "Generic types not defined", "Type " + fieldType+ " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
+				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
+				
+				return;
+			}
+
+			var dTypeIdentifier = genericArgsList.Arguments.First();
 
             DistributedPropertyInfo propInfo = new DistributedPropertyInfo(varDef.Identifier.ToString(),
-                                                    fieldType, dTypeIdentifier.ToString(), distributedPropertyId)
-            {
-                OnReplacedMethodName = onReplacedMethodName,
-                OnChangedMethodName = onChangedMethodName
-            };
+                                                    fieldType, dTypeIdentifier.ToString(), distributedPropertyId);
 
             classInfo.Properties.Add(propInfo);
 
-			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId+", "+propInfo.OnChangedMethodName+")");
+			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId+", "+")");
 		}
 
 		// determine the namespace the class/enum/struct is declared in, if any
