@@ -12,7 +12,7 @@ namespace Impunity.Connection
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
-	public struct BoolSerializer : IDistributableValueSerializer<bool>
+	public readonly struct BoolSerializer : IDistributableValueSerializer<bool>
 	{
 		public void WriteTo(bool value, BinaryWriter w)
 		{
@@ -27,7 +27,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Boolean; }
 	}
 
-	public struct Int8Serializer : IDistributableValueSerializer<sbyte>
+	public readonly struct Int8Serializer : IDistributableValueSerializer<sbyte>
 	{
 		public void WriteTo(sbyte value, BinaryWriter w)
 		{
@@ -42,7 +42,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int8; }
 	}
 
-	public struct UInt8Serializer : IDistributableValueSerializer<byte>
+	public readonly struct UInt8Serializer : IDistributableValueSerializer<byte>
 	{
 		public void WriteTo(byte value, BinaryWriter w)
 		{
@@ -57,7 +57,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt8; }
 	}
 
-	public struct Int16Serializer : IDistributableValueSerializer<short>
+	public readonly struct Int16Serializer : IDistributableValueSerializer<short>
 	{
 		public void WriteTo(short value, BinaryWriter w)
 		{
@@ -74,20 +74,20 @@ namespace Impunity.Connection
 
 	public struct UInt16Serializer : IDistributableValueSerializer<ushort>
 	{
-		public void WriteTo(ushort value, BinaryWriter w)
+		public readonly void WriteTo(ushort value, BinaryWriter w)
 		{
 			w.Write(value);
 		}
 
-		public ushort ReadFrom(BinaryReader r)
+		public readonly ushort ReadFrom(BinaryReader r)
 		{
 			return r.ReadUInt16();
 		}
 
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
+		public readonly GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
 	}
 
-	public struct Int32Serializer : IDistributableValueSerializer<int>
+	public readonly struct Int32Serializer : IDistributableValueSerializer<int>
 	{
 		public void WriteTo(int value, BinaryWriter w)
 		{
@@ -102,14 +102,14 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int32; }
 	}
 
-	public struct UInt32Serializer : IDistributableValueSerializer<uint>
+	public readonly struct UInt32Serializer : IDistributableValueSerializer<uint>
 	{
-		public void WriteTo(uint value, BinaryWriter w)
+		public readonly void WriteTo(uint value, BinaryWriter w)
 		{
 			w.Write(value);
 		}
 
-		public uint ReadFrom(BinaryReader r)
+		public readonly uint ReadFrom(BinaryReader r)
 		{
 			return r.ReadUInt32();
 		}
@@ -132,7 +132,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int64; }
 	}
 
-	public struct UInt64Serializer : IDistributableValueSerializer<ulong>
+	public readonly struct UInt64Serializer : IDistributableValueSerializer<ulong>
 	{
 		public void WriteTo(ulong value, BinaryWriter w)
 		{
@@ -147,7 +147,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt64; }
 	}
 
-	public struct FloatSerializer : IDistributableValueSerializer<float>
+	public readonly struct FloatSerializer : IDistributableValueSerializer<float>
 	{
 		public void WriteTo(float value, BinaryWriter w)
 		{
@@ -162,7 +162,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Float; }
 	}
 
-	public struct DoubleSerializer : IDistributableValueSerializer<double>
+	public readonly struct DoubleSerializer : IDistributableValueSerializer<double>
 	{
 		public void WriteTo(double value, BinaryWriter w)
 		{
@@ -177,7 +177,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Double; }
 	}
 
-	public struct DecimalSerializer : IDistributableValueSerializer<decimal>
+	public readonly struct DecimalSerializer : IDistributableValueSerializer<decimal>
 	{
 		public void WriteTo(decimal value, BinaryWriter w)
 		{
@@ -192,7 +192,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Decimal; }
 	}
 
-	public struct CharSerializer : IDistributableValueSerializer<char>
+	public readonly struct CharSerializer : IDistributableValueSerializer<char>
 	{
 		public void WriteTo(char value, BinaryWriter w)
 		{
@@ -207,7 +207,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Char; }
 	}
 
-	public struct StringSerializer : IDistributableValueSerializer<string>
+	public readonly struct StringSerializer : IDistributableValueSerializer<string>
 	{
 		public void WriteTo(string value, BinaryWriter w)
 		{
@@ -240,7 +240,7 @@ namespace Impunity.Connection
 
 	
 
-	public struct BlobSerializer : IDistributableValueSerializer<ArraySegment<byte>>
+	public readonly struct BlobSerializer : IDistributableValueSerializer<ArraySegment<byte>>
 	{
 		public void WriteTo(ArraySegment<byte> value, BinaryWriter w)
 		{
@@ -273,7 +273,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
 	}
 
-	public struct DateTimeSerializer : IDistributableValueSerializer<DateTime>
+	public readonly struct DateTimeSerializer : IDistributableValueSerializer<DateTime>
 	{
 		public void WriteTo(DateTime value, BinaryWriter w)
 		{
@@ -288,7 +288,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
 	}
 
-	public struct DateTimeOffsetSerializer : IDistributableValueSerializer<DateTimeOffset>
+	public readonly struct DateTimeOffsetSerializer : IDistributableValueSerializer<DateTimeOffset>
 	{
 		public void WriteTo(DateTimeOffset value, BinaryWriter w)
 		{
@@ -306,7 +306,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
 	}
 
-	public struct TimeSpanSerializer : IDistributableValueSerializer<TimeSpan>
+	public readonly struct TimeSpanSerializer : IDistributableValueSerializer<TimeSpan>
 	{
 		public void WriteTo(TimeSpan value, BinaryWriter w)
 		{
@@ -321,7 +321,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
 	}
 
-	public struct GuidSerializer : IDistributableValueSerializer<Guid>
+	public readonly struct GuidSerializer : IDistributableValueSerializer<Guid>
 	{
 		public void WriteTo(Guid value, BinaryWriter w)
 		{

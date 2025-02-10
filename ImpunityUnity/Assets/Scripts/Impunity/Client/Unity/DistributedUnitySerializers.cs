@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace Impunity.Unity
 {
-	public struct Vector2Serializer : IDistributableValueSerializer<Vector2>
+	public readonly struct Vector2Serializer : IDistributableValueSerializer<Vector2>
 	{
 
 		public void WriteTo(Vector2 value, BinaryWriter w)
@@ -32,7 +32,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct Vector3Serializer : IDistributableValueSerializer<Vector3>
+	public readonly struct Vector3Serializer : IDistributableValueSerializer<Vector3>
 	{
 
 		public void WriteTo(Vector3 value, BinaryWriter w)
@@ -60,7 +60,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct DVector4Serializer : IDistributableValueSerializer<Vector4>
+	public readonly struct DVector4Serializer : IDistributableValueSerializer<Vector4>
 	{
 		public void WriteTo(Vector4 value, BinaryWriter w)
 		{
@@ -89,7 +89,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct Vector2IntSerializer : IDistributableValueSerializer<Vector2Int>
+	public readonly struct Vector2IntSerializer : IDistributableValueSerializer<Vector2Int>
 	{
 		public void WriteTo(Vector2Int value, BinaryWriter w)
 		{
@@ -114,7 +114,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct Vector3IntSerializer : IDistributableValueSerializer<Vector3Int>
+	public readonly struct Vector3IntSerializer : IDistributableValueSerializer<Vector3Int>
 	{
 		public void WriteTo(Vector3Int value, BinaryWriter w)
 		{
@@ -140,7 +140,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct ColorSerializer : IDistributableValueSerializer<Color>
+	public readonly struct ColorSerializer : IDistributableValueSerializer<Color>
 	{
 		public void WriteTo(Color value, BinaryWriter w)
 		{
@@ -168,7 +168,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct Color32Serializer : IDistributableValueSerializer<Color32>
+	public readonly struct Color32Serializer : IDistributableValueSerializer<Color32>
 	{
 		public void WriteTo(Color32 value, BinaryWriter w)
 		{
@@ -196,7 +196,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct Matrix4x4Serializer : IDistributableValueSerializer<Matrix4x4>
+	public readonly struct Matrix4x4Serializer : IDistributableValueSerializer<Matrix4x4>
 	{
 		public void WriteTo(Matrix4x4 value, BinaryWriter w)
 		{
@@ -224,7 +224,7 @@ namespace Impunity.Unity
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
-	public struct QuaternionSerializer : IDistributableValueSerializer<Quaternion>
+	public readonly struct QuaternionSerializer : IDistributableValueSerializer<Quaternion>
 	{
 		public void WriteTo(Quaternion value, BinaryWriter w)
 		{

@@ -580,24 +580,8 @@ namespace Impunity.Connection
 		{
 			List<FieldInfo> fields = new List<FieldInfo>();
 
-			AddDistributedFields(fields, typeInfo);
-
-			return fields;
-		}
-
-		private static void AddDistributedFields(List<FieldInfo> fields, Type typeInfo)
-		{
-			//if (typeInfo.BaseType != typeof(object))
-			//{
-			//	AddDistributedFields(fields, typeInfo.BaseType);
-			//}
-
 			foreach (var fieldInfo in typeInfo.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
 			{
-				//if (fieldInfo.IsStatic)
-				//{
-				//	continue;
-				//}
 
 				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
 				if (fieldAttr == null)
@@ -608,6 +592,7 @@ namespace Impunity.Connection
 				fields.Add(fieldInfo);
 			}
 
+			return fields;
 		}
 
 		private static MethodInfo GetTypeMethodInherited(Type typeInfo, string methodName, BindingFlags flags)

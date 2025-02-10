@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using UnityEngine.InputSystem.Utilities;
 
 
 namespace Impunity.Connection
@@ -29,7 +30,7 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
-		public T Get()
+		public readonly T Get()
         {
 			return CurrentValue;
         }
@@ -62,7 +63,7 @@ namespace Impunity.Connection
 			return true;
 		}
 
-		public void WriteChangesTo(BinaryWriter w)
+		public readonly void WriteChangesTo(BinaryWriter w)
 		{
 			Serializer.WriteTo(NewValue, w);
 		}
@@ -83,8 +84,8 @@ namespace Impunity.Connection
 			}
 		}
 
-		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
-		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
+		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
+		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
 		public static implicit operator T(DistributedValue<T,S> d) => d.CurrentValue;
 	}
@@ -162,7 +163,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public T Get(int index)
+		public readonly T Get(int index)
 		{
 			if(Changes.TryGetValue(index, out T value))
 			{
