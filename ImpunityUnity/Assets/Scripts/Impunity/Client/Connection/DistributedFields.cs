@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine.InputSystem.Utilities;
-
 
 namespace Impunity.Connection
 {
@@ -16,7 +14,7 @@ namespace Impunity.Connection
 	public struct DistributedValue<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
 		public event Action<T,T> OnChanged;
-		private static readonly S Serializer;
+		private static readonly S Serializer = default;
 		
 		IDistributedEntity Entity;
 		byte FieldId;
@@ -94,7 +92,7 @@ namespace Impunity.Connection
 	{
 		public event Action<T[],T[]> OnReplaced;
 		public event Action<int,T,T> OnChanged;
-		private static readonly S Serializer;
+		private static readonly S Serializer = default;
 
 		T[] CurrentValue;
 		T[] NewValue;
@@ -328,7 +326,7 @@ namespace Impunity.Connection
 		public event Action<T> OnChanged;
 		public event Action<Queue<T>, Queue<T>> OnReplaced;
 
-		private static readonly S Serializer;
+		private static readonly S Serializer = default;
 
 		int CurrentCapacity;
 		Queue<T> CurrentValue;
@@ -576,7 +574,7 @@ namespace Impunity.Connection
 		public event Action<int,T,T> OnChanged;
 		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
 
-		private static readonly S Serializer;
+		private static readonly S Serializer = default;
 
 		Dictionary<int,T> CurrentValue;
 
@@ -796,7 +794,7 @@ namespace Impunity.Connection
 		public event Action<string,T,T> OnChanged;
 		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
 
-		private static readonly S Serializer;
+		private static readonly S Serializer = default;
 
 		Dictionary<string, T> CurrentValue;
 
