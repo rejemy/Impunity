@@ -45,7 +45,7 @@ namespace SourceGenerator
 	public class DistributedEntityGenerator : ISourceGenerator
 	{
 		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new []
-			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor" });
+			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor", "Assembly-CSharp-Editor" });
 
 		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new []
 			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedIntDictionary", "DistributedStringDictionary" });
@@ -53,7 +53,7 @@ namespace SourceGenerator
 
 		public static StringBuilder Output = new StringBuilder();
 		public static StringBuilder Info = new StringBuilder();
-
+		
 		public List<DistributedClassInfo> DistributedClasses;
 		public string SourceBasePath;
 
@@ -236,11 +236,12 @@ namespace SourceGenerator
 
 		private void GenerateClassFieldInitializer(DistributedClassInfo classInfo)
 		{
-			Output.AppendLine("		public override void InitializeDistributedFields()\n		{\n");
+			Output.AppendLine("		public override void InitializeDistributedFields()\n		{");
+			Output.AppendLine("		    base.InitializeDistributedFields();");
 
 			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
-				Output.AppendLine($"        {propInfo.PropertyName}.Initialize(this, {propInfo.PropertyId});\n");
+				Output.AppendLine($"            {propInfo.PropertyName}.Initialize(this, {propInfo.PropertyId});");
 			}
 
 			Output.AppendLine("		}\n");
