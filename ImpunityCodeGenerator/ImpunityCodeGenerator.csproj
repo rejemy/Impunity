@@ -3,10 +3,10 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <PackageId>ImpunityCodeGenerator</PackageId>
-    <Version>0.5</Version>
-    <AssemblyVersion>0.5</AssemblyVersion>
-    <FileVersion>0.5</FileVersion>
-    <VersionPrefix>0.5</VersionPrefix>
+    <Version>0.6</Version>
+    <AssemblyVersion>0.6</AssemblyVersion>
+    <FileVersion>0.6</FileVersion>
+    <VersionPrefix>0.6</VersionPrefix>
     <Authors>Jeremy Friesen</Authors>
     <Product>ImpunityNetworking</Product>
     <Description>Impunity Networking Code Generator</Description>
