@@ -48,14 +48,7 @@ namespace Impunity.Connection
 				T oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnChanged?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
+				InvokeOnChanged(oldValue, CurrentValue);
 			}
 
 			return true;
@@ -72,9 +65,14 @@ namespace Impunity.Connection
 			T oldValue = CurrentValue;
 			CurrentValue = Serializer.ReadFrom(r);
 
+			InvokeOnChanged(oldValue, CurrentValue);
+		}
+
+		private readonly void InvokeOnChanged(T oldValue, T newValue)
+		{
 			try
 			{
-				OnChanged?.Invoke(oldValue, CurrentValue);
+				OnChanged?.Invoke(oldValue, newValue);
 			}
 			catch(Exception e)
 			{
@@ -119,14 +117,7 @@ namespace Impunity.Connection
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch(Exception e)
-				{
-					ImpunityLogger.LogError("Exception in OnReplacedHandler method", e);
-				}
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -150,14 +141,7 @@ namespace Impunity.Connection
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch(Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -186,14 +170,7 @@ namespace Impunity.Connection
 
 				if (Entity.IsClientAuthoritative)
 				{
-					try
-					{
-						OnChanged?.Invoke(index, oldValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					InvokeOnChanged(index, oldValue, newValue);
 				}
 
 				return true;
@@ -218,15 +195,7 @@ namespace Impunity.Connection
 				T oldValue = CurrentValue[index];
 				CurrentValue[index] = newValue;
 
-				try
-				{
-					OnChanged?.Invoke(index, oldValue, newValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnChanged(index, oldValue, newValue);
 			}
 
 			return true;
@@ -277,14 +246,7 @@ namespace Impunity.Connection
 					CurrentValue[index] = Serializer.ReadFrom(r);
 					T newValue = CurrentValue[index];
 
-					try
-					{
-						OnChanged?.Invoke(index, oldValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					InvokeOnChanged(index, oldValue, newValue);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -303,15 +265,31 @@ namespace Impunity.Connection
 
 				CurrentValue = newValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-				
+				InvokeOnReplaced(oldValue, CurrentValue);
+			}
+		}
+
+		private readonly void InvokeOnChanged(int index, T oldValue, T newValue)
+		{
+			try
+			{
+				OnChanged?.Invoke(index, oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnReplaced(T[] oldValue, T[] newValue)
+		{
+			try
+			{
+				OnReplaced?.Invoke(oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
 		}
 
@@ -358,15 +336,7 @@ namespace Impunity.Connection
 				Queue<T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -390,14 +360,7 @@ namespace Impunity.Connection
 				Queue<T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -442,14 +405,7 @@ namespace Impunity.Connection
 
 				if (Entity.IsClientAuthoritative)
 				{
-					try
-					{
-						OnChanged?.Invoke(newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					InvokeOnChanged(newValue);
 				}
 
 				return;
@@ -463,17 +419,8 @@ namespace Impunity.Connection
 			{
 				AddToCurrent(newValue);
 
-				try
-				{
-					OnChanged?.Invoke(newValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnChanged(newValue);
 			}
-
 		}
 
 		public void WriteChangesTo(BinaryWriter w)
@@ -518,14 +465,7 @@ namespace Impunity.Connection
 					T val = Serializer.ReadFrom(r);
 					AddToCurrent(val);
 
-					try
-					{
-						OnChanged?.Invoke(val);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
+					InvokeOnChanged(val);
 				}
 			}
 			else if(updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -550,17 +490,32 @@ namespace Impunity.Connection
 					newValue.Enqueue(val);
 				}
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
-			
+		}
+
+		private readonly void InvokeOnChanged(T newValue)
+		{
+			try
+			{
+				OnChanged?.Invoke(newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnReplaced(Queue<T> oldValue, Queue<T> newValue)
+		{
+			try
+			{
+				OnReplaced?.Invoke(oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
+			}
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Queue; }
@@ -602,15 +557,7 @@ namespace Impunity.Connection
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -627,15 +574,7 @@ namespace Impunity.Connection
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -650,15 +589,7 @@ namespace Impunity.Connection
 
 				if (Entity.IsClientAuthoritative)
 				{
-					try
-					{
-						OnChanged?.Invoke(key, oldValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-
+					InvokeOnChanged(key, oldValue, newValue);
 				}
 
 				return;
@@ -673,15 +604,7 @@ namespace Impunity.Connection
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
 
-				try
-				{
-					OnChanged?.Invoke(key, oldValue, newValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnChanged(key, oldValue, newValue);
 			}
 
 		}
@@ -741,15 +664,7 @@ namespace Impunity.Connection
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
 
-					try
-					{
-						OnChanged?.Invoke(key, oldVal, val);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-					
+					InvokeOnChanged(key, oldVal, val);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -770,17 +685,33 @@ namespace Impunity.Connection
 				var oldValue = CurrentValue;
 				CurrentValue = newValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 
+		}
+
+		private readonly void InvokeOnChanged(int key, T oldValue, T newValue)
+		{
+			try
+			{
+				OnChanged?.Invoke(key, oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnReplaced(Dictionary<int,T> oldValue, Dictionary<int,T> newValue)
+		{
+			try
+			{
+				OnReplaced?.Invoke(oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
+			}
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.IntDictionary; }
@@ -822,14 +753,7 @@ namespace Impunity.Connection
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -846,15 +770,7 @@ namespace Impunity.Connection
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onSetMethod method", e);
-				}
-
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 		}
 
@@ -869,15 +785,7 @@ namespace Impunity.Connection
 
 				if (Entity.IsClientAuthoritative)
 				{
-					try
-					{
-						OnChanged?.Invoke(key, oldValue, newValue);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-
+					InvokeOnChanged(key, oldValue, newValue);
 				}
 
 				return;
@@ -892,15 +800,7 @@ namespace Impunity.Connection
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
 
-				try
-				{
-					OnChanged?.Invoke(key, oldValue, newValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-
+				InvokeOnChanged(key, oldValue, newValue);
 			}
 
 		}
@@ -960,15 +860,7 @@ namespace Impunity.Connection
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
 
-					try
-					{
-						OnChanged?.Invoke(key, oldVal, val);
-					}
-					catch (Exception e)
-					{
-						ImpunityLogger.LogError("Exception in onChange method", e);
-					}
-
+					InvokeOnChanged(key, oldVal, val);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -989,17 +881,33 @@ namespace Impunity.Connection
 				var oldValue = CurrentValue;
 				CurrentValue = newValue;
 
-				try
-				{
-					OnReplaced?.Invoke(oldValue, CurrentValue);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in onChange method", e);
-				}
-				
+				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 
+		}
+
+		private readonly void InvokeOnChanged(string key, T oldValue, T newValue)
+		{
+			try
+			{
+				OnChanged?.Invoke(key, oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnReplaced(Dictionary<string,T> oldValue, Dictionary<string,T> newValue)
+		{
+			try
+			{
+				OnReplaced?.Invoke(oldValue, newValue);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
+			}
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.StringDictionary; }
