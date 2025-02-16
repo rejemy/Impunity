@@ -1,7 +1,4 @@
 
-using System.Collections.Concurrent;
-
-using UltraLiteDB;
 
 using Impunity.GameState;
 
@@ -10,7 +7,6 @@ namespace Impunity.Connection
 
 	public class LocalGameConnection : BaseGameConnection, IGameStateListener, IServerSideConnectionProxy
 	{
-		public string ConnectionId { get; private set; }
 		public GameStateReplicant ConnectionReplicant { get; set; }
 
 		private static int NextLocalConnectionId = 1;

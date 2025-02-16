@@ -46,6 +46,8 @@ namespace Impunity.Connection
 			NetworkClient.OnDisconnectedByServer = OnDisconnectedByServer;
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
+
+			ConnectionId = "RemoteConnection_" + Guid.NewGuid().ToString().Substring(0, 6);
 		}
 
 		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)

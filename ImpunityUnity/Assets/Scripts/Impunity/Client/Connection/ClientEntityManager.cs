@@ -52,7 +52,9 @@ namespace Impunity.Connection
 
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
+		void Lock(ImpunityCallback<bool> onComplete);
 		void Lock(string key, ImpunityCallback<bool> onComplete);
+		void Unlock(ImpunityCallback<bool> onComplete);
 		void Unlock(string key, ImpunityCallback<bool> onComplete);
 
 		void OnEventTriggered(int eventType, BsonValue eventData);
@@ -104,9 +106,19 @@ namespace Impunity.Connection
 			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
 		}
 
+		public void Lock(ImpunityCallback<bool> onComplete)
+		{
+			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
+		}
+
 		public void Lock(string key, ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, key, onComplete);
+		}
+
+		public void Unlock(ImpunityCallback<bool> onComplete)
+		{
+			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
 		}
 
 		public void Unlock(string key, ImpunityCallback<bool> onComplete)

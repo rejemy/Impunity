@@ -145,10 +145,24 @@ namespace Impunity.Connection
 
 		// -------- Live game
 
+		public static Task<bool> TryToLockAsync(this BaseGameConnection connection, string lockName)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.TryToLock(lockName, t.OnComplete);
+			return t.Task;
+		}
+
 		public static Task<bool> TryToLockAsync(this BaseGameConnection connection, string lockName, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.TryToLock(lockName, key, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> UnlockAsync(this BaseGameConnection connection, string lockName)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.Unlock(lockName, t.OnComplete);
 			return t.Task;
 		}
 
@@ -201,10 +215,24 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.TryToLockEntity(entityId, t.OnComplete);
+			return t.Task;
+		}
+
 		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.TryToLockEntity(entityId, key, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.UnlockEntity(entityId, t.OnComplete);
 			return t.Task;
 		}
 
@@ -304,10 +332,24 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		public static Task<bool> LockAsync(this IDistributedEntity entity)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.Lock(t.OnComplete);
+			return t.Task;
+		}
+
 		public static Task<bool> LockAsync(this IDistributedEntity entity, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			entity.Lock(key, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> UnlockAsync(this IDistributedEntity entity)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.Unlock(t.OnComplete);
 			return t.Task;
 		}
 

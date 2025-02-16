@@ -21,6 +21,8 @@ namespace Impunity.Connection
 
 		public abstract void Connect(ImpunityCallback onComplete);
 
+		public string ConnectionId {get; protected set;}
+
 		public BaseGameConnection(GameStateFormat format, ClientEntityManager em)
         {
 			if (em == null)
@@ -186,16 +188,25 @@ namespace Impunity.Connection
 
 		// -------- Live game
 
+		public void TryToLock(string lockName, ImpunityCallback<bool> onComplete)
+        {
+			DoAction(new LockNamedLockAction(lockName, ConnectionId, onComplete));
+        }
+
 		public void TryToLock(string lockName, string key, ImpunityCallback<bool> onComplete)
         {
 			DoAction(new LockNamedLockAction(lockName, key, onComplete));
         }
 
+		public void Unlock(string lockName, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new UnlockNamedLockAction(lockName, ConnectionId, onComplete));
+		}
+
 		public void Unlock(string lockName, string key, ImpunityCallback<bool> onComplete)
 		{
 			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
 		}
-
 
 		public void SubcribeToChannel(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
 		{
@@ -227,9 +238,19 @@ namespace Impunity.Connection
 			DoAction(new EventEntityAction(entityId, eventType, eventData, onComplete));
 		}
 
+		public void TryToLockEntity(uint entityId, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new LockEntityAction(entityId, ConnectionId, onComplete));
+		}
+
 		public void TryToLockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
 		{
 			DoAction(new LockEntityAction(entityId, key, onComplete));
+		}
+
+		public void UnlockEntity(uint entityId, ImpunityCallback<bool> onComplete)
+		{
+			DoAction(new UnlockEntityAction(entityId, ConnectionId, onComplete));
 		}
 
 		public void UnlockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)

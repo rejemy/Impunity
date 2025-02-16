@@ -147,10 +147,24 @@ namespace Impunity.Unity
 
 		// -------- Live game
 
+		public static ImpunityYield<bool> TryToLockYield(this BaseGameConnection connection, string lockName)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.TryToLock(lockName, action.OnComplete);
+			return action;
+		}
+
 		public static ImpunityYield<bool> TryToLockYield(this BaseGameConnection connection, string lockName, string key)
 		{
 			var action = new ImpunityYield<bool>();
 			connection.TryToLock(lockName, key, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> UnlockYield(this BaseGameConnection connection, string lockName)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.Unlock(lockName, action.OnComplete);
 			return action;
 		}
 
@@ -203,10 +217,24 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		public static ImpunityYield<bool> TryToLockEntityYield(this BaseGameConnection connection, uint entityId)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.TryToLockEntity(entityId, action.OnComplete);
+			return action;
+		}
+
 		public static ImpunityYield<bool> TryToLockEntityYield(this BaseGameConnection connection, uint entityId, string key)
 		{
 			var action = new ImpunityYield<bool>();
 			connection.TryToLockEntity(entityId, key, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> UnlockEntityYield(this BaseGameConnection connection, uint entityId)
+		{
+			var action = new ImpunityYield<bool>();
+			connection.UnlockEntity(entityId, action.OnComplete);
 			return action;
 		}
 
@@ -305,10 +333,24 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		public static ImpunityYield<bool> LockYield(this IDistributedEntity entity)
+		{
+			var t = new ImpunityYield<bool>();
+			entity.Lock(t.OnComplete);
+			return t;
+		}
+
 		public static ImpunityYield<bool> LockYield(this IDistributedEntity entity, string key)
 		{
 			var t = new ImpunityYield<bool>();
 			entity.Lock(key, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<bool> UnlockYield(this IDistributedEntity entity)
+		{
+			var t = new ImpunityYield<bool>();
+			entity.Unlock(t.OnComplete);
 			return t;
 		}
 
