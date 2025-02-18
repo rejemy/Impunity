@@ -40,6 +40,7 @@ namespace Impunity.Connection
 		uint DistributedEntityId { get; set; }
 		int DistributedEntityType { get; set; }
 		bool IsClientAuthoritative { get; set; }
+		bool IsLocked { get; set; }
 
 		ClientEntityManager Manager { get; set; }
 
@@ -52,13 +53,16 @@ namespace Impunity.Connection
 
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
-		void Lock(ImpunityCallback<bool> onComplete);
-		void Lock(string key, ImpunityCallback<bool> onComplete);
+		void TryLock(ImpunityCallback<bool> onComplete);
+		void TryLock(string key, ImpunityCallback<bool> onComplete);
+		void WaitForLock(ImpunityCallback<LockWaitResult> onComplete);
+		void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete);
 		void Unlock(ImpunityCallback<bool> onComplete);
 		void Unlock(string key, ImpunityCallback<bool> onComplete);
 
 		void OnEventTriggered(int eventType, BsonValue eventData);
 		void OnDeleted(BsonValue deleteData);
+		void OnUnlocked();
 		void OnUndistributed();
 	}
 
@@ -78,6 +82,8 @@ namespace Impunity.Connection
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
+		public bool IsLocked { get; set; }
+		private event ImpunityCallback<LockWaitResult> LockWaiter;
 
 		public ClientEntityManager Manager { get; set; }
 		public IDistributedChannel Channel { get; set; }
@@ -106,14 +112,52 @@ namespace Impunity.Connection
 			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
 		}
 
-		public void Lock(ImpunityCallback<bool> onComplete)
+		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
-		public void Lock(string key, ImpunityCallback<bool> onComplete)
+		public void TryLock(string key, ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, key, onComplete);
+		}
+
+		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
+		{
+			Manager.Connection.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Error);
+				}
+				else if(lockResult)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Locked);
+				}
+				else
+				{
+					LockWaiter += onComplete;
+				}
+			});
+		}
+
+		public void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete)
+		{
+			Manager.Connection.TryToLockEntity(DistributedEntityId, key, (err, lockResult) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Error);
+				}
+				else if(lockResult)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Locked);
+				}
+				else
+				{
+					LockWaiter += onComplete;
+				}
+			});
 		}
 
 		public void Unlock(ImpunityCallback<bool> onComplete)
@@ -124,6 +168,20 @@ namespace Impunity.Connection
 		public void Unlock(string key, ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.UnlockEntity(DistributedEntityId, key, onComplete);
+		}
+
+		public virtual void OnUnlocked()
+		{
+			IsLocked = false;
+			try
+			{
+				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
+			}
+			catch (Exception ex)
+			{
+				ImpunityLogger.LogError("Exception in entity WaitForLock callback handler:", ex);
+			}
+			LockWaiter = null;
 		}
 
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
@@ -784,6 +842,30 @@ namespace Impunity.Connection
 			}
 		}
 
+		public void HandleEntityLocked(uint entityId)
+		{
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity == null)
+			{
+				ImpunityLogger.LogWarning("Got lock for entity we don't know about: " + entityId);
+				return;
+			}
+
+			entity.OnUnlocked();
+		}
+
+		public void HandleEntityUnlocked(uint entityId)
+		{
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity == null)
+			{
+				ImpunityLogger.LogWarning("Got unlock for entity we don't know about: " + entityId);
+				return;
+			}
+
+			entity.IsLocked = false;
+		}
+
 		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
@@ -838,11 +920,11 @@ namespace Impunity.Connection
 
 		}
 
-		private ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity)
+		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, bool allProperties = false)
         {
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 
-			ulong dirtyBits = entity.DirtyBits;
+			ulong dirtyBits = allProperties ? ulong.MaxValue : entity.DirtyBits;
 			if (dirtyBits == 0)
             {
 				return null;
@@ -868,7 +950,7 @@ namespace Impunity.Connection
 			return new ArraySegment<byte>(PropertyEncodingBuffer, 0, bufferSize);
 		}
 
-		private void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes)
+		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes)
         {
 			if (propertyBytes == null || propertyBytes.Count == 0)
             {

@@ -16,8 +16,11 @@ namespace Impunity.GameState
 		ENTITY_UPDATE_MESSAGE = 102,
 		ENTITY_EVENT_MESSAGE = 103,
 		ENTITY_DELETE_MESSAGE = 104,
+		ENTITY_LOCKED_MESSAGE = 105,
+		ENTITY_UNLOCKED_MESSAGE = 106,
 
 		BROADCAST_MESSAGE = 200,
+		NAMED_LOCK_UNLOCKED_MESSAGE = 201,
 	}
 
 
@@ -56,9 +59,16 @@ namespace Impunity.GameState
 					return typeof(EntityEventMessageAction);
 				case ServerActionType.ENTITY_DELETE_MESSAGE:
 					return typeof(EntityDeleteMessageAction);
+				case ServerActionType.ENTITY_LOCKED_MESSAGE:
+					return typeof(EntityLockedMessageAction);
+				case ServerActionType.ENTITY_UNLOCKED_MESSAGE:
+					return typeof(EntityUnlockedMessageAction);
 
 				case ServerActionType.BROADCAST_MESSAGE:
 					return typeof(BroadcastMessageAction);
+				
+				case ServerActionType.NAMED_LOCK_UNLOCKED_MESSAGE:
+					return typeof(NamedLockUnlockedMessageAction);
 			}
 
 			throw new Exception("Action type id with no entry in factory: " + type);
@@ -177,6 +187,48 @@ namespace Impunity.GameState
 		}
 	}
 
+	public class EntityLockedMessageAction : ServerActionBase
+	{
+		[BsonField("id")]
+		public uint EntityId;
+
+		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_LOCKED_MESSAGE; }
+
+		// Called in client main thread
+		public override void DoAction(IServerMessageHandler handler)
+		{
+			handler.HandleEntityLocked(EntityId);
+		}
+	}
+
+	public class EntityUnlockedMessageAction : ServerActionBase
+	{
+		[BsonField("id")]
+		public uint EntityId;
+
+		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UNLOCKED_MESSAGE; }
+
+		// Called in client main thread
+		public override void DoAction(IServerMessageHandler handler)
+		{
+			handler.HandleEntityUnlocked(EntityId);
+		}
+	}
+
+
+	public class NamedLockUnlockedMessageAction : ServerActionBase
+	{
+		[BsonField("ln")]
+		public string Name;
+
+		public override ushort GetActionType() { return (ushort)ServerActionType.NAMED_LOCK_UNLOCKED_MESSAGE; }
+
+		// Called in client main thread
+		public override void DoAction(IServerMessageHandler handler)
+		{
+			handler.HandleNamedLockUnlocked(Name);
+		}
+	}
 
 	public class BroadcastMessageAction : ServerActionBase
 	{

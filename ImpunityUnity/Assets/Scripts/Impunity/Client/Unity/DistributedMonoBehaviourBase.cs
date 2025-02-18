@@ -5,6 +5,7 @@ using UnityEngine;
 using Impunity.Connection;
 
 using UltraLiteDB;
+using System;
 
 namespace Impunity.Unity
 {
@@ -15,6 +16,8 @@ namespace Impunity.Unity
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
+		public bool IsLocked { get; set; }
+		private event ImpunityCallback<LockWaitResult> LockWaiter;
 
 		public ClientEntityManager Manager { get; set; }
 		public IDistributedChannel Channel { get; set; }
@@ -43,14 +46,52 @@ namespace Impunity.Unity
 			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
 		}
 
-		public void Lock(ImpunityCallback<bool> onComplete)
+		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
-		public void Lock(string key, ImpunityCallback<bool> onComplete)
+		public void TryLock(string key, ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, key, onComplete);
+		}
+
+		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
+		{
+			Manager.Connection.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Error);
+				}
+				else if(lockResult)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Locked);
+				}
+				else
+				{
+					LockWaiter += onComplete;
+				}
+			});
+		}
+
+		public void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete)
+		{
+			Manager.Connection.TryToLockEntity(DistributedEntityId, key, (err, lockResult) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Error);
+				}
+				else if(lockResult)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Locked);
+				}
+				else
+				{
+					LockWaiter += onComplete;
+				}
+			});
 		}
 
 		public void Unlock(ImpunityCallback<bool> onComplete)
@@ -63,6 +104,20 @@ namespace Impunity.Unity
 			Manager.Connection.UnlockEntity(DistributedEntityId, key, onComplete);
 		}
 
+		public virtual void OnUnlocked()
+		{
+			IsLocked = false;
+			try
+			{
+				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
+			}
+			catch (Exception ex)
+			{
+				ImpunityLogger.LogError("Exception in entity WaitForLock callback handler:", ex);
+			}
+			LockWaiter = null;
+		}
+		
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
 		public virtual void OnDeleted(BsonValue deleteData) { }
 		public virtual void OnUndistributed() { }

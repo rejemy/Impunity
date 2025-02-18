@@ -9,6 +9,13 @@ using Impunity.GameState;
 namespace Impunity.Connection
 {
 
+	public enum LockWaitResult
+	{
+		Error,
+		Locked,
+		Unlocked,
+		Timeout
+	}
 	public delegate void BroadcastMessageHandler(int messageType, BsonValue messageBody, string sender);
 
 
@@ -22,6 +29,8 @@ namespace Impunity.Connection
 		public abstract void Connect(ImpunityCallback onComplete);
 
 		public string ConnectionId {get; protected set;}
+
+		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
 
 		public BaseGameConnection(GameStateFormat format, ClientEntityManager em)
         {
@@ -108,6 +117,16 @@ namespace Impunity.Connection
 			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
 		}
 
+		public void HandleEntityLocked(uint entityId)
+		{
+			EntityManager.HandleEntityLocked(entityId);
+		}
+
+		public void HandleEntityUnlocked(uint entityId)
+		{
+			EntityManager.HandleEntityUnlocked(entityId);
+		}
+
 		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
         {
 			EntityManager.HandleEntityDelete(entityId, deleteData);
@@ -122,6 +141,26 @@ namespace Impunity.Connection
 			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnBroadcastMessage handler", e);
+			}
+		}
+
+		public void HandleNamedLockUnlocked(string lockName)
+        {
+			if(LockWaits.TryGetValue(lockName, out var onComplete))
+			{
+				LockWaits.Remove(lockName);
+				try
+				{
+					onComplete.Invoke(null, LockWaitResult.Unlocked);
+				}
+				catch(Exception e)
+				{
+					ImpunityLogger.LogError("Exception in WaitForLock callback", e);
+				}
+			}
+			else
+			{
+				ImpunityLogger.LogWarning("Got NamedLock unlock for lock we weren't waiting for: " + lockName);
 			}
 		}
 
@@ -190,12 +229,37 @@ namespace Impunity.Connection
 
 		public void TryToLock(string lockName, ImpunityCallback<bool> onComplete)
         {
-			DoAction(new LockNamedLockAction(lockName, ConnectionId, onComplete));
+			DoAction(new LockNamedLockAction(lockName, ConnectionId, false, onComplete));
         }
 
 		public void TryToLock(string lockName, string key, ImpunityCallback<bool> onComplete)
         {
-			DoAction(new LockNamedLockAction(lockName, key, onComplete));
+			DoAction(new LockNamedLockAction(lockName, key, false, onComplete));
+        }
+
+		public void WaitForLock(string lockName, ImpunityCallback<LockWaitResult> onComplete)
+        {
+			WaitForLock(lockName, ConnectionId, onComplete);
+        }
+
+		public void WaitForLock(string lockName, string key, ImpunityCallback<LockWaitResult> onComplete)
+        {
+			DoAction(new LockNamedLockAction(lockName, key, true, (err, locked) =>
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err, LockWaitResult.Error);
+				}
+				else if (locked)
+				{
+					onComplete?.Invoke(null, LockWaitResult.Locked);
+				}
+				else
+				{
+					LockWaits[lockName] = onComplete;
+				}
+				
+			}));
         }
 
 		public void Unlock(string lockName, ImpunityCallback<bool> onComplete)

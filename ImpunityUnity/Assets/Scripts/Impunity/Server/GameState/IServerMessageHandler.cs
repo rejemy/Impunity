@@ -10,9 +10,13 @@ namespace Impunity.GameState
 		void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, string uniqueName, bool newlyCreated);
 		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData);
 		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData);
+		void HandleEntityLocked(uint entityId);
+		void HandleEntityUnlocked(uint entityId);
 		void HandleEntityDelete(uint entityId, BsonValue deleteData);
+		
 
 		void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy);
+		void HandleNamedLockUnlocked(string lockName);
 	}
 
 }

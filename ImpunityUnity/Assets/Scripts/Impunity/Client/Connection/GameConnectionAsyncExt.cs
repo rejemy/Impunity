@@ -159,6 +159,20 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		public static Task<LockWaitResult> WaitForLockAsync(this BaseGameConnection connection, string lockName)
+		{
+			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
+			connection.WaitForLock(lockName, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<LockWaitResult> WaitForLockAsync(this BaseGameConnection connection, string lockName, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
+			connection.WaitForLock(lockName, key, t.OnComplete);
+			return t.Task;
+		}
+
 		public static Task<bool> UnlockAsync(this BaseGameConnection connection, string lockName)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -332,17 +346,31 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> LockAsync(this IDistributedEntity entity)
+		public static Task<bool> TryLockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.Lock(t.OnComplete);
+			entity.TryLock(t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<bool> LockAsync(this IDistributedEntity entity, string key)
+		public static Task<bool> TryLockAsync(this IDistributedEntity entity, string key)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.Lock(key, t.OnComplete);
+			entity.TryLock(key, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<LockWaitResult> WaitForLockAsync(this IDistributedEntity entity)
+		{
+			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
+			entity.WaitForLock(t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<LockWaitResult> WaitForLockAsync(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
+			entity.WaitForLock(key, t.OnComplete);
 			return t.Task;
 		}
 

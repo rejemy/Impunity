@@ -781,21 +781,25 @@ namespace Impunity.GameState
 		[BsonField("k")]
 		public string Key;
 
+		[BsonField("w")]
+		public bool WaitForUnlock;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_NAMED_LOCK; }
 		public override bool IsDBOperation() { return false; }
 
 		public LockNamedLockAction() { }
 
-		public LockNamedLockAction(string lockName, string key, ImpunityCallback<bool> onComplete = null)
+		public LockNamedLockAction(string lockName, string key, bool wait, ImpunityCallback<bool> onComplete = null)
 		{
 			Name = lockName;
 			Key = key;
+			WaitForUnlock = wait;
 			OnCompleteCallback = onComplete;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.TryToLockNamedLock(Origin.ConnectionReplicant, Name, Key);
+			Result = game.Live.TryToLockNamedLock(Origin.ConnectionReplicant, Name, Key, WaitForUnlock);
 		}
 	}
 

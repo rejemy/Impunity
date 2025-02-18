@@ -532,6 +532,42 @@ public class ImpunityTestComponent : MonoBehaviour
 			return;
 		}
 
+		var waitLockResult = await c1.WaitForLockAsync("waitLock", "xyz");
+		if (waitLockResult != LockWaitResult.Locked)
+		{
+			ImpunityLogger.LogError("Unable to lock waitLock");
+			return;
+		}
+
+		TaskCompletionSource<bool> waitComplete = new TaskCompletionSource<bool>();
+		
+		await Task.Delay(20);
+
+		c2.WaitForLock("waitLock", (err, lockResult) =>
+		{
+			if (lockResult != LockWaitResult.Unlocked)
+			{
+				ImpunityLogger.LogError("Got incorrect wait lock result " + lockResult.ToString());
+			}
+			else
+			{
+				ImpunityLogger.LogInformation("Got wait lock result " + lockResult.ToString());
+			}
+			
+			waitComplete.SetResult(true);
+		});
+		
+		await Task.Delay(20);
+
+		bool waitUnlocked = await c1.UnlockAsync("waitLock", "xyz");
+		if (localUnlocked != true)
+		{
+			ImpunityLogger.LogError("Unable to unlock waitLock");
+			return;
+		}
+
+		await waitComplete.Task;
+
 		ImpunityLogger.LogInformation("Lock tests complete");
 	}
 
@@ -632,7 +668,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Deletes happened");
 
 		
-		await c2player2.LockAsync("xyz");
+		await c2player2.TryLockAsync("xyz");
 
 		bool deleted = await c1.DeleteEntityAsync(c2player2.DistributedEntityId, null, null);
 		if (deleted)

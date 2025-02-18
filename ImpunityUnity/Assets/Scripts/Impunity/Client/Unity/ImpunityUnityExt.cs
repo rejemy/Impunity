@@ -161,6 +161,20 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		public static ImpunityYield<LockWaitResult> WaitForLockYield(this BaseGameConnection connection, string lockName)
+		{
+			var action = new ImpunityYield<LockWaitResult>();
+			connection.WaitForLock(lockName, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<LockWaitResult> WaitForLockYield(this BaseGameConnection connection, string lockName, string key)
+		{
+			var action = new ImpunityYield<LockWaitResult>();
+			connection.WaitForLock(lockName, key, action.OnComplete);
+			return action;
+		}
+
 		public static ImpunityYield<bool> UnlockYield(this BaseGameConnection connection, string lockName)
 		{
 			var action = new ImpunityYield<bool>();
@@ -333,17 +347,31 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield<bool> LockYield(this IDistributedEntity entity)
+		public static ImpunityYield<bool> TryLockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<bool>();
-			entity.Lock(t.OnComplete);
+			entity.TryLock(t.OnComplete);
 			return t;
 		}
 
-		public static ImpunityYield<bool> LockYield(this IDistributedEntity entity, string key)
+		public static ImpunityYield<bool> TryLockYield(this IDistributedEntity entity, string key)
 		{
 			var t = new ImpunityYield<bool>();
-			entity.Lock(key, t.OnComplete);
+			entity.TryLock(key, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<LockWaitResult> WaitForLockYield(this IDistributedEntity entity)
+		{
+			var t = new ImpunityYield<LockWaitResult>();
+			entity.WaitForLock(t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<LockWaitResult> WaitForLockYield(this IDistributedEntity entity, string key)
+		{
+			var t = new ImpunityYield<LockWaitResult>();
+			entity.WaitForLock(key, t.OnComplete);
 			return t;
 		}
 

@@ -45,7 +45,7 @@ namespace Impunity.GameState
 			LocksHeld = null;
 			foreach (GameStateEntity entity in locked.Values)
 			{
-				entity.Unlock();
+				entity.Unlock(null);
 			}
 			locked.Clear();
 
@@ -177,7 +177,7 @@ namespace Impunity.GameState
 			return (Flags & ImpunityInstanceFlags.ClientAuthoritative) != 0;
 		}
 
-		public bool Lock(string key, GameStateReplicant lockedBy)
+		public virtual bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
 		{
 			if (LockedWith != null && LockedWith != key)
 			{
@@ -196,12 +196,12 @@ namespace Impunity.GameState
 				return false;
 			}
 
-			LockedWith = null;
-			LockHeldBy.RemoveLockedEntity(this);
+			Unlock(unlockedBy);
+
 			return true;
 		}
 
-		public void Unlock()
+		public virtual void Unlock(GameStateReplicant unlockedBy)
 		{
 			LockedWith = null;
 			if (LockHeldBy != null)
@@ -328,7 +328,7 @@ namespace Impunity.GameState
 
 		public void Cleanup()
 		{
-			Unlock();
+			Unlock(null);
 			if (EphemeralOwner != null)
 			{
 				EphemeralOwner.RemoveEphemeralEntity(this);
@@ -439,9 +439,34 @@ namespace Impunity.GameState
 			SendToListeners(eventMessage, null);
 		}
 
+		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		{
+			if (base.Lock(key, lockedBy, waitForUnlock))
+			{
+				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
+				lockedMessage.EntityId = Id;
+
+				SendToListeners(lockedMessage, lockedBy);
+
+				return true;
+			}
+			return false;
+		}
+
+		public override void Unlock(GameStateReplicant unlockedBy)
+		{
+			base.Unlock(unlockedBy);
+
+			EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
+			unlockedMessage.EntityId = Id;
+
+			SendToListeners(unlockedMessage, unlockedBy);
+		}
 
 		public override void Destroy(BsonValue deleteData)
 		{
+			base.Destroy(deleteData);
+
 			EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
 			deleteMessage.EntityId = Id;
 			deleteMessage.DeleteData = deleteData;
@@ -456,8 +481,6 @@ namespace Impunity.GameState
 
 			Members.Clear();
 			Listeners.Clear();
-
-			base.Destroy(deleteData);
 		}
 
 		public void SendToListeners(ServerActionBase message, GameStateReplicant except)
@@ -639,8 +662,34 @@ namespace Impunity.GameState
 			Channel.SendToListeners(eventMessage, null);
 		}
 
+		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		{
+			if (base.Lock(key, lockedBy, waitForUnlock))
+			{
+				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
+				lockedMessage.EntityId = Id;
+
+				Channel.SendToListeners(lockedMessage, lockedBy);
+
+				return true;
+			}
+			return false;
+		}
+
+		public override void Unlock(GameStateReplicant unlockedBy)
+		{
+			base.Unlock(unlockedBy);
+
+			EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
+			unlockedMessage.EntityId = Id;
+
+			Channel.SendToListeners(unlockedMessage, unlockedBy);
+		}
+
 		public override void Destroy(BsonValue deleteData)
 		{
+			base.Destroy(deleteData);
+
 			EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
 			deleteMessage.EntityId = Id;
 			deleteMessage.DeleteData = deleteData;
@@ -648,8 +697,6 @@ namespace Impunity.GameState
 
 			Channel.SendToListeners(deleteMessage, null);
 			Channel = null;
-
-			base.Destroy(deleteData);
 		}
 	}
 
@@ -658,9 +705,45 @@ namespace Impunity.GameState
 	{
 		public override string ChannelName { get { return Name; } }
 
-		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, 0, name)
+		public List<GameStateReplicant> LockAwaitedBy;
+
+		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, 0, name) {}
+
+		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
 		{
+			if (!base.Lock(key, lockedBy, waitForUnlock))
+			{
+				if (waitForUnlock)
+				{
+					if (LockAwaitedBy == null)
+					{
+						LockAwaitedBy = new List<GameStateReplicant>();
+					}
+					LockAwaitedBy.Add(lockedBy);
+				}
+
+				return false;
+			}
 			
+			return true;
+		}
+
+		public override void Unlock(GameStateReplicant unlockedBy)
+		{
+			base.Unlock(unlockedBy);
+			
+			if (LockAwaitedBy != null)
+			{
+				NamedLockUnlockedMessageAction unlockedAction = new NamedLockUnlockedMessageAction();
+				unlockedAction.Name = Name;
+
+				foreach(var replica in LockAwaitedBy)
+				{
+					replica.SendMessageViaConnection(unlockedAction);
+				}
+
+				LockAwaitedBy = null;
+			}
 		}
 	}
 
@@ -907,7 +990,7 @@ namespace Impunity.GameState
 
 			if(channel.IsClientAuthoritative())
 			{
-				channel.Lock(origin.Id, origin);
+				channel.Lock(origin.Id, origin, false);
 			}
 
 			if (typeInfo.PersistedAs != null)
@@ -975,7 +1058,7 @@ namespace Impunity.GameState
 
 			if (dobj.IsClientAuthoritative())
 			{
-				dobj.Lock(origin.Id, origin);
+				dobj.Lock(origin.Id, origin, false);
 			}
 
 			// Will notify all listeners (except origin) of new object
@@ -1071,13 +1154,11 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
 			}
 
-			if (entity.IsLocked())
+			if (!entity.Lock(key, origin, false))
 			{
 				// Already locked
-				return entity.IsLockedBy(key);
+				return false;
 			}
-
-			entity.Lock(key, origin);
 
 			return true;
 		}
@@ -1093,7 +1174,7 @@ namespace Impunity.GameState
 			return entity.Unlock(key, origin);
 		}
 
-		public bool TryToLockNamedLock(GameStateReplicant origin, string name, string key)
+		public bool TryToLockNamedLock(GameStateReplicant origin, string name, string key, bool waitForUnlock)
 		{
 			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
 			if (entity == null || entity.InLoadingState)
@@ -1104,7 +1185,7 @@ namespace Impunity.GameState
 				origin.AddEphemeralEntity(entity);
 			}
 
-			bool locked = entity.Lock(key, origin);
+			bool locked = entity.Lock(key, origin, waitForUnlock);
 			
 			return locked;
 		}
