@@ -116,7 +116,7 @@ namespace Impunity.GameState
 	{
 		public uint Id { get; internal set; }
 		public string Name { get; private set; }
-		private ImpunityInstanceFlags Flags;
+		protected ImpunityInstanceFlags Flags;
 		public byte FlagByte { get { return (byte)Flags; } }
 		public abstract string ChannelName { get; }
 		public bool InLoadingState { get; protected set; } = false;
@@ -175,6 +175,11 @@ namespace Impunity.GameState
 		public bool IsClientAuthoritative()
 		{
 			return (Flags & ImpunityInstanceFlags.ClientAuthoritative) != 0;
+		}
+
+		public bool IsPersisted()
+		{
+			return (Flags & ImpunityInstanceFlags.Persisted) != 0;
 		}
 
 		public virtual bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
@@ -371,6 +376,8 @@ namespace Impunity.GameState
 			channelCreate.ChannelId = Id;
 			channelCreate.ChannelName = Name;
 			channelCreate.ChannelType = TypeInfo != null ? TypeInfo.Index : 0;
+			channelCreate.IsLocked = IsLocked();
+			channelCreate.InstanceFlags = (byte)Flags;
 			channelCreate.PropBytes = GetPropBytes();
 			channelCreate.ObjectsInChannel = new ObjectCreateMessageAction[Members.Count];
 
@@ -629,6 +636,8 @@ namespace Impunity.GameState
 			message.ObjectId = Id;
 			message.ChannelId = Channel.Id;
 			message.ObjectType = TypeInfo.Index;
+			message.IsLocked = IsLocked();
+			message.InstanceFlags = (byte)Flags;
 			message.PropBytes = GetPropBytes();
 			message.UniqueName = Name;
 			return message;
@@ -993,7 +1002,7 @@ namespace Impunity.GameState
 				channel.Lock(origin.Id, origin, false);
 			}
 
-			if (typeInfo.PersistedAs != null)
+			if (channel.IsPersisted() && typeInfo.PersistedAs != null)
 			{
 				// Save to DB
 				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name, channel.ChannelName, typeId, channel.FlagByte, persistedProps);
@@ -1044,7 +1053,7 @@ namespace Impunity.GameState
 			}
 
 			string dbid = uniqueName;
-			if (typeInfo.PersistedAs != null && dbid == null)
+			if (((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0 && typeInfo.PersistedAs != null && dbid == null)
 			{
 				// If this is a persisted item and it doesn't have a unique name set, make one with a guid
 				dbid = Guid.NewGuid().ToString();
@@ -1064,7 +1073,7 @@ namespace Impunity.GameState
 			// Will notify all listeners (except origin) of new object
 			channel.AddObject(dobj, origin);
 
-			if (typeInfo.PersistedAs != null)
+			if (dobj.IsPersisted() && typeInfo.PersistedAs != null)
 			{
 				// Save to DB
 				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name, dobj.ChannelName, typeId, channel.FlagByte, persistedProps);
@@ -1105,7 +1114,7 @@ namespace Impunity.GameState
 			List<LiveEntityPersistedPropertyData> persistedProps;
 			UpdateEntityProps(entity, propData, origin, out persistedProps);
 
-			if (persistedProps != null)
+			if (entity.IsPersisted() && persistedProps != null)
 			{
 				UpdatePersistedEntityPropertiesAction action = new UpdatePersistedEntityPropertiesAction(entity.Name, entity.ChannelName, persistedProps);
 				Server.QueueAction(action);

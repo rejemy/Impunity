@@ -97,14 +97,14 @@ namespace Impunity.Connection
 
 		// Server message handlers
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, ArraySegment<byte> propData)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
         {
-			EntityManager.HandleCreateChannel(channelId, channelName, channelType, propData);
+			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
         {
-			EntityManager.HandleCreateObject(objectId, channelId, objectType, propData, uniqueName, newlyCreated);
+			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated);
 		}
 
 		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)

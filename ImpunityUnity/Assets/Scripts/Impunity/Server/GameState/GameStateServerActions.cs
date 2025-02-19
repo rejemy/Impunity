@@ -88,6 +88,12 @@ namespace Impunity.GameState
 		[BsonField("t")]
 		public int ChannelType;
 
+		[BsonField("if")]
+		public byte InstanceFlags;
+
+		[BsonField("l")]
+		public bool IsLocked;
+
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
@@ -99,10 +105,11 @@ namespace Impunity.GameState
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, PropBytes);
+			handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, IsLocked, InstanceFlags, PropBytes);
 			foreach (ObjectCreateMessageAction objCreate in ObjectsInChannel)
 			{
-				handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.PropBytes, objCreate.UniqueName, false);
+				handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.IsLocked,
+														objCreate.InstanceFlags, objCreate.PropBytes, objCreate.UniqueName, false);
 			}
 		}
 	}
@@ -118,6 +125,12 @@ namespace Impunity.GameState
 		[BsonField("t")]
 		public int ObjectType;
 
+		[BsonField("if")]
+		public byte InstanceFlags;
+
+		[BsonField("l")]
+		public bool IsLocked;
+
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
@@ -129,7 +142,7 @@ namespace Impunity.GameState
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, PropBytes, UniqueName, true);
+			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, IsLocked, InstanceFlags, PropBytes, UniqueName, true);
 		}
 	}
 

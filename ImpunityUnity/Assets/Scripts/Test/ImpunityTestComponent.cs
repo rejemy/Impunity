@@ -742,6 +742,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		zoneGrid[90] = -2;
 
 		PersistedTestZone zone1 = new PersistedTestZone();
+		zone1.IsPersisted = true;
 		zone1.Status.Set("ready");
 		zone1.Scalar.Set(2.5f);
 		zone1.Chat.Init(200);
@@ -753,6 +754,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		for (int i = 0; i < 10; i++)
 		{
 			ZonePersistedObject zobj = new ZonePersistedObject();
+			zobj.IsPersisted = true;
 			zobj.Position.Set(new Vector2Int(10, -2));
 			zobj.Flags.Init();
 			zobj.Flags.Add(34, "done");
@@ -812,8 +814,9 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		ImpunityLogger.LogInformation("Starting verifying persisted zone and objects");
 
-		Task<PersistedTestZone> c1Zone1T = c1.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", null);
-		Task<PersistedTestZone> c2Zone1T = c2.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", null);
+		
+		Task<PersistedTestZone> c1Zone1T = c1.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", new PersistedTestZone { IsPersisted = true });
+		Task<PersistedTestZone> c2Zone1T = c2.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", new PersistedTestZone { IsPersisted = true });
 
 		PersistedTestZone c1Zone1 = await c1Zone1T;
 		PersistedTestZone c2Zone1 = await c2Zone1T;

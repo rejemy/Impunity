@@ -16,6 +16,7 @@ namespace Impunity.Unity
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
+		public bool IsPersisted { get; set; }
 		public bool IsLocked { get; set; }
 		private event ImpunityCallback<LockWaitResult> LockWaiter;
 

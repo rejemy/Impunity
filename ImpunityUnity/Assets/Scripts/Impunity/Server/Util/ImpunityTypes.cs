@@ -35,7 +35,8 @@ namespace Impunity
 	public enum ImpunityInstanceFlags : byte
 	{
 		None = 0,
-		ClientAuthoritative = 1
+		ClientAuthoritative = 1,
+		Persisted = 2
 	}
 
 	public enum ImpunityInternalCollectionIds

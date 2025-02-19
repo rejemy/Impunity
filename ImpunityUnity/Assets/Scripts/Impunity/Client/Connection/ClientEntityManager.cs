@@ -40,6 +40,7 @@ namespace Impunity.Connection
 		uint DistributedEntityId { get; set; }
 		int DistributedEntityType { get; set; }
 		bool IsClientAuthoritative { get; set; }
+		bool IsPersisted { get; set; }
 		bool IsLocked { get; set; }
 
 		ClientEntityManager Manager { get; set; }
@@ -82,6 +83,7 @@ namespace Impunity.Connection
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
+		public bool IsPersisted { get; set; }
 		public bool IsLocked { get; set; }
 		private event ImpunityCallback<LockWaitResult> LockWaiter;
 
@@ -358,10 +360,19 @@ namespace Impunity.Connection
 					throw new Exception("Can't create a client authoritative object that is also persisted");
 				}
 			}
-
-			if (IsPersisted(distObj) && !IsPersisted(channel))
+			if (distObj.IsPersisted)
 			{
-				throw new Exception("Unable to create persisted object in non-persisted channel");
+				if (!DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create persisted object of a type that is not persistant");
+				}
+
+				if (!channel.IsPersisted)
+				{
+					throw new Exception("Unable to create persisted object in non-persisted channel");
+				}
+
+				instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
 			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.Name, (ImpunityErrorResponse err, uint objectId) =>
@@ -429,6 +440,15 @@ namespace Impunity.Connection
 					{
 						throw new Exception("Can't create a client authoritative channel that is also persisted");
 					}
+				}
+				if (createIfNeeded.IsPersisted)
+				{
+					if (!DistributedTypes[entityTypeId].Persisted)
+					{
+						throw new Exception("Can't create persisted channel of a type that is not persistant");
+					}
+
+					instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 				}
 			}
 
@@ -696,13 +716,8 @@ namespace Impunity.Connection
 			return typeInfo;
 		}
 
-		private bool IsPersisted(IDistributedEntity entity)
-		{
-			DistributedTypeInfo typeInfo = GetDistributedTypeInfo(entity.DistributedEntityType);
-			return typeInfo.Persisted;
-		}
 
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, ArraySegment<byte> propData)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
 		{
 			IDistributedChannel channel = null;
 			if (channelType != 0)
@@ -729,13 +744,14 @@ namespace Impunity.Connection
 
 			channel.DistributedEntityType = channelType;
 			channel.Name = channelName;
-
+			channel.IsLocked = isLocked;
+			channel.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 			SetPropertyBytes(channel, propData);
 
 			RegisterEntity(channel, channelId);
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
 		{
 			IDistributedEntity entity = null;
 
@@ -751,6 +767,8 @@ namespace Impunity.Connection
 
 			entity.DistributedEntityType = objectType;
 			entity.Name = uniqueName;
+			entity.IsLocked = isLocked;
+			entity.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 			SetPropertyBytes(entity, propData);
 
 			RegisterEntity(entity, objectId);
