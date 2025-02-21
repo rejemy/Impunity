@@ -511,28 +511,28 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		ImpunityLogger.LogInformation("Doing lock tests");
 
-		bool localLocked = await c1.TryToLockAsync("tempLock", "xyz");
+		bool localLocked = await c1.TryToLockAsync("tempLock");
 		if (localLocked != true)
 		{
 			ImpunityLogger.LogError("Unable to lock temp lock");
 			return;
 		}
 
-		bool remoteLocked = await c2.TryToLockAsync("tempLock", "snad");
+		bool remoteLocked = await c2.TryToLockAsync("tempLock");
 		if (remoteLocked != false)
 		{
 			ImpunityLogger.LogError("Was able to get lock that should be held");
 			return;
 		}
 
-		bool localUnlocked = await c1.UnlockAsync("tempLock", "xyz");
+		bool localUnlocked = await c1.UnlockAsync("tempLock");
 		if (localUnlocked != true)
 		{
 			ImpunityLogger.LogError("Unable to unlock temp lock");
 			return;
 		}
 
-		var waitLockResult = await c1.WaitForLockAsync("waitLock", "xyz");
+		var waitLockResult = await c1.WaitForLockAsync("waitLock");
 		if (waitLockResult != LockWaitResult.Locked)
 		{
 			ImpunityLogger.LogError("Unable to lock waitLock");
@@ -559,7 +559,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		
 		await Task.Delay(20);
 
-		bool waitUnlocked = await c1.UnlockAsync("waitLock", "xyz");
+		bool waitUnlocked = await c1.UnlockAsync("waitLock");
 		if (localUnlocked != true)
 		{
 			ImpunityLogger.LogError("Unable to unlock waitLock");
@@ -594,7 +594,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		TestPlayer c1player1 = new TestPlayer();
 		c1player1.Name = "player1";
-		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel);
+		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel, false);
 		ImpunityLogger.LogInformation("C1 Made player: " + c1player1.DistributedEntityId);
 
 		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone", null);
@@ -602,17 +602,17 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		TestPlayer c2player2 = new TestPlayer();
 		c2player2.Name = "player2";
-		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c2channel);
+		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c2channel, false);
 		ImpunityLogger.LogInformation("C2 Made player: " + c2player2.DistributedEntityId);
 
 		TestEmptyObj c1empty = new TestEmptyObj();
-		await c1.EntityManager.CreateObjectAsync(c1empty, c1channel);
+		await c1.EntityManager.CreateObjectAsync(c1empty, c1channel, false);
 
 		try
 		{
 			TestPlayer c2player1 = new TestPlayer();
 			c2player1.Name = "player1";
-			c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c2channel);
+			c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c2channel, false);
 			ImpunityLogger.LogError("C2 Made player1: " + c2player1.DistributedEntityId);
 		}
 		catch (ImpuntyErrorResponseException e)
@@ -668,16 +668,16 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Deletes happened");
 
 		
-		await c2player2.TryLockAsync("xyz");
+		await c2player2.TryLockAsync();
 
-		bool deleted = await c1.DeleteEntityAsync(c2player2.DistributedEntityId, null, null);
+		bool deleted = await c1.DeleteEntityAsync(c2player2.DistributedEntityId, null);
 		if (deleted)
 		{
 			ImpunityLogger.LogError("Was able to delete locked object");
 			return;
 		}
 
-		await c2player2.UnlockAsync("xyz");
+		await c2player2.UnlockAsync();
 		ImpunityLogger.LogInformation("Completed locking");
 
 
@@ -701,6 +701,37 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Unsubscribed");
 
 		await Task.Delay(100);
+
+		TestZone c1channelCreate = new TestZone();
+		c1channelCreate.Status.Set("Stuff");
+
+		List<IDistributedEntity> zoneObjects = new List<IDistributedEntity>();
+
+		for(int i=1; i<=5; i++)
+		{
+			var zonePlayer = new TestPlayer();
+			zonePlayer.Name = "player_"+i;
+			zonePlayer.Direction.Set(new Vector3(1,1,i));
+			zoneObjects.Add(zonePlayer);
+		}
+
+		ImpunityLogger.LogInformation("Creating a channel with objects");
+
+		await c1.EntityManager.CreateChannelAsync("createChannelZoneTest", c1channelCreate, true, zoneObjects);
+
+		TestZone c2channelFromCreate = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("createChannelZoneTest", null);
+
+		if (c2channelFromCreate.Status != "Stuff")
+		{
+			ImpunityLogger.LogError("Created channel has incorrect properties");
+		}
+
+		if (c2channelFromCreate.DistributedObjects.Count != 5)
+		{
+			ImpunityLogger.LogError("Created channel doesn't have all its objects");
+		}
+
+		await c2channelFromCreate.UnsubscribeAsync();
 
 		ImpunityLogger.LogInformation("Live channel tests complete");
     }
@@ -762,7 +793,7 @@ public class ImpunityTestComponent : MonoBehaviour
 			zobj.Quests.Add("butt", "in progress");
 			zobj.Direction.Set(new Vector3(0.0f, 1.0f, 2.0f));
 
-			await c.EntityManager.CreateObjectAsync(zobj, zone1);
+			await c.EntityManager.CreateObjectAsync(zobj, zone1, false);
 		}
 
 		ImpunityLogger.LogInformation("Done setting up persisted zone and objects");

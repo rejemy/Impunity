@@ -30,6 +30,7 @@ namespace Impunity.GameState
 		public Dictionary<uint, GameStateChannel> Subscriptions;
 
 		public string Id { get { return ConnectionProxy.ConnectionId;  } }
+		public string ConnectionKey { get { return ConnectionProxy.ConnectionKey;  } }
 
 		public GameStateReplicant(IServerSideConnectionProxy proxy)
 		{
@@ -45,7 +46,7 @@ namespace Impunity.GameState
 			LocksHeld = null;
 			foreach (GameStateEntity entity in locked.Values)
 			{
-				entity.Unlock(null);
+				entity.TryUnlock(this);
 			}
 			locked.Clear();
 
@@ -182,21 +183,21 @@ namespace Impunity.GameState
 			return (Flags & ImpunityInstanceFlags.Persisted) != 0;
 		}
 
-		public virtual bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		public virtual bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
-			if (LockedWith != null && LockedWith != key)
+			if (LockedWith != null && LockedWith != lockedBy.ConnectionKey)
 			{
 				return false;
 			}
 
-			LockedWith = key;
+			LockedWith = lockedBy.ConnectionKey;
 			lockedBy.AddLockedEntity(this);
 			return true;
 		}
 
-		public bool Unlock(string key, GameStateReplicant unlockedBy)
+		public bool TryUnlock(GameStateReplicant unlockedBy)
 		{
-			if (LockedWith != key || LockHeldBy != unlockedBy)
+			if (LockedWith != unlockedBy.ConnectionKey || LockHeldBy != unlockedBy)
 			{
 				return false;
 			}
@@ -206,7 +207,7 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public virtual void Unlock(GameStateReplicant unlockedBy)
+		protected virtual void Unlock(GameStateReplicant unlockedBy)
 		{
 			LockedWith = null;
 			if (LockHeldBy != null)
@@ -400,6 +401,11 @@ namespace Impunity.GameState
 			return UniqueNames.ContainsKey(name);
 		}
 
+		public GameStateObject GetNamedObject(string name)
+		{
+			return UniqueNames.GetValueOrDefault(name);
+		}
+
 		public void AddObject(GameStateObject obj, GameStateReplicant addedBy)
 		{
 			Members.Add(obj.Id, obj);
@@ -446,9 +452,9 @@ namespace Impunity.GameState
 			SendToListeners(eventMessage, null);
 		}
 
-		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
-			if (base.Lock(key, lockedBy, waitForUnlock))
+			if (base.Lock(lockedBy, waitForUnlock))
 			{
 				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
 				lockedMessage.EntityId = Id;
@@ -460,7 +466,7 @@ namespace Impunity.GameState
 			return false;
 		}
 
-		public override void Unlock(GameStateReplicant unlockedBy)
+		protected override void Unlock(GameStateReplicant unlockedBy)
 		{
 			base.Unlock(unlockedBy);
 
@@ -519,6 +525,7 @@ namespace Impunity.GameState
 		int CreateEntityTypeId;
 		byte CreateInstanceFlags;
 		ArraySegment<byte> CreatePropBytes;
+		List<ObjectCreateData> CreateObjects;
 
 		List<GameStateChannelLoadListener> LoadListeners;
 
@@ -534,7 +541,7 @@ namespace Impunity.GameState
 			LoadListeners.Add(listener);
 		}
 
-		public void SetCreateIfMissing(GameStateReplicant creator, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		public void SetCreateIfMissing(GameStateReplicant creator, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
 		{
 			if (CreateIfMissing)
 			{
@@ -547,13 +554,14 @@ namespace Impunity.GameState
 			CreateEntityTypeId = entityTypeId;
 			CreateInstanceFlags = instanceFlags;
 			CreatePropBytes = propBytes;
+			CreateObjects = objects;
 		}
 
 		public void OnDataLoaded(ImpunityErrorResponse error, LiveChannelData channelData)
 		{
 			if (error == null && channelData == null && !CreateIfMissing)
 			{
-				error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "No channel with name " + Name);
+				error = new ImpunityErrorResponse(ImpunityErrorCode.ActionNotFound, "No channel with name " + Name);
 			}
 
 			if (error != null)
@@ -591,7 +599,7 @@ namespace Impunity.GameState
 				{
 					// No channel found, but we're all set to create it
 					LiveData.UnregisterEntity(this);
-					channel = LiveData.CreateChannel(Creator, ChannelName, CreateEntityTypeId, CreateInstanceFlags, CreatePropBytes);
+					channel = LiveData.CreateChannelInternal(Creator, ChannelName, CreateEntityTypeId, CreateInstanceFlags, CreatePropBytes, CreateObjects);
 				}
 			}
 			catch (Exception e)
@@ -671,9 +679,9 @@ namespace Impunity.GameState
 			Channel.SendToListeners(eventMessage, null);
 		}
 
-		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
-			if (base.Lock(key, lockedBy, waitForUnlock))
+			if (base.Lock(lockedBy, waitForUnlock))
 			{
 				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
 				lockedMessage.EntityId = Id;
@@ -685,7 +693,7 @@ namespace Impunity.GameState
 			return false;
 		}
 
-		public override void Unlock(GameStateReplicant unlockedBy)
+		protected override void Unlock(GameStateReplicant unlockedBy)
 		{
 			base.Unlock(unlockedBy);
 
@@ -718,9 +726,9 @@ namespace Impunity.GameState
 
 		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, 0, name) {}
 
-		public override bool Lock(string key, GameStateReplicant lockedBy, bool waitForUnlock)
+		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
-			if (!base.Lock(key, lockedBy, waitForUnlock))
+			if (!base.Lock(lockedBy, waitForUnlock))
 			{
 				if (waitForUnlock)
 				{
@@ -737,7 +745,7 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public override void Unlock(GameStateReplicant unlockedBy)
+		protected override void Unlock(GameStateReplicant unlockedBy)
 		{
 			base.Unlock(unlockedBy);
 			
@@ -974,7 +982,24 @@ namespace Impunity.GameState
 		}
 
 		// Create channel from client input
-		public GameStateChannel CreateChannel(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		public bool CreateChannel(GameStateReplicant origin, string channelName, bool replace, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
+		{
+			GameStateChannel existing = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
+			
+			if (replace && existing != null)
+			{
+				if (!DeleteEntity(origin, existing.Id, null))
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Couldn't replace channel " + channelName + " because existing channel was locked by someone else");
+				}
+			}
+
+			GameStateChannel channel = CreateChannelInternal(origin, channelName, typeId, instanceFlags, propBytes, objects);
+
+			return true;
+		}
+
+		public GameStateChannel CreateChannelInternal(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
 		{
 			if (channelName == null)
 			{
@@ -983,7 +1008,7 @@ namespace Impunity.GameState
 
 			if (NamedEntities.ContainsKey(channelName))
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Entity with name " + channelName + " already exists");
+				throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Entity with name " + channelName + " already exists");
 			}
 
 			GameStateEntityType typeInfo = null;
@@ -999,7 +1024,7 @@ namespace Impunity.GameState
 
 			if(channel.IsClientAuthoritative())
 			{
-				channel.Lock(origin.Id, origin, false);
+				channel.Lock(origin, false);
 			}
 
 			if (channel.IsPersisted() && typeInfo.PersistedAs != null)
@@ -1007,6 +1032,14 @@ namespace Impunity.GameState
 				// Save to DB
 				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name, channel.ChannelName, typeId, channel.FlagByte, persistedProps);
 				Server.QueueAction(action);
+			}
+
+			if (objects != null)
+			{
+				foreach(ObjectCreateData co in objects)
+				{
+					CreateObject(origin, co.EntityTypeId, co.InstanceFlags, channel.Id, co.PropBytes, co.UniqueName, true, true);
+				}
 			}
 
 			return channel;
@@ -1017,7 +1050,7 @@ namespace Impunity.GameState
 			GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
 			if (channel == null)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with name " + channelName);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with name " + channelName);
 			}
 
 			channel.AddListener(origin, true);
@@ -1031,25 +1064,41 @@ namespace Impunity.GameState
 			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with id " + channelId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with id " + channelId);
 			}
 
 			channel.RemoveListener(origin);
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName)
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, bool force)
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
 			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null || channel.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No channel with ID " + channelId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with ID " + channelId);
 			}
 
 			if (uniqueName != null && channel.HasUniqueName(uniqueName))
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Channel already has object with name " + uniqueName);
+				if (replace)
+				{
+					GameStateObject existing = channel.GetNamedObject(uniqueName);
+
+					if (force)
+					{
+						DestroyEntity(existing, null);
+					}
+					else
+					{
+						if (!DeleteEntity(origin, existing.Id, null))
+						{
+							throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Couldn't replace object " + uniqueName + " because existing object was locked by someone else");
+						}
+					}
+				}
+				throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Channel already has object with name " + uniqueName);
 			}
 
 			string dbid = uniqueName;
@@ -1067,7 +1116,7 @@ namespace Impunity.GameState
 
 			if (dobj.IsClientAuthoritative())
 			{
-				dobj.Lock(origin.Id, origin, false);
+				dobj.Lock(origin, false);
 			}
 
 			// Will notify all listeners (except origin) of new object
@@ -1097,15 +1146,15 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, string key, ArraySegment<byte> propData)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData)
 		{
-			GameStateEntity entity = AllEntities[entityId];
+			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			if (!entity.IsAccessibleBy(key))
+			if (!entity.IsAccessibleBy(origin.ConnectionKey))
 			{
 				// Can't update locked entity
 				return false;
@@ -1130,21 +1179,21 @@ namespace Impunity.GameState
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
 			entity.SendEvent(eventType, eventData);
 		}
 
-		public bool DeleteEntity(uint entityId, string key, BsonValue deleteData)
+		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue deleteData)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			if (!entity.IsAccessibleBy(key))
+			if (!entity.IsAccessibleBy(origin.ConnectionKey))
 			{
 				// Can't delete locked entity
 				return false;
@@ -1155,15 +1204,15 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public bool LockEntity(GameStateReplicant origin, uint entityId, string key)
+		public bool LockEntity(GameStateReplicant origin, uint entityId)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			if (!entity.Lock(key, origin, false))
+			if (!entity.Lock(origin, false))
 			{
 				// Already locked
 				return false;
@@ -1172,18 +1221,18 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public bool UnlockEntity(GameStateReplicant origin, uint entityId, string key)
+		public bool UnlockEntity(GameStateReplicant origin, uint entityId)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
-				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "No entity with ID " + entityId);
+				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			return entity.Unlock(key, origin);
+			return entity.TryUnlock(origin);
 		}
 
-		public bool TryToLockNamedLock(GameStateReplicant origin, string name, string key, bool waitForUnlock)
+		public bool TryToLockNamedLock(GameStateReplicant origin, string name, bool waitForUnlock)
 		{
 			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
 			if (entity == null || entity.InLoadingState)
@@ -1194,12 +1243,12 @@ namespace Impunity.GameState
 				origin.AddEphemeralEntity(entity);
 			}
 
-			bool locked = entity.Lock(key, origin, waitForUnlock);
+			bool locked = entity.Lock(origin, waitForUnlock);
 			
 			return locked;
 		}
 
-		public bool UnlockNamedLock(GameStateReplicant origin, string name, string key)
+		public bool UnlockNamedLock(GameStateReplicant origin, string name)
 		{
 			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
 			if (entity == null || entity.InLoadingState)
@@ -1207,7 +1256,7 @@ namespace Impunity.GameState
 				return false;
 			}
 
-			bool unlocked = entity.Unlock(key, origin);
+			bool unlocked = entity.TryUnlock(origin);
 			if (unlocked)
 			{
 				if (entity is GameStateNamedLock)

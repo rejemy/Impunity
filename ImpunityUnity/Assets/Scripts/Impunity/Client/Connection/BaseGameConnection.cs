@@ -30,6 +30,8 @@ namespace Impunity.Connection
 
 		public string ConnectionId {get; protected set;}
 
+		public string ConnectionKey { get; set; }
+
 		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
 
 		public BaseGameConnection(GameStateFormat format, ClientEntityManager em)
@@ -42,6 +44,8 @@ namespace Impunity.Connection
 			EntityManager.Connection = this;
 			GameStateEntityTypeDef[] entityTypes = EntityManager.RegisterEntityTypes(format.EntityTypes);
 
+			ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
+			
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
@@ -50,7 +54,7 @@ namespace Impunity.Connection
 		protected void EstablishConnection(string gameId, string password, GameStateFormatData format, ImpunityCallback onComplete)
 		{
 			string hashedPassword = ImpunityUtil.HashPassword(password);
-			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, onComplete));
+			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onComplete));
 		}
 
 
@@ -229,22 +233,12 @@ namespace Impunity.Connection
 
 		public void TryToLock(string lockName, ImpunityCallback<bool> onComplete)
         {
-			DoAction(new LockNamedLockAction(lockName, ConnectionId, false, onComplete));
-        }
-
-		public void TryToLock(string lockName, string key, ImpunityCallback<bool> onComplete)
-        {
-			DoAction(new LockNamedLockAction(lockName, key, false, onComplete));
+			DoAction(new LockNamedLockAction(lockName, false, onComplete));
         }
 
 		public void WaitForLock(string lockName, ImpunityCallback<LockWaitResult> onComplete)
         {
-			WaitForLock(lockName, ConnectionId, onComplete);
-        }
-
-		public void WaitForLock(string lockName, string key, ImpunityCallback<LockWaitResult> onComplete)
-        {
-			DoAction(new LockNamedLockAction(lockName, key, true, (err, locked) =>
+			DoAction(new LockNamedLockAction(lockName, true, (err, locked) =>
 			{
 				if (err != null)
 				{
@@ -264,17 +258,27 @@ namespace Impunity.Connection
 
 		public void Unlock(string lockName, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new UnlockNamedLockAction(lockName, ConnectionId, onComplete));
+			DoAction(new UnlockNamedLockAction(lockName, onComplete));
 		}
 
-		public void Unlock(string lockName, string key, ImpunityCallback<bool> onComplete)
+		public void CreateChannel(string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData> channelObjects, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new UnlockNamedLockAction(lockName, key, onComplete));
+			var action = new CreateChannelAction(channelName, entityTypeId, instanceFlags, propBytes, replace, onComplete);
+			if (channelObjects != null)
+			{
+				action.Objects = new List<ObjectCreateData>(channelObjects);
+			}
+			DoAction(action);
 		}
 
-		public void SubcribeToChannel(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete)
+		public void SubcribeToChannel(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData> channelObjects, ImpunityCallback<uint> onComplete)
 		{
-			DoAction(new SubscribeChannelAction(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, onComplete));
+			var action = new SubscribeChannelAction(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, onComplete);
+			if (channelObjects != null)
+			{
+				action.Objects = new List<ObjectCreateData>(channelObjects);
+			}
+			DoAction(action);
 		}
 
 		public void UnsubscribeFromChannel(uint channelId, ImpunityCallback onComplete)
@@ -282,19 +286,19 @@ namespace Impunity.Connection
 			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
 		}
 
-		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, ImpunityCallback<uint> onComplete)
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, ImpunityCallback<uint> onComplete)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, onComplete));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, onComplete));
 		}
 
-		public void UpdateEntity(uint entityId, string key, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new UpdateEntityAction(entityId, key, updateData, onComplete));
+			DoAction(new UpdateEntityAction(entityId, updateData, onComplete));
 		}
 
-		public void DeleteEntity(uint entityId, string key, BsonValue deleteData, ImpunityCallback<bool> onComplete)
+		public void DeleteEntity(uint entityId, BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new DeleteEntityAction(entityId, key, deleteData, onComplete));
+			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete));
 		}
 
 		public void TriggerEntityEvent(uint entityId, int eventType, BsonValue eventData, ImpunityCallback onComplete)
@@ -304,22 +308,12 @@ namespace Impunity.Connection
 
 		public void TryToLockEntity(uint entityId, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new LockEntityAction(entityId, ConnectionId, onComplete));
-		}
-
-		public void TryToLockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
-		{
-			DoAction(new LockEntityAction(entityId, key, onComplete));
+			DoAction(new LockEntityAction(entityId, onComplete));
 		}
 
 		public void UnlockEntity(uint entityId, ImpunityCallback<bool> onComplete)
 		{
-			DoAction(new UnlockEntityAction(entityId, ConnectionId, onComplete));
-		}
-
-		public void UnlockEntity(uint entityId, string key, ImpunityCallback<bool> onComplete)
-		{
-			DoAction(new UnlockEntityAction(entityId, key, onComplete));
+			DoAction(new UnlockEntityAction(entityId, onComplete));
 		}
 
 		// -------- Broadcast

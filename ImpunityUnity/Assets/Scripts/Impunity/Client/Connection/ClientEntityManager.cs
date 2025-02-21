@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
-
+using Impunity.GameState;
 using UltraLiteDB;
 
 
@@ -55,11 +55,8 @@ namespace Impunity.Connection
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
 		void TryLock(ImpunityCallback<bool> onComplete);
-		void TryLock(string key, ImpunityCallback<bool> onComplete);
 		void WaitForLock(ImpunityCallback<LockWaitResult> onComplete);
-		void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete);
 		void Unlock(ImpunityCallback<bool> onComplete);
-		void Unlock(string key, ImpunityCallback<bool> onComplete);
 
 		void OnEventTriggered(int eventType, BsonValue eventData);
 		void OnDeleted(BsonValue deleteData);
@@ -111,17 +108,12 @@ namespace Impunity.Connection
 
 		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
+			Manager.Connection.DeleteEntity(DistributedEntityId, deleteData, onComplete);
 		}
 
 		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
-		}
-
-		public void TryLock(string key, ImpunityCallback<bool> onComplete)
-		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, key, onComplete);
 		}
 
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
@@ -143,33 +135,10 @@ namespace Impunity.Connection
 			});
 		}
 
-		public void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete)
-		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, key, (err, lockResult) =>
-			{
-				if (err != null)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Error);
-				}
-				else if(lockResult)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Locked);
-				}
-				else
-				{
-					LockWaiter += onComplete;
-				}
-			});
-		}
 
 		public void Unlock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
-		}
-
-		public void Unlock(string key, ImpunityCallback<bool> onComplete)
-		{
-			Manager.Connection.UnlockEntity(DistributedEntityId, key, onComplete);
 		}
 
 		public virtual void OnUnlocked()
@@ -327,7 +296,7 @@ namespace Impunity.Connection
         }
 
 
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
 		{
 			if(distObj.Name != null && distObj.Name.Contains("/"))
 			{
@@ -375,7 +344,7 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.Name, (ImpunityErrorResponse err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.Name, replace, (ImpunityErrorResponse err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -386,6 +355,113 @@ namespace Impunity.Connection
 				RegisterEntity(distObj, objectId);
 				onComplete?.Invoke(err, distObj);
 			});
+		}
+
+		private ObjectCreateData MakeObjectCreateData(IDistributedEntity distObj, IDistributedChannel channel)
+		{
+			ObjectCreateData data = new ObjectCreateData();
+
+			if(distObj.Name != null && distObj.Name.Contains("/"))
+			{
+				throw new Exception("Object name cannot contain forward slash");
+			}
+
+			Type entityType = distObj.GetType();
+			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
+			if (distAttr == null)
+			{
+				throw new Exception("Tried to create distributed object type " + entityType.Name + " with no DistributedEntity attribute");
+			}
+
+			int entityTypeId = distAttr.EntityId;
+			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
+			{
+				throw new Exception("Tried to create distributed object with invalid entity type id: " + entityTypeId);
+			}
+
+			distObj.DistributedEntityType = entityTypeId;
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj);
+
+			byte instanceFlags = 0;
+			if (distObj.IsClientAuthoritative)
+			{
+				instanceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a client authoritative object that is also persisted");
+				}
+			}
+			if (distObj.IsPersisted)
+			{
+				if (!DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create persisted object of a type that is not persistant");
+				}
+
+				if (!channel.IsPersisted)
+				{
+					throw new Exception("Unable to create persisted object in non-persisted channel");
+				}
+
+				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
+			}
+
+			return new ObjectCreateData(entityTypeId, instanceFlags, propertyBytes, distObj.Name);
+		}
+
+		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
+		{
+			channel.Name = channelName;
+
+			Type entityType = channel.GetType();
+			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
+			if (distAttr == null)
+			{
+				throw new Exception("Tried to create distributed channel type " + entityType.Name + " with no DistributedEntity attribute");
+			}
+
+			int entityTypeId = distAttr.EntityId;
+			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
+			{
+				throw new Exception("Tried to create distributed channel with invalid entity type id: " + entityTypeId);
+			}
+
+			channel.DistributedEntityType = entityTypeId;
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel);
+			byte instanceFlags = 0;
+
+			if (channel.IsClientAuthoritative)
+			{
+				instanceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a client authoritative channel that is also persisted");
+				}
+			}
+			if (channel.IsPersisted)
+			{
+				if (!DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create persisted channel of a type that is not persistant");
+				}
+
+				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
+			}
+
+			List<ObjectCreateData> objectCreateList = null;
+			if (channelObjects != null)
+			{
+				objectCreateList = new List<ObjectCreateData>();
+
+				foreach(IDistributedEntity distObj in channelObjects)
+				{
+					objectCreateList.Add(MakeObjectCreateData(distObj, channel));
+				}
+			}
+
+			Connection.CreateChannel(channelName, entityTypeId, instanceFlags, propertyBytes, replace, objectCreateList, onComplete);
 		}
 
 		public void SubscribeToChannel<T>(string channelName, T createIfNeeded, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
@@ -410,6 +486,8 @@ namespace Impunity.Connection
 			byte instaceFlags = 0;
 			ArraySegment<byte> propertyBytes = null;
 
+			List<ObjectCreateData> channelObjects = null;
+			
 			if (createIfNeeded != null)
 			{
 				createIfMising = true;
@@ -452,7 +530,7 @@ namespace Impunity.Connection
 				}
 			}
 
-			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, (ImpunityErrorResponse err, uint channelId) =>
+			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, channelObjects, (ImpunityErrorResponse err, uint channelId) =>
 			{
 				if (err != null)
 				{
@@ -780,8 +858,6 @@ namespace Impunity.Connection
 				throw new Exception("No channel with id " + channelId);
 			}
 
-
-
 			try
 			{
 				channel.OnObjectAdded(entity, newlyCreated);
@@ -929,6 +1005,8 @@ namespace Impunity.Connection
 
 		public void SendUpdates()
         {
+			PropertyEncodingWriter.BaseStream.Position = 0;
+			
 			foreach (IDistributedEntity entity in DirtyObjects)
             {
 				SendEntityUpdates(entity);
@@ -948,7 +1026,8 @@ namespace Impunity.Connection
 				return null;
 			}
 
-			PropertyEncodingWriter.BaseStream.Position = 0;
+			int startPos = (int)PropertyEncodingWriter.BaseStream.Position;
+
 			foreach (var fieldInfo in typeInfo.DistributedFields)
 			{
 				if (fieldInfo == null) continue;
@@ -963,9 +1042,9 @@ namespace Impunity.Connection
 			PropertyEncodingWriter.Write((byte)0);
 
 			entity.ClearDirty();
-			int bufferSize = (int)PropertyEncodingWriter.BaseStream.Position;
+			int bufferSize = (int)PropertyEncodingWriter.BaseStream.Position - startPos;
 
-			return new ArraySegment<byte>(PropertyEncodingBuffer, 0, bufferSize);
+			return new ArraySegment<byte>(PropertyEncodingBuffer, startPos, bufferSize);
 		}
 
 		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes)
@@ -1010,7 +1089,7 @@ namespace Impunity.Connection
         {
 			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity);
 
-			Connection.UpdateEntity(entity.DistributedEntityId, null, updateDatabuffer, null);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, null);
 
 		}
 	}

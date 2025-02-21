@@ -7,6 +7,7 @@ using UltraLiteDB;
 
 using Impunity.GameState;
 using Impunity.Connection;
+using UnityEditor.SearchService;
 
 namespace Impunity.Unity
 {
@@ -154,24 +155,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> TryToLockYield(this BaseGameConnection connection, string lockName, string key)
-		{
-			var action = new ImpunityYield<bool>();
-			connection.TryToLock(lockName, key, action.OnComplete);
-			return action;
-		}
-
 		public static ImpunityYield<LockWaitResult> WaitForLockYield(this BaseGameConnection connection, string lockName)
 		{
 			var action = new ImpunityYield<LockWaitResult>();
 			connection.WaitForLock(lockName, action.OnComplete);
-			return action;
-		}
-
-		public static ImpunityYield<LockWaitResult> WaitForLockYield(this BaseGameConnection connection, string lockName, string key)
-		{
-			var action = new ImpunityYield<LockWaitResult>();
-			connection.WaitForLock(lockName, key, action.OnComplete);
 			return action;
 		}
 
@@ -182,17 +169,17 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> UnlockYield(this BaseGameConnection connection, string lockName, string key)
+		public static ImpunityYield<bool> CreateChannelYield(this BaseGameConnection connection, string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.Unlock(lockName, key, action.OnComplete);
+			connection.CreateChannel(channelName, entityTypeId, instanceFlags, propBytes, replace, channelObjects, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<uint> SubcribeToChannelYield(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		public static ImpunityYield<uint> SubcribeToChannelYield(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, action.OnComplete);
+			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, channelObjects, action.OnComplete);
 			return action;
 		}
 
@@ -203,24 +190,24 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName)
+		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, action.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<bool> UpdateEntityYield(this BaseGameConnection connection, uint entityId, string key, ArraySegment<byte> updateData)
+		public static ImpunityYield<bool> UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.UpdateEntity(entityId, key, updateData, action.OnComplete);
+			connection.UpdateEntity(entityId, updateData, action.OnComplete);
 			return action;
 		}
 
-		public static ImpunityYield<bool> DeleteEntityYield(this BaseGameConnection connection, uint entityId, string key, BsonValue deleteData)
+		public static ImpunityYield<bool> DeleteEntityYield(this BaseGameConnection connection, uint entityId, BsonValue deleteData)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.DeleteEntity(entityId, key, deleteData, action.OnComplete);
+			connection.DeleteEntity(entityId, deleteData, action.OnComplete);
 			return action;
 		}
 
@@ -238,24 +225,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> TryToLockEntityYield(this BaseGameConnection connection, uint entityId, string key)
-		{
-			var action = new ImpunityYield<bool>();
-			connection.TryToLockEntity(entityId, key, action.OnComplete);
-			return action;
-		}
-
 		public static ImpunityYield<bool> UnlockEntityYield(this BaseGameConnection connection, uint entityId)
 		{
 			var action = new ImpunityYield<bool>();
 			connection.UnlockEntity(entityId, action.OnComplete);
-			return action;
-		}
-
-		public static ImpunityYield<bool> UnlockEntityYield(this BaseGameConnection connection, uint entityId, string key)
-		{
-			var action = new ImpunityYield<bool>();
-			connection.UnlockEntity(entityId, key, action.OnComplete);
 			return action;
 		}
 
@@ -309,10 +282,17 @@ namespace Impunity.Unity
 
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
+		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityYield<T>();
-			manager.CreateObject<T>(obj, channel, t.OnComplete);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
+			return t;
+		}
+
+		public static ImpunityYield<bool> CreateChannelYield<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects) where T : class, IDistributedChannel
+		{
+			var t = new ImpunityYield<bool>();
+			manager.CreateChannel<T>(channelName, channel, replace, channelObjects, t.OnComplete);
 			return t;
 		}
 
@@ -354,24 +334,10 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield<bool> TryLockYield(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityYield<bool>();
-			entity.TryLock(key, t.OnComplete);
-			return t;
-		}
-
 		public static ImpunityYield<LockWaitResult> WaitForLockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<LockWaitResult>();
 			entity.WaitForLock(t.OnComplete);
-			return t;
-		}
-
-		public static ImpunityYield<LockWaitResult> WaitForLockYield(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityYield<LockWaitResult>();
-			entity.WaitForLock(key, t.OnComplete);
 			return t;
 		}
 
@@ -382,12 +348,6 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield<bool> UnlockYield(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityYield<bool>();
-			entity.Unlock(key, t.OnComplete);
-			return t;
-		}
 	}
 
 	public static class IDistributedChannelYieldExtensions

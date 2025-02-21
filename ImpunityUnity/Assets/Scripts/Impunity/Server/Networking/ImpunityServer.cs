@@ -32,6 +32,7 @@ namespace Impunity.Networking
 		Semaphore SendLock;
 
 		public string ConnectionId { get { return "NetworkConnection_" + ClientContext.GetAddress(); } }
+		public string ConnectionKey { get; set; }
 		public GameStateReplicant ConnectionReplicant { get; set; }
 
 		public bool IsRemote { get { return true; } }
@@ -91,6 +92,12 @@ namespace Impunity.Networking
 				}
 
 				EstablishConnectionAction establish = (EstablishConnectionAction)action;
+				ConnectionKey = establish.ConnectionKey;
+				if (ConnectionKey == null)
+				{
+					ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
+				}
+				
 				GameServer = NetworkServer.GetGameStateServer(establish.GameId);
 				if (GameServer == null)
 				{

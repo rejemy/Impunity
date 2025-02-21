@@ -152,24 +152,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> TryToLockAsync(this BaseGameConnection connection, string lockName, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.TryToLock(lockName, key, t.OnComplete);
-			return t.Task;
-		}
-
 		public static Task<LockWaitResult> WaitForLockAsync(this BaseGameConnection connection, string lockName)
 		{
 			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
 			connection.WaitForLock(lockName, t.OnComplete);
-			return t.Task;
-		}
-
-		public static Task<LockWaitResult> WaitForLockAsync(this BaseGameConnection connection, string lockName, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
-			connection.WaitForLock(lockName, key, t.OnComplete);
 			return t.Task;
 		}
 
@@ -180,17 +166,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> UnlockAsync(this BaseGameConnection connection, string lockName, string key)
+		public static Task<bool> CreateChannelAsync(this BaseGameConnection connection, string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.Unlock(lockName, key, t.OnComplete);
+			connection.CreateChannel(channelName, entityTypeId, instanceFlags, propBytes, replace, channelObjects, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes)
+		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, t.OnComplete);
+			connection.SubcribeToChannel(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, channelObjects, t.OnComplete);
 			return t.Task;
 		}
 
@@ -201,24 +187,24 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, t.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, string key, ArraySegment<byte> updateData)
+		public static Task<bool> UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UpdateEntity(entityId, key, updateData, t.OnComplete);
+			connection.UpdateEntity(entityId, updateData, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, string key, BsonValue deleteData)
+		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, BsonValue deleteData)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.DeleteEntity(entityId, key, deleteData, t.OnComplete);
+			connection.DeleteEntity(entityId, deleteData, t.OnComplete);
 			return t.Task;
 		}
 
@@ -236,24 +222,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.TryToLockEntity(entityId, key, t.OnComplete);
-			return t.Task;
-		}
-
 		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			connection.UnlockEntity(entityId, t.OnComplete);
-			return t.Task;
-		}
-
-		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.UnlockEntity(entityId, key, t.OnComplete);
 			return t.Task;
 		}
 
@@ -308,10 +280,17 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel) where T : class, IDistributedEntity
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedEntity
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, t.OnComplete);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> CreateChannelAsync<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects) where T : class, IDistributedChannel
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			manager.CreateChannel<T>(channelName, channel, replace, channelObjects, t.OnComplete);
 			return t.Task;
 		}
 
@@ -353,24 +332,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> TryLockAsync(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.TryLock(key, t.OnComplete);
-			return t.Task;
-		}
-
 		public static Task<LockWaitResult> WaitForLockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
 			entity.WaitForLock(t.OnComplete);
-			return t.Task;
-		}
-
-		public static Task<LockWaitResult> WaitForLockAsync(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
-			entity.WaitForLock(key, t.OnComplete);
 			return t.Task;
 		}
 
@@ -381,12 +346,6 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> UnlockAsync(this IDistributedEntity entity, string key)
-		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.Unlock(key, t.OnComplete);
-			return t.Task;
-		}
 	}
 
 	public static class IDistributedChannelAsyncExtensions

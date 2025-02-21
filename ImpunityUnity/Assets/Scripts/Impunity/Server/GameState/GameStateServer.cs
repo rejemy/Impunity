@@ -10,6 +10,7 @@ namespace Impunity.GameState
 	public interface IServerSideConnectionProxy
     {
 		string ConnectionId { get; }
+		string ConnectionKey { get; }
 		bool IsRemote { get; }
 		GameStateReplicant ConnectionReplicant { get; set; }
 		bool SupportsUnguaranteed();

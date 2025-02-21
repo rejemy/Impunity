@@ -68,7 +68,10 @@ namespace Impunity
 
 		ActionInvalidParameter = 3000,
 		ActionBadRequest = 3001,
-		ActionCompoundFailure = 3002
+		ActionCompoundFailure = 3002,
+		ActionUniqueNameExists = 3003,
+		ActionNotFound = 3004,
+		ActionBlockedByLock = 3005,
 	}
 
 	public class GameMetadata

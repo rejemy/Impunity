@@ -125,7 +125,7 @@ public partial class TestPlayer : TestDistObj
 
 	public override void OnDeleted(BsonValue deleteData)
 	{
-		ImpunityLogger.LogInformation("Player deleted: " + deleteData.ToString());
+		ImpunityLogger.LogInformation("Player deleted: " + deleteData?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 }

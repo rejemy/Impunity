@@ -44,17 +44,12 @@ namespace Impunity.Unity
 
 		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.DeleteEntity(DistributedEntityId, null, deleteData, onComplete);
+			Manager.Connection.DeleteEntity(DistributedEntityId, deleteData, onComplete);
 		}
 
 		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
-		}
-
-		public void TryLock(string key, ImpunityCallback<bool> onComplete)
-		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, key, onComplete);
 		}
 
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
@@ -76,34 +71,11 @@ namespace Impunity.Unity
 			});
 		}
 
-		public void WaitForLock(string key, ImpunityCallback<LockWaitResult> onComplete)
-		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, key, (err, lockResult) =>
-			{
-				if (err != null)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Error);
-				}
-				else if(lockResult)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Locked);
-				}
-				else
-				{
-					LockWaiter += onComplete;
-				}
-			});
-		}
-
 		public void Unlock(ImpunityCallback<bool> onComplete)
 		{
 			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
 		}
 
-		public void Unlock(string key, ImpunityCallback<bool> onComplete)
-		{
-			Manager.Connection.UnlockEntity(DistributedEntityId, key, onComplete);
-		}
 
 		public virtual void OnUnlocked()
 		{

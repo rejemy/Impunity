@@ -18,6 +18,7 @@ namespace Impunity.Connection
 			: base(format, em)
 		{
 			State = gameState;
+			ConnectionKey = "local_key";
 			
 			int id = NextLocalConnectionId++;
 			ConnectionId = "LocalConnection_" + id;
