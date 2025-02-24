@@ -33,10 +33,10 @@ namespace Impunity.Connection
 			return CurrentValue;
         }
 
-		public bool Set(T newValue)
+		public bool Set(T newValue, bool force = false)
 		{
 			NewValue = newValue;
-			if (NewValue.Equals(CurrentValue))
+			if (!force && NewValue.Equals(CurrentValue))
 			{
 				return false;
 			}
@@ -154,11 +154,11 @@ namespace Impunity.Connection
 			return CurrentValue[index];
 		}
 
-		public bool Set(int index, T newValue)
+		public bool Set(int index, T newValue, bool force = false)
 		{
 			if (NewValue != null)
 			{
-				if (NewValue[index].Equals(newValue))
+				if (!force && NewValue[index].Equals(newValue))
 				{
 					return false;
 				}
