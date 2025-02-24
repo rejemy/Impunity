@@ -60,6 +60,7 @@ namespace Impunity.Connection
 
 		void OnEventTriggered(int eventType, BsonValue eventData);
 		void OnDeleted(BsonValue deleteData);
+		void OnLocked();
 		void OnUnlocked();
 		void OnUndistributed();
 	}
@@ -140,10 +141,13 @@ namespace Impunity.Connection
 		{
 			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
 		}
+		
+		public virtual void OnLocked()
+		{
+		}
 
 		public virtual void OnUnlocked()
 		{
-			IsLocked = false;
 			try
 			{
 				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
@@ -945,7 +949,8 @@ namespace Impunity.Connection
 				return;
 			}
 
-			entity.OnUnlocked();
+			entity.IsLocked = true;
+			entity.OnLocked();
 		}
 
 		public void HandleEntityUnlocked(uint entityId)
@@ -958,6 +963,7 @@ namespace Impunity.Connection
 			}
 
 			entity.IsLocked = false;
+			entity.OnUnlocked();
 		}
 
 		public void HandleEntityDelete(uint entityId, BsonValue deleteData)

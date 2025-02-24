@@ -76,10 +76,12 @@ namespace Impunity.Unity
 			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
 		}
 
+		public virtual void OnLocked()
+		{
+		}
 
 		public virtual void OnUnlocked()
 		{
-			IsLocked = false;
 			try
 			{
 				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
