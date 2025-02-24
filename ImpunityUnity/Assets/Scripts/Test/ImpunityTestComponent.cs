@@ -20,6 +20,7 @@ using Impunity.Unity;
 using Impunity.Networking;
 
 using UltraLiteDB;
+using UnityEngine.UIElements;
 
 public class ImpunityTestComponent : MonoBehaviour
 {
@@ -48,6 +49,8 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		Cons.Init();
 		Cons.Open();
+
+		BsonMapper.Global.IncludeFields = true;
 
 		ImpunityUnityLogger.Setup(ImpunityLogLevel.DEBUG);
 
@@ -634,9 +637,10 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("c2channel got new status");
 
-		WaitingForCount = 4;
+		WaitingForCount = 6;
 
 		c1player1.Position.Set(new Vector3(5.0f, 5.0f, 5.0f));
+		c1player1.BigData.Set(new BsonDataRecord {Thingy1 = "stuff", Thingy2 = 10, Thingy3 = 0.1f});
 		c2player2.Direction.Set(new Vector3(1.0f, 1.0f, 1.0f));
 
 		if (!await WaitForCount("Didn't get direction and/or position change callback"))

@@ -20,9 +20,8 @@ namespace Impunity.Connection
 			Mapper = mapper;
 			if (Mapper == null)
             {
-				Mapper = new BsonMapper();
+				Mapper = BsonMapper.Global;
             }
-
 		}
 
 		public void InsertDocument(DTYPE doc, ImpunityCallback<BsonValue> onComplete)

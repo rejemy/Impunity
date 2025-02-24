@@ -26,6 +26,18 @@ public static class TestEntityTypes
 	public const int EMPTY_OBJ = 10;
 }
 
+public class BsonDataRecord
+{
+	[BsonField("T1")]
+	public string Thingy1;
+
+	[BsonField("T2")]
+	public int Thingy2;
+
+	[BsonField("T3")]
+	public float Thingy3;
+}
+
 [DistributedEntity(TestEntityTypes.EMPTY_OBJ)]
 public partial class TestEmptyObj : DistributedEntityBase
 {
@@ -67,7 +79,8 @@ public partial class TestPlayer : TestDistObj
 		TESTBOOL = 10,
 		DIRECTION = 11,
 		FLAGS = 12,
-		QUESTS = 13
+		QUESTS = 13,
+		BIGDATA = 14
 	}
 
 	public static IDistributedEntity TestPlayerFactory() { return new TestPlayer(); }
@@ -81,6 +94,7 @@ public partial class TestPlayer : TestDistObj
 		Direction.OnChanged += OnDirectionChanged;
 		Flags.OnChanged += OnFlagsChanged;
 		Quests.OnChanged += OnQuestsChanged;
+		BigData.OnChanged += OnBigDataChanged;
 	}
 
 
@@ -115,6 +129,15 @@ public partial class TestPlayer : TestDistObj
 	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
 	{
 		ImpunityLogger.LogInformation("Got quests change on TestPlayer, key " + key + " from " + oldQuest + " to " + newQuest);
+	}
+
+	[Distributed((byte)DistributedPropIds.BIGDATA)]
+	public DistributedValue<BsonDataRecord, BsonSerializer<BsonDataRecord>> BigData;
+
+	private void OnBigDataChanged(BsonDataRecord oldData, BsonDataRecord newData)
+	{
+		ImpunityLogger.LogInformation("Got bigdata change on TestPlayer");
+		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
 	public override void OnEventTriggered(int eventType, BsonValue eventData)

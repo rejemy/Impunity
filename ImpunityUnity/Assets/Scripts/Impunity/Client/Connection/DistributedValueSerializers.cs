@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using UltraLiteDB;
 
 namespace Impunity.Connection
 {
@@ -334,5 +335,79 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
+	}
+
+	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T> where T : class
+	{
+		public void WriteTo(T value, BinaryWriter w)
+		{
+			if (value == null)
+			{
+				w.Write((byte)0);
+			}
+			else
+			{
+				byte[] bytes = BsonSerializer.Serialize(BsonMapper.Global.SerializeObject(value));
+				if (bytes.Length >= 255)
+				{
+					throw new Exception("Value to large to serialize as a small value");
+				}
+				w.Write((byte)bytes.Length);
+				w.Write(bytes);
+			}
+		}
+
+		public T ReadFrom(BinaryReader r)
+		{
+			byte length = r.ReadByte();
+			if (length > 0)
+			{
+				byte[] bytes = r.ReadBytes(length);
+				return BsonMapper.Global.ToObject<T>(BsonSerializer.Deserialize(bytes));
+			}
+			else
+			{
+				return null;
+			}
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+	}
+
+	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T> where T : class
+	{
+		public void WriteTo(T value, BinaryWriter w)
+		{
+			if (value == null)
+			{
+				w.Write((ushort)0);
+			}
+			else
+			{
+				byte[] bytes = BsonSerializer.Serialize(BsonMapper.Global.SerializeObject(value));
+				if (bytes.Length >= ushort.MaxValue)
+				{
+					throw new Exception("Value to large to serialize");
+				}
+				w.Write((ushort)bytes.Length);
+				w.Write(bytes);
+			}
+		}
+
+		public T ReadFrom(BinaryReader r)
+		{
+			ushort length = r.ReadUInt16();
+			if (length > 0)
+			{
+				byte[] bytes = r.ReadBytes(length);
+				return BsonMapper.Global.ToObject<T>(BsonSerializer.Deserialize(bytes));
+			}
+			else
+			{
+				return null;
+			}
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
 	}
 }
