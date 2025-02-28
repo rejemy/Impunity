@@ -27,6 +27,11 @@ public class ConnectionService
 		NetworkServer.Start();
 	}
 
+	public int NumConnections()
+	{
+		return NetworkServer.NumConnections;
+	}
+
 	public void Stop()
 	{
 		NetworkServer.Dispose();

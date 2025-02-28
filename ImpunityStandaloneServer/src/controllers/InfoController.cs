@@ -62,8 +62,13 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 		var worldDatas = worldService.GetWorldDatas();
 		result.Worlds = new List<StandaloneServerWorldInfo>(worldDatas.Count);
 
+		
+
 		foreach(var worldData in worldDatas)
 		{
+			int currPlayers = tcpService.NumConnections();
+			currPlayers = currPlayers <= worldData.MaxPlayers ? currPlayers : worldData.MaxPlayers;
+
 			var gameMetadata = worldData.GameState.GetGameMetadata();
 
             var info = new StandaloneServerWorldInfo
@@ -71,7 +76,7 @@ public class InfoController(InfoService infoService, WorldService worldService, 
                 WorldId = worldData.ID,
                 WorldName = worldData.Name,
 				PasswordProtected = worldData.Password != null,
-                CurrentPlayers = 0,
+                CurrentPlayers = currPlayers,
                 MaxPlayers = worldData.MaxPlayers,
 				GameSummary = worldData.GetGameSummaryAsJson(),
 				DataFormatChecksum = gameMetadata.DataFormatChecksum
@@ -91,6 +96,9 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 			return NotFound();
 		}
 
+		int currPlayers = tcpService.NumConnections();
+		currPlayers = currPlayers <= worldData.MaxPlayers ? currPlayers : worldData.MaxPlayers;
+
 		var gameMetadata = worldData.GameState.GetGameMetadata();
 
 		var info = new StandaloneServerWorldInfo
@@ -98,7 +106,7 @@ public class InfoController(InfoService infoService, WorldService worldService, 
                 WorldId = worldData.ID,
                 WorldName = worldData.Name,
 				PasswordProtected = worldData.Password != null,
-                CurrentPlayers = 0,
+                CurrentPlayers = currPlayers,
                 MaxPlayers = worldData.MaxPlayers,
 				GameSummary = worldData.GetGameSummaryAsJson(),
 				DataFormatChecksum = gameMetadata.DataFormatChecksum

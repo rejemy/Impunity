@@ -230,6 +230,8 @@ namespace Impunity.Networking
 
 		public IPEndPoint TCPEndpoint { get; private set; }
 
+		public int NumConnections { get {return Clients.Count; }}
+
 		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer>{gameState}, options)
 		{
 		}
@@ -379,7 +381,6 @@ namespace Impunity.Networking
 				return;
 			}
 		}
-
 
 		// called on game server thread
 		internal void QueueNetworkAction(GameStateActionBase action)

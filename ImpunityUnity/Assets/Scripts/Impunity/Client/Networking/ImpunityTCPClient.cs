@@ -11,6 +11,9 @@ namespace Impunity.Networking
 		public ImpunityCallback OnNetworkError { get; set; }
 		public Action<int> OnDisconnectedByServer { get; set; }
 
+		private string ServerHost;
+		private int ServerPort;
+
 		private IPEndPoint ServerEndpoint;
 		private ImpunityOptions Options;
 
@@ -27,9 +30,29 @@ namespace Impunity.Networking
 			return client;
 		}
 
+		public static IImpunityClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
+		{
+			ImpunityTCPClient client = new ImpunityTCPClient(hostname, port, options);
+			return client;
+		}
+
 		private ImpunityTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{
 			ServerEndpoint = serverEndpoint;
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+			Options = options;
+
+			ClientSocket = new TcpClient();
+		}
+
+		private ImpunityTCPClient(string hostname, int port, ImpunityOptions options = null)
+		{
+			ServerHost = hostname;
+			ServerPort = port;
+
 			if (options == null)
 			{
 				options = new ImpunityOptions();
@@ -72,7 +95,14 @@ namespace Impunity.Networking
 
 			try
 			{
-				ClientSocket.Connect(ServerEndpoint);
+				if (ServerHost != null)
+				{
+					ClientSocket.Connect(ServerHost, ServerPort);
+				}
+				else
+				{
+					ClientSocket.Connect(ServerEndpoint);
+				}
 
 				SocketStream = ClientSocket.GetStream();
 

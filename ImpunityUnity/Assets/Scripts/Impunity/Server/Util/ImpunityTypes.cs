@@ -26,6 +26,7 @@ namespace Impunity
 		public string DBPassword = null;
 		public bool RemoteUpgradeAllowed = false;
 		public bool LANDiscoverable = false;
+		public int MaxConnections = 8;
 		public ushort ServerPort = ImpunityConstants.DefaultServerPort;
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
 		public string GameTypeCode = "IMP";
@@ -191,6 +192,8 @@ namespace Impunity
     {
 		void OnGameMetadataChanged(GameStateServer game);
 		void OnGameSummaryChanged(GameStateServer game);
+
+
     }
 
 	public class GameStateFormat
@@ -369,9 +372,18 @@ namespace Impunity
 
 	public class ServerInfo
 	{
+		public string WorldName;
+
+		// Only one of Hostname/Port or Address will be set
+		public string Hostname;
+		public int Port;
 		public IPEndPoint Address;
+		
 		public string GameId;
 		public bool PasswordProtected;
+
+		public int CurrentPlayers { get; set; }
+		public int MaxPlayers { get; set; }
 
 		public int GameStateFormatVersion;
 		public string GameStateFormatChecksum;

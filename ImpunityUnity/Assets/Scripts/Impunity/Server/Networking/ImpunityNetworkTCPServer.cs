@@ -9,6 +9,7 @@ using System.Text;
 
 using UltraLiteDB;
 using Impunity.GameState;
+using System.Linq;
 
 namespace Impunity.Networking
 {
@@ -299,6 +300,14 @@ namespace Impunity.Networking
 			PerGameData[gameId] = tcpGameData;
 		}
 
+		public void UpdateAnnouncePacket(string gameId)
+		{
+			PerGameTCPServerData tcpGameData = PerGameData[gameId].Clone();
+
+			MakeAnnouncePacket(tcpGameData);
+			PerGameData[gameId] = tcpGameData;
+		}
+
 		private void MakeAnnouncePacket(PerGameTCPServerData tcpGameData)
 		{
 			BsonDocument body = new BsonDocument();
@@ -307,6 +316,8 @@ namespace Impunity.Networking
 			body["cs"] = tcpGameData.GameStateFormatChecksum;
 			body["s"] = tcpGameData.CurrGameSummary;
 			body["p"] = tcpGameData.PasswordProtected;
+			body["mc"] = Options.MaxConnections;
+			body["cc"] = Clients.Count <= Options.MaxConnections ? Clients.Count : Options.MaxConnections;
 
 			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array,
 				ImpunityConstants.ServerAnnouncePacketHeader + tcpGameData.GameTypeCode + ":", body);
@@ -348,11 +359,9 @@ namespace Impunity.Networking
 					TcpClient client = TCPSocket.AcceptTcpClient();
 
 					ImpunityTCPServerClientContext context = new ImpunityTCPServerClientContext(this, client);
-					Clients[context.RemoteEndpoint] = context;
+					
 					ImpunityLogger.LogInformation("Client connected");
-
-					context.Listen();
-
+			
 					try
 					{
 						OnClientConnected?.Invoke(context);
@@ -360,6 +369,15 @@ namespace Impunity.Networking
 					catch (Exception e)
 					{
 						ImpunityLogger.LogError("Exception in TCP client connected callback", e);
+						context.Disconnect();
+					}
+
+					Clients[context.RemoteEndpoint] = context;
+					context.Listen();
+
+					foreach(string gameId in PerGameData.Keys.ToList())
+					{
+						UpdateAnnouncePacket(gameId);
 					}
 				}
 
@@ -391,6 +409,11 @@ namespace Impunity.Networking
 			{
 				ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + context.RemoteEndpoint.ToString());
 				return;
+			}
+
+			foreach(string gameId in PerGameData.Keys.ToList())
+			{
+				UpdateAnnouncePacket(gameId);
 			}
 
 		}

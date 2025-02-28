@@ -148,8 +148,9 @@ namespace Impunity.Networking
 			info.GameStateFormatVersion = doc["fv"];
 			info.GameStateFormatChecksum = doc["cs"];
 			info.GameSummary = doc["s"].AsDocument;
+			info.CurrentPlayers = doc["cc"].AsInt32;
+			info.MaxPlayers = doc["mc"].AsInt32;
 			
-
 			if (ServersFound.TryAdd(from, info))
 			{
 				NotificationQueue.Enqueue(info);
