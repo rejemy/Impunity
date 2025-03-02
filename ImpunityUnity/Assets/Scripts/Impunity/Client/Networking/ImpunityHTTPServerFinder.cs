@@ -4,22 +4,24 @@ using System.Collections.Generic;
 using UnityEngine.Networking;
 
 using UltraLiteDB;
+using UnityEngine;
+using System.Collections;
 
 namespace Impunity.Networking
 {
 
 	public static class ImpunityHTTPServerFinder
 	{
-		public static void GetServerWorlds(ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
+		public static void GetServerWorlds(MonoBehaviour runner, ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
 		{
 			if (hostname.IndexOf(':') < 0)
 			{
-				hostname += ":"+ImpunityConstants.DefaultServerPort;
+				hostname += ":"+ImpunityConstants.DefaultServerHttpPort;
 			}
+			string url = "http://"+hostname+"/worlds";
 
-			UnityWebRequest request = UnityWebRequest.Get("http://"+hostname+"/worlds");
-			var asyncOp = request.SendWebRequest();
-			asyncOp.completed += _ =>
+			UnityWebRequest request = UnityWebRequest.Get(url);
+			runner.StartCoroutine(SendRequest(request, () =>
 			{
 				if(request.error != null)
 				{
@@ -90,12 +92,18 @@ namespace Impunity.Networking
 					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, e.Message), null);
 					return;
 				}
-			};
+			}));
 		}
 
-		public static void GetServerWorldStatus(ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
+		static IEnumerator SendRequest(UnityWebRequest request, Action onCompleted)
+    	{
+			yield return request.SendWebRequest();
+			onCompleted();
+		}
+
+		public static void GetServerWorldStatus(MonoBehaviour runner, ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
 		{
-			GetServerWorlds(options, hostname, (err, worlds) =>
+			GetServerWorlds(runner, options, hostname, (err, worlds) =>
 			{
 				if (err != null)
 				{

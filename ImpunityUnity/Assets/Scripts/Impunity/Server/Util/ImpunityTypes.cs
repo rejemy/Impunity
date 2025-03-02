@@ -13,6 +13,7 @@ namespace Impunity
 	public static class ImpunityConstants
 	{
 		public const string ImpunityVersion = "1";
+		public const ushort DefaultServerHttpPort = 29653;
 		public const ushort DefaultServerPort = 29654;
 		public const ushort DefaultClientPort = 29655;
 		public const int MinMessageSize = 4096;
