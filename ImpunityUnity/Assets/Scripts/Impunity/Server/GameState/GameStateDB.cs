@@ -123,6 +123,15 @@ namespace Impunity.GameState
 			}
 		}
 
+		public static void WriteGameSummary(string path, BsonDocument summary)
+		{
+			Directory.CreateDirectory(path);
+			string summaryFile = Path.Combine(path, GameSummaryFile);
+			byte[] summaryBytes = BsonSerializer.Serialize(summary);
+
+			File.WriteAllBytes(summaryFile, summaryBytes);
+		}
+
 
 		public static BsonDocument LoadGameSummary(string path)
 		{

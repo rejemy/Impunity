@@ -157,6 +157,11 @@ namespace Impunity.GameState
 			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
 		}
 
+		public static void WriteGameSummary(string path, BsonDocument summary)
+		{
+			GameStateDB.WriteGameSummary(path, summary);
+		}
+
 		// Called by connection threads
 		internal void AddListener(IGameStateListener listener)
 		{

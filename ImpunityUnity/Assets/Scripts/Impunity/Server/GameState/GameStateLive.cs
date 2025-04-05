@@ -671,6 +671,11 @@ namespace Impunity.GameState
 
 		public override void SendEvent(int eventType, BsonValue eventData)
 		{
+			if(Channel == null)
+			{
+				return;
+			}
+
 			EntityEventMessageAction eventMessage = new EntityEventMessageAction();
 			eventMessage.EntityId = Id;
 			eventMessage.EventType = eventType;
@@ -683,10 +688,13 @@ namespace Impunity.GameState
 		{
 			if (base.Lock(lockedBy, waitForUnlock))
 			{
-				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
-				lockedMessage.EntityId = Id;
+				if (Channel != null)
+				{
+					EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
+					lockedMessage.EntityId = Id;
 
-				Channel.SendToListeners(lockedMessage, lockedBy);
+					Channel.SendToListeners(lockedMessage, lockedBy);
+				}
 
 				return true;
 			}
@@ -697,22 +705,29 @@ namespace Impunity.GameState
 		{
 			base.Unlock(unlockedBy);
 
-			EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
-			unlockedMessage.EntityId = Id;
+			if (Channel != null)
+			{
+				EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
+				unlockedMessage.EntityId = Id;
 
-			Channel.SendToListeners(unlockedMessage, unlockedBy);
+				Channel.SendToListeners(unlockedMessage, unlockedBy);
+			}
 		}
 
 		public override void Destroy(BsonValue deleteData)
 		{
 			base.Destroy(deleteData);
 
-			EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
-			deleteMessage.EntityId = Id;
-			deleteMessage.DeleteData = deleteData;
-			Channel.RemoveObject(this);
+			if (Channel != null)
+			{
+				EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
+				deleteMessage.EntityId = Id;
+				deleteMessage.DeleteData = deleteData;
+				Channel.RemoveObject(this);
 
-			Channel.SendToListeners(deleteMessage, null);
+				Channel.SendToListeners(deleteMessage, null);
+			}
+
 			Channel = null;
 		}
 	}
