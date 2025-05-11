@@ -54,6 +54,22 @@ namespace Impunity.Connection
 			return true;
 		}
 
+		public bool SetLocalOnly(T newValue, bool force = false)
+		{
+			NewValue = newValue;
+			if (!force && NewValue.Equals(CurrentValue))
+			{
+				return false;
+			}
+
+			T oldValue = CurrentValue;
+			CurrentValue = NewValue;
+
+			InvokeOnChanged(oldValue, CurrentValue);
+			
+			return true;
+		}
+
 		public readonly void WriteChangesTo(BinaryWriter w)
 		{
 			Serializer.WriteTo(NewValue, w);
