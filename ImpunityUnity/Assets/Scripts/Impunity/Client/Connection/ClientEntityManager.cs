@@ -58,6 +58,7 @@ namespace Impunity.Connection
 		void WaitForLock(ImpunityCallback<LockWaitResult> onComplete);
 		void Unlock(ImpunityCallback<bool> onComplete);
 
+		void OnFullyInitialized();
 		void OnEventTriggered(int eventType, BsonValue eventData);
 		void OnDeleted(BsonValue deleteData);
 		void OnLocked();
@@ -159,6 +160,7 @@ namespace Impunity.Connection
 			LockWaiter = null;
 		}
 
+		public virtual void OnFullyInitialized() { }
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
 		public virtual void OnDeleted(BsonValue deleteData) { }
 		public virtual void OnUndistributed() { }
@@ -828,9 +830,18 @@ namespace Impunity.Connection
 			channel.Name = channelName;
 			channel.IsLocked = isLocked;
 			channel.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
+			RegisterEntity(channel, channelId);
+
 			SetPropertyBytes(channel, propData);
 
-			RegisterEntity(channel, channelId);
+			try
+			{
+				channel.OnFullyInitialized();
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
+			}			
 		}
 
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
@@ -851,7 +862,6 @@ namespace Impunity.Connection
 			entity.Name = uniqueName;
 			entity.IsLocked = isLocked;
 			entity.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
-			SetPropertyBytes(entity, propData);
 
 			RegisterEntity(entity, objectId);
 
@@ -864,6 +874,15 @@ namespace Impunity.Connection
 
 			try
 			{
+				OnDistributedObjectCreated?.Invoke(entity, channel, newlyCreated);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Excpetion in OnDistributedObjectCreated handler:", e);
+			}
+
+			try
+			{
 				channel.OnObjectAdded(entity, newlyCreated);
 			}
 			catch (Exception e)
@@ -871,14 +890,16 @@ namespace Impunity.Connection
 				ImpunityLogger.LogError("Excpetion in channel OnObjectAdded:", e);
 			}
 
+			SetPropertyBytes(entity, propData);
+
 			try
 			{
-				OnDistributedObjectCreated?.Invoke(entity, channel, newlyCreated);
+				entity.OnFullyInitialized();
 			}
 			catch (Exception e)
-            {
-				ImpunityLogger.LogError("Excpetion in OnDistributedObjectCreated handler:", e);
-            }
+			{
+				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
+			}			
 		}
 
 		private void RegisterEntity(IDistributedEntity entity, uint entityId)
