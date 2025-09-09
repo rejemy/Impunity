@@ -23,6 +23,7 @@ namespace Impunity.Connection
 	{
 		public ClientEntityManager EntityManager { get; private set; }
 		protected GameStateFormatData LocalFormat;
+		protected long ServerMillisOffset;
 
 		protected ConcurrentQueue<GameStateActionBase> CompletedActions;
 
@@ -34,10 +35,13 @@ namespace Impunity.Connection
 
 		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
 
+		private long ClockSyncRateMs = 60 * 1000;
+		private long LastClockSync = 0;
+
 		public BaseGameConnection(GameStateFormat format, ClientEntityManager em)
-        {
+		{
 			if (em == null)
-            {
+			{
 				em = new ClientEntityManager();
 			}
 			EntityManager = em;
@@ -45,7 +49,7 @@ namespace Impunity.Connection
 			GameStateEntityTypeDef[] entityTypes = EntityManager.RegisterEntityTypes(format.EntityTypes);
 
 			ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
-			
+
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
@@ -53,10 +57,43 @@ namespace Impunity.Connection
 
 		protected void EstablishConnection(string gameId, string password, GameStateFormatData format, ImpunityCallback onComplete)
 		{
+			void onEstablished(ImpunityErrorResponse err)
+			{
+				if (err != null)
+				{
+					onComplete?.Invoke(err);
+					return;
+				}
+
+				SyncServerTime(onComplete);
+			}
+
 			string hashedPassword = ImpunityUtil.HashPassword(password);
-			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onComplete));
+			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onEstablished));
 		}
 
+		private void SyncServerTime(ImpunityCallback onComplete = null)
+		{
+			LastClockSync = DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds();
+
+			void gotTime(ImpunityErrorResponse err, long serverTimeMillis)
+			{
+				if (err == null)
+				{
+					long clientTimeMillis = DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds();
+					ServerMillisOffset = serverTimeMillis - clientTimeMillis;
+				}
+
+				onComplete?.Invoke(err);
+			}
+
+			DoAction(new GetTimeAction(gotTime));
+		}
+
+		public long GetServerTime()
+		{
+			return DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds() + ServerMillisOffset;
+		}
 
 		public void Update()
 		{
@@ -67,19 +104,26 @@ namespace Impunity.Connection
 				try
 				{
 					if (action is ServerActionBase)
-                    {
+					{
 						((ServerActionBase)action).DoAction(this);
-                    }
+					}
 					else
-                    {
+					{
 						action.InvokeOnCompleteCallback();
 					}
-					
+
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in action results callback", e);
 				}
+			}
+
+			long currTimeMillis = DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds();
+
+			if (currTimeMillis - LastClockSync >= ClockSyncRateMs)
+			{
+				SyncServerTime();
 			}
 
 		}

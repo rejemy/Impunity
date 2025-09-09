@@ -491,7 +491,12 @@ namespace Impunity.GameState
 
 		public void QueueAction(GameStateActionBase action)
         {
-			if (action.IsDBOperation())
+			if (action.IsImmediate())
+			{
+				action.Run(this);
+				SendActionResults(action);
+			}
+			else if (action.IsDBOperation())
 			{
 				DBActionQueue.Add(action);
 			}

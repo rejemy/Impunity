@@ -41,6 +41,7 @@ namespace Impunity.GameState
 		public abstract ushort GetActionType();
 		public abstract bool HasCallback();
 		public abstract bool IsDBOperation();
+		public virtual bool IsImmediate() { return false; }
 
 		public virtual BsonDocument SerializeRequest()
 		{

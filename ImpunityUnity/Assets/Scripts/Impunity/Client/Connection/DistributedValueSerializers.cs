@@ -304,7 +304,7 @@ namespace Impunity.Connection
 			return new DateTimeOffset(ticks, offset);
 		}
 
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTimeOffset; }
 	}
 
 	public readonly struct TimeSpanSerializer : IDistributableValueSerializer<TimeSpan>

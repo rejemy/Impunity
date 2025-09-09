@@ -293,8 +293,9 @@ namespace Impunity
 		Blob = 15,
 
 		DateTime = 16,
-		TimeSpan = 17,
-		Guid = 18,
+		DateTimeOffset = 17,
+		TimeSpan = 18,
+		Guid = 19,
 
 		CustomSmall = 100,
 		CustomSmallNullable = 101,

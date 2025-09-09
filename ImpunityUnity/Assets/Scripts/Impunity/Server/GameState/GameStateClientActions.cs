@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 
 using UltraLiteDB;
+using UnityEngine;
 
 
 namespace Impunity.GameState
@@ -11,6 +12,7 @@ namespace Impunity.GameState
 		ESTABLISH_CONNECTION = 100,
 		SET_SUMMARY = 101,
 		GET_SUMMARY = 102,
+		GET_TIME = 103,
 
 		COMPOUND_DATABASE = 200,
 		INSERT_DOCUMENT = 201,
@@ -68,6 +70,8 @@ namespace Impunity.GameState
 					return typeof(SetGameSummaryAction);
 				case ClientActionType.GET_SUMMARY:
 					return typeof(GetGameSummaryAction);
+				case ClientActionType.GET_TIME:
+					return typeof(GetTimeAction);
 
 				case ClientActionType.INSERT_DOCUMENT:
 					return typeof(InsertDocumentAction);
@@ -212,6 +216,25 @@ namespace Impunity.GameState
 		protected override void DoAction(GameStateServer game)
 		{
 			Result = game.GetGameSummary();
+		}
+	}
+
+	public class GetTimeAction : ClientActionResultBase<long>
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.GET_TIME; }
+		public override bool IsDBOperation() { return false; }
+		public override bool IsImmediate() { return true; }
+
+		public GetTimeAction() { }
+
+		public GetTimeAction(ImpunityCallback<long> onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds();
 		}
 	}
 

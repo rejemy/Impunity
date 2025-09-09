@@ -523,13 +523,61 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsDateTime; }
 	}
 
+	public struct DDateTimeOffset : IStandardDistributableValueType, IEquatable<DDateTimeOffset>
+	{
+		private DateTimeOffset Value;
+
+		public DDateTimeOffset(DateTimeOffset v)
+		{
+			Value = v;
+		}
+
+		public void WriteTo(BinaryWriter w)
+		{
+			w.Write(Value.Ticks);
+			w.Write((short)Value.Offset.Minutes);
+		}
+
+		public void ReadFrom(BinaryReader r)
+		{
+			long ticks = r.ReadInt64();
+			TimeSpan offset = TimeSpan.FromMinutes(r.ReadInt16());
+			Value = new DateTimeOffset(ticks, offset);
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
+
+		public static implicit operator DateTimeOffset(DDateTimeOffset d) => d.Value;
+		public static implicit operator DDateTimeOffset(DateTimeOffset d) => new DDateTimeOffset(d);
+		public bool Equals(DDateTimeOffset v) => Value == v.Value;
+
+		public BsonValue AsBsonValue()
+		{
+			BsonDocument doc = new BsonDocument();
+			doc["t"] = Value.Ticks;
+			doc["o"] = Value.Offset.Minutes;
+			return doc;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonDocument doc = value.AsDocument;
+			long ticks = doc.GetInt64OrDefault("t", 0);
+			TimeSpan offset = TimeSpan.FromMinutes(doc.GetInt32OrDefault("o", 0));
+			Value = new DateTimeOffset(ticks, offset);
+		}
+	}
+
 	public struct DTimeSpan : IStandardDistributableValueType, IEquatable<DTimeSpan>
 	{
 		private TimeSpan Value;
 
+		public long LastChangedMillis { get; set; }
+
 		public DTimeSpan(TimeSpan v)
 		{
 			Value = v;
+			LastChangedMillis = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)

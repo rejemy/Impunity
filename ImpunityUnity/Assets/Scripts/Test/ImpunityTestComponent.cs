@@ -114,6 +114,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		AsyncTests().ContinueWith((t)=>
 		{
 			TestsDone = true;
+			ImpunityLogger.LogInformation("Tests complete");
 		});
 	}
 

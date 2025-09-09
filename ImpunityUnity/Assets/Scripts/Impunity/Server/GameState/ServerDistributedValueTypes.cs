@@ -198,7 +198,7 @@ namespace Impunity.GameState
 					T newValue = Value[index];
 				}
 			}
-			else if(updateType == (byte)DistributedCollectionUpdateType.Set)
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
 				int arraySize = r.ReadUInt16();
 				if (Value == null || Value.Length != arraySize)
@@ -612,6 +612,8 @@ namespace Impunity.GameState
 					return typeof(DBlob);
 				case GameStateEntityPropertyValueType.DateTime:
 					return typeof(DDateTime);
+				case GameStateEntityPropertyValueType.DateTimeOffset:
+					return typeof(DDateTimeOffset);
 				case GameStateEntityPropertyValueType.TimeSpan:
 					return typeof(DTimeSpan);
 				case GameStateEntityPropertyValueType.Guid:
