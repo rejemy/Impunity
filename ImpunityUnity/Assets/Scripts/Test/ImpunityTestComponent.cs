@@ -20,7 +20,7 @@ using Impunity.Unity;
 using Impunity.Networking;
 
 using UltraLiteDB;
-using UnityEngine.UIElements;
+
 
 public class ImpunityTestComponent : MonoBehaviour
 {
@@ -592,14 +592,26 @@ public class ImpunityTestComponent : MonoBehaviour
 		c1.EntityManager.OnDistributedObjectCreated = Connection1ObjectCreated;
 		c2.EntityManager.OnDistributedObjectCreated = Connection2ObjectCreated;
 
-		TestZone c1channel = new TestZone();
-		c1channel = await c1.EntityManager.SubscribeToChannelAsync("testZone", c1channel);
+		TestZone c1channelInitializer = new TestZone();
+		c1channelInitializer.Chat.Init(10);
+		c1channelInitializer.Chat.Add("hey dudes");
+		c1channelInitializer.Grid.Replace(new int[] { 1,2 });
+
+		TestZone c1channel = await c1.EntityManager.SubscribeToChannelAsync("testZone", c1channelInitializer);
 		ImpunityLogger.LogInformation("C1 Made channel " + c1channel.DistributedEntityId);
 
 		TestPlayer c1player1 = new TestPlayer();
 		c1player1.Name = "player1";
+		c1player1.MovementState.Set(new CustomMovementStateData
+		{
+			StartPos = new Vector3(1, 2, 3),
+			Velocity = new Vector3(1,0,-1)
+		});
+
 		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel, false);
 		ImpunityLogger.LogInformation("C1 Made player: " + c1player1.DistributedEntityId);
+		
+		await Task.Delay(100);
 
 		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone", null);
 		ImpunityLogger.LogInformation("C2 subscribed to channel " + c2channel.DistributedEntityId);

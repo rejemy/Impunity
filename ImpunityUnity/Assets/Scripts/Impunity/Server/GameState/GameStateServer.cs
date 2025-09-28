@@ -157,6 +157,11 @@ namespace Impunity.GameState
 			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
 		}
 
+		public static long GetServerTime()
+		{
+			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		}
+
 		public static void WriteGameSummary(string path, BsonDocument summary)
 		{
 			GameStateDB.WriteGameSummary(path, summary);
@@ -493,6 +498,7 @@ namespace Impunity.GameState
         {
 			if (action.IsImmediate())
 			{
+				
 				action.Run(this);
 				SendActionResults(action);
 			}

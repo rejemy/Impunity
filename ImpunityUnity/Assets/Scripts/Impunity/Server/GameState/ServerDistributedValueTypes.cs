@@ -12,9 +12,12 @@ namespace Impunity.GameState
 	{
 		private ArraySegment<byte> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DSmallCustom(ArraySegment<byte> v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -50,9 +53,12 @@ namespace Impunity.GameState
 	{
 		private ArraySegment<byte> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DSmallNullableCustom(ArraySegment<byte> v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -97,9 +103,12 @@ namespace Impunity.GameState
 	{
 		private ArraySegment<byte> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DCustom(ArraySegment<byte> v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -135,9 +144,12 @@ namespace Impunity.GameState
 	{
 		private ArraySegment<byte> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DNullableCustom(ArraySegment<byte> v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -183,6 +195,8 @@ namespace Impunity.GameState
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
 		private T[] Value;
+
+		public long LastModifiedTime { get; set; }
 
 		public void ReadFrom(BinaryReader r)
 		{
@@ -272,6 +286,8 @@ namespace Impunity.GameState
 
 		private int Capacity;
 		private Queue<T> Value;
+
+		public long LastModifiedTime { get; set; }
 
 		private void AddValue(T value)
 		{
@@ -381,6 +397,8 @@ namespace Impunity.GameState
 
 		private Dictionary<int,T> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public void ReadFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -482,6 +500,8 @@ namespace Impunity.GameState
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
 		private Dictionary<string, T> Value;
+
+		public long LastModifiedTime { get; set; }
 
 		public void ReadFrom(BinaryReader r)
 		{

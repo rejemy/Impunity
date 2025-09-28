@@ -131,6 +131,25 @@ namespace Impunity.Connection
 			}
 		}
 
+		public override void Update()
+		{
+			var tooOld = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(this.Options.ActionTimeoutMillis);
+
+			while (AwaitingReceive.TryPeek(out var pendingAction))
+			{
+				if (pendingAction.SentAt >= tooOld)
+				{
+					break;
+				}
+
+				AwaitingReceive.TryDequeue(out var _);
+
+				pendingAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + pendingAction.GetType().Name + " took too long to complete");
+				CompletedActions.Enqueue(pendingAction);
+			}
+
+			base.Update();
+		}
 
 		private void SendMessage(GameStateActionBase action)
 		{
@@ -142,7 +161,7 @@ namespace Impunity.Connection
 				flags |= ImpunityMessageFlags.NO_REPLY;
 			}
 			else
-            {
+			{
 				AwaitingReceive.Enqueue(action);
 			}
 
@@ -221,6 +240,7 @@ namespace Impunity.Connection
 
 		public override void DoAction(GameStateActionBase action)
         {
+			action.SentAt = DateTimeOffset.UtcNow;
 			PendingSend.Add(action);
 
 		}

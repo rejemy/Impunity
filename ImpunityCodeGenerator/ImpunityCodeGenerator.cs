@@ -47,8 +47,9 @@ namespace SourceGenerator
 		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new []
 			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor", "Assembly-CSharp-Editor" });
 
-		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new []
-			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedIntDictionary", "DistributedStringDictionary" });
+		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new[]
+			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedIntDictionary", "DistributedStringDictionary",
+			  "DistributedTemporalValue", "DistributedTemporalArray", "DistributedTemporalQueue", "DistributedTemporalIntDictionary", "DistributedTemporalStringDictionary" });
 
 
 		public static StringBuilder Output = new StringBuilder();
@@ -209,26 +210,7 @@ namespace SourceGenerator
 
 			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
-				if(propInfo.PropertyFieldType == "DistributedValue")
-				{
-					GenerateDistributedValueCode(propInfo);
-				}
-				else if(propInfo.PropertyFieldType == "DistributedArray")
-				{
-					GenerateDistributedArrayCode(propInfo);
-				}
-				else if(propInfo.PropertyFieldType == "DistributedQueue")
-				{
-					GenerateDistributedQueueCode(propInfo);
-				}
-				else if(propInfo.PropertyFieldType == "DistributedIntDictionary")
-				{
-					GenerateDistributedDictionaryCode(propInfo, "int");
-				}
-				else if(propInfo.PropertyFieldType == "DistributedStringDictionary")
-				{
-					GenerateDistributedDictionaryCode(propInfo, "string");
-				}
+				GenerateDistributedFieldCode(propInfo);
 			}
 
 			Output.AppendLine("\t}\n");
@@ -236,68 +218,35 @@ namespace SourceGenerator
 
 		private void GenerateClassFieldInitializer(DistributedClassInfo classInfo)
 		{
-			Output.AppendLine("		public override void InitializeDistributedFields()\n		{");
-			Output.AppendLine("		    base.InitializeDistributedFields();");
+			Output.AppendLine("\t\tpublic override void InitializeDistributedFields()\n\t\t{");
+			Output.AppendLine("\t\tbase.InitializeDistributedFields();");
 
 			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
-				Output.AppendLine($"            {propInfo.PropertyName}.Initialize(this, {propInfo.PropertyId});");
+				Output.AppendLine($"\t\t\t{propInfo.PropertyName}._imp_Initialize(this, {propInfo.PropertyId});");
 			}
 
-			Output.AppendLine("		}\n");
+			Output.AppendLine("\t\t}\n");
 		}
 
-		private void GenerateDistributedValueCode(DistributedPropertyInfo propInfo)
+		private void GenerateDistributedFieldCode(DistributedPropertyInfo propInfo)
 		{
-			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
+			Output.AppendLine($@"		private void _imp_WriteChangesWrapper_{propInfo.PropertyName}(BinaryWriter w)
 		{{
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
-			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
+			Output.AppendLine($@"		private void _imp_ReadInitialWrapper_{propInfo.PropertyName}(BinaryReader r)
+		{{
+			{propInfo.PropertyName}.ReadInitialFrom(r);
+		}}");
+
+			Output.AppendLine($@"		private void _imp_ReadChangeWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
 			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
 		}
 
-		private void GenerateDistributedArrayCode(DistributedPropertyInfo propInfo)
-		{
-			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
-		{{
-			{propInfo.PropertyName}.WriteChangesTo(w);
-		}}");
-
-			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
-		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r);
-		}}");
-		}
-
-		private void GenerateDistributedQueueCode(DistributedPropertyInfo propInfo)
-		{
-			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
-		{{
-			{propInfo.PropertyName}.WriteChangesTo(w);
-		}}");
-
-			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
-		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r);
-		}}");
-		}
-
-		private void GenerateDistributedDictionaryCode(DistributedPropertyInfo propInfo, string keyType)
-		{
-			Output.AppendLine($@"		private void _imp_WriteWrapper_{propInfo.PropertyName}(BinaryWriter w)
-		{{
-			{propInfo.PropertyName}.WriteChangesTo(w);
-		}}");
-
-			Output.AppendLine($@"		private void _imp_ReadWrapper_{propInfo.PropertyName}(BinaryReader r)
-		{{
-			{propInfo.PropertyName}.ReadChangesFrom(r);
-		}}");
-		}
 
 		private void ExamineSyntaxTree(GeneratorExecutionContext context, SyntaxTree fileTree)
 		{

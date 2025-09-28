@@ -1,42 +1,53 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 
 namespace Impunity.Connection
 {
 	
 	public interface IDistributedField
 	{
+		void WriteChangesTo(BinaryWriter w);
+		void ReadInitialFrom(BinaryReader r);
+		void ReadChangesFrom(BinaryReader r);
+
 		GameStateEntityFieldType FieldType { get; }
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
-	public struct DistributedValue<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
+	public interface IDistributedTemporalField : IDistributedField
 	{
-		public event Action<T,T> OnChanged;
+		long LastModifiedTime { get; set; }
+	}
+
+	public struct DistributedValue<T, S> : IDistributedField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	{
+		public event Action<T, T> OnChanged;
 		private static readonly S Serializer = default;
-		
+
 		IDistributedEntity Entity;
 		byte FieldId;
 
 		T CurrentValue;
 		T NewValue;
 
-		public void Initialize(IDistributedEntity entity, byte fieldId)
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
 			FieldId = fieldId;
 		}
 
 		public readonly T Get()
-        {
+		{
 			return CurrentValue;
-        }
+		}
 
 		public bool Set(T newValue, bool force = false)
 		{
 			NewValue = newValue;
-			if (!force && NewValue.Equals(CurrentValue))
+			if (!force && Equals(NewValue, CurrentValue))
 			{
 				return false;
 			}
@@ -57,7 +68,7 @@ namespace Impunity.Connection
 		public bool SetLocalOnly(T newValue, bool force = false)
 		{
 			NewValue = newValue;
-			if (!force && NewValue.Equals(CurrentValue))
+			if (!force && Equals(NewValue, CurrentValue))
 			{
 				return false;
 			}
@@ -66,7 +77,7 @@ namespace Impunity.Connection
 			CurrentValue = NewValue;
 
 			InvokeOnChanged(oldValue, CurrentValue);
-			
+
 			return true;
 		}
 
@@ -75,6 +86,10 @@ namespace Impunity.Connection
 			Serializer.WriteTo(NewValue, w);
 		}
 
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
+		}
 
 		public void ReadChangesFrom(BinaryReader r)
 		{
@@ -90,22 +105,173 @@ namespace Impunity.Connection
 			{
 				OnChanged?.Invoke(oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in onChange method", e);
 			}
 		}
 
+		public static bool Equals(T obj1, T obj2)
+		{
+			if (obj1 == null)
+			{
+				return obj2 == null;
+			}
+			return obj1.Equals(obj2);
+		}
+
+		public bool Equals(T other)
+		{
+			return Equals(CurrentValue, other);
+		}
+
 		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
 		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator T(DistributedValue<T,S> d) => d.CurrentValue;
+		public static implicit operator T(DistributedValue<T, S> d) => d.CurrentValue;
+	}
+	
+	public struct DistributedTemporalValue<T,S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	{
+		public event Action<T,T,TimeSpan> OnInitialized;
+		public event Action<T,T> OnChanged;
+
+		private static readonly S Serializer = default;
+		
+		IDistributedEntity Entity;
+		byte FieldId;
+
+		T CurrentValue;
+		T NewValue;
+
+		public long LastModifiedTime { get; set; }
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldId = fieldId;
+		}
+
+		public readonly T Get()
+        {
+			return CurrentValue;
+        }
+
+		public bool Set(T newValue, bool force = false)
+		{
+			NewValue = newValue;
+			if (!force && Equals(NewValue, CurrentValue))
+			{
+				return false;
+			}
+
+			Entity.SetDirty(FieldId);
+
+			if (Entity.IsClientAuthoritative)
+			{
+				LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+
+				T oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
+				InvokeOnChanged(oldValue, CurrentValue);
+			}
+
+			return true;
+		}
+
+		public bool SetLocalOnly(T newValue, bool force = false)
+		{
+			NewValue = newValue;
+			if (!force && Equals(NewValue, CurrentValue))
+			{
+				return false;
+			}
+
+			LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+
+			T oldValue = CurrentValue;
+			CurrentValue = NewValue;
+
+			InvokeOnChanged(oldValue, CurrentValue);
+			
+			return true;
+		}
+
+		public readonly void WriteChangesTo(BinaryWriter w)
+		{
+			Serializer.WriteTo(NewValue, w);
+		}
+
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			long ageMilliseconds = r.ReadUInt32();
+			LastModifiedTime = Entity.Manager.Connection.GetServerTime() - ageMilliseconds;
+
+			T oldValue = CurrentValue;
+			CurrentValue = Serializer.ReadFrom(r);
+
+			InvokeOnInitialized(oldValue, CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
+		}
+
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+
+			T oldValue = CurrentValue;
+			CurrentValue = Serializer.ReadFrom(r);
+
+			InvokeOnChanged(oldValue, CurrentValue);
+		}
+
+		private readonly void InvokeOnInitialized(T oldValue, T newValue, TimeSpan age)
+		{
+			try
+			{
+				OnInitialized?.Invoke(oldValue, newValue, age);
+			}
+			catch(Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnInitialized method", e);
+			}
+		}
+
+		private readonly void InvokeOnChanged(T oldValue, T newValue)
+		{
+			try
+			{
+				OnChanged?.Invoke(oldValue, newValue);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnChanged method", e);
+			}
+		}
+
+		public static bool Equals(T obj1, T obj2)
+		{
+			if (obj1 == null)
+			{
+				return obj2 == null;
+			}
+			return obj1.Equals(obj2);
+		}
+
+		public bool Equals(T other)
+		{
+			return Equals(CurrentValue, other);
+		}
+
+		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
+		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
+
+		public static implicit operator T(DistributedTemporalValue<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedArray<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
+	public struct DistributedArray<T, S> : IDistributedField, IReadOnlyList<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
-		public event Action<T[],T[]> OnReplaced;
-		public event Action<int,T,T> OnChanged;
+		public event Action<T[], T[]> OnReplaced;
+		public event Action<int, T, T> OnChanged;
 		private static readonly S Serializer = default;
 
 		T[] CurrentValue;
@@ -115,7 +281,13 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		byte FieldId;
 
-		public void Initialize(IDistributedEntity entity, byte fieldId)
+		public readonly int Length => CurrentValue.Length;
+		public readonly int Count => CurrentValue.Length;
+
+		public readonly T this[int index] => Get(index);
+
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
 			FieldId = fieldId;
@@ -163,7 +335,7 @@ namespace Impunity.Connection
 
 		public readonly T Get(int index)
 		{
-			if(Changes.TryGetValue(index, out T value))
+			if (Changes.TryGetValue(index, out T value))
 			{
 				return value;
 			}
@@ -224,7 +396,7 @@ namespace Impunity.Connection
 				// Resend entire array
 				w.Write((byte)DistributedCollectionUpdateType.Set);
 				w.Write((ushort)NewValue.Length);
-				for(int index = 0; index < NewValue.Length; index++)
+				for (int index = 0; index < NewValue.Length; index++)
 				{
 					Serializer.WriteTo(NewValue[index], w);
 				}
@@ -246,6 +418,11 @@ namespace Impunity.Connection
 			{
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
+		}
+
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
 		}
 
 
@@ -291,7 +468,7 @@ namespace Impunity.Connection
 			{
 				OnChanged?.Invoke(index, oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
 			}
@@ -303,19 +480,37 @@ namespace Impunity.Connection
 			{
 				OnReplaced?.Invoke(oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
 		}
 
+		public IEnumerator<T> GetEnumerator()
+		{
+			throw new NotImplementedException();
+		}
+
+		IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
+		public bool Equals(T other)
+		{
+			if (CurrentValue == null)
+			{
+				return other == null;
+			}
+			return CurrentValue.Equals(other);
+		}
+
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Array; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
-
-		public static implicit operator T[](DistributedArray<T,S> d) => d.CurrentValue;
+		public static implicit operator T[](DistributedArray<T, S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedQueue<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
+	public struct DistributedQueue<T,S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		public event Action<T> OnChanged;
 		public event Action<Queue<T>, Queue<T>> OnReplaced;
@@ -332,7 +527,9 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		byte FieldId;
 
-		public void Initialize(IDistributedEntity entity, byte fieldId)
+		public readonly int Count { get => CurrentValue.Count; }
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
 			FieldId = fieldId;
@@ -362,7 +559,7 @@ namespace Impunity.Connection
 			NewCapacity = capacity;
 			NewValue = new Queue<T>();
 			Changes = new Queue<T>();
-
+			
 			foreach (T val in initialValues)
 			{
 				AddToNew(val);
@@ -470,6 +667,11 @@ namespace Impunity.Connection
 			}
 		}
 
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
+		}
+
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -484,7 +686,7 @@ namespace Impunity.Connection
 					InvokeOnChanged(val);
 				}
 			}
-			else if(updateType == (byte)DistributedCollectionUpdateType.Set)
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
 				NewValue = new Queue<T>();
 				Changes = new Queue<T>();
@@ -534,13 +736,32 @@ namespace Impunity.Connection
 			}
 		}
 
+		public bool Equals(T other)
+		{
+			if (CurrentValue == null)
+			{
+				return other == null;
+			}
+			return CurrentValue.Equals(other);
+		}
+
+		public readonly IEnumerator<T> GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
+		readonly IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Queue; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
 		public static implicit operator Queue<T>(DistributedQueue<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedIntDictionary<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
+	public struct DistributedIntDictionary<T,S> : IDistributedField, IReadOnlyDictionary<int,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		public event Action<int,T,T> OnChanged;
 		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
@@ -555,7 +776,14 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		byte FieldId;
 
-		public void Initialize(IDistributedEntity entity, byte fieldId)
+		public readonly int Count { get => CurrentValue.Count; }
+		public readonly IEnumerable<int> Keys => CurrentValue.Keys;
+
+		public readonly IEnumerable<T> Values => CurrentValue.Values;
+
+		public readonly T this[int key] => Get(key);
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
 			FieldId = fieldId;
@@ -625,11 +853,11 @@ namespace Impunity.Connection
 
 		}
 
-		public T Get(int key)
+		public readonly T Get(int key)
 		{
 			if (CurrentValue == null)
 			{
-				return default(T);
+				return default;
 			}
 			return CurrentValue.GetValueOrDefault(key);
 		}
@@ -665,6 +893,11 @@ namespace Impunity.Connection
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
 		}
+		
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
+		}
 
 		public void ReadChangesFrom(BinaryReader r)
 		{
@@ -676,7 +909,7 @@ namespace Impunity.Connection
 				{
 					int key = r.ReadInt32();
 					T val = Serializer.ReadFrom(r);
-					
+
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
 
@@ -730,13 +963,41 @@ namespace Impunity.Connection
 			}
 		}
 
+		public readonly bool ContainsKey(int key)
+		{
+			return CurrentValue.ContainsKey(key);
+		}
+
+		public readonly bool TryGetValue(int key, out T value)
+		{
+			return CurrentValue.TryGetValue(key, out value);
+		}
+
+		public readonly IEnumerator<KeyValuePair<int, T>> GetEnumerator()
+		{
+			return CurrentValue.GetEnumerator();
+		}
+
+		readonly IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
+		public bool Equals(T other)
+		{
+			if (CurrentValue == null)
+			{
+				return other == null;
+			}
+			return CurrentValue.Equals(other);
+		}
+
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.IntDictionary; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
-
 		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T,S> d) => d.CurrentValue;
 	}
 
-	public struct DistributedStringDictionary<T,S> : IDistributedField where S : IDistributableValueSerializer<T>
+	public struct DistributedStringDictionary<T,S> : IDistributedField, IReadOnlyDictionary<string,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		public event Action<string,T,T> OnChanged;
 		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
@@ -751,7 +1012,14 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		byte FieldId;
 
-		public void Initialize(IDistributedEntity entity, byte fieldId)
+		public readonly int Count { get => CurrentValue.Count; }
+		public readonly IEnumerable<string> Keys => CurrentValue.Keys;
+
+		public readonly IEnumerable<T> Values => CurrentValue.Values;
+
+		public readonly T this[string key] => Get(key);
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
 			FieldId = fieldId;
@@ -821,7 +1089,7 @@ namespace Impunity.Connection
 
 		}
 
-		public T Get(string key)
+		public readonly T Get(string key)
 		{
 			if (CurrentValue == null)
 			{
@@ -860,6 +1128,11 @@ namespace Impunity.Connection
 			{
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
+		}
+
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
 		}
 
 		public void ReadChangesFrom(BinaryReader r)
@@ -924,6 +1197,35 @@ namespace Impunity.Connection
 			{
 				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
+		}
+
+		public readonly bool ContainsKey(string key)
+		{
+			return CurrentValue.ContainsKey(key);
+		}
+
+		public readonly bool TryGetValue(string key, out T value)
+		{
+			return CurrentValue.TryGetValue(key, out value);
+		}
+
+		public readonly IEnumerator<KeyValuePair<string, T>> GetEnumerator()
+		{
+			return CurrentValue.GetEnumerator();
+		}
+
+		readonly IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
+		public bool Equals(T other)
+		{
+			if (CurrentValue == null)
+			{
+				return other == null;
+			}
+			return CurrentValue.Equals(other);
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.StringDictionary; }

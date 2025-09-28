@@ -1,5 +1,6 @@
 
 
+using System;
 using Impunity.GameState;
 
 namespace Impunity.Connection
@@ -76,7 +77,8 @@ namespace Impunity.Connection
         {
 			action.Origin = this;
 			action.ResultsExpected = action.HasCallback();
-
+			action.SentAt = DateTimeOffset.UtcNow;
+			
 			State.QueueAction(action);
         }
 

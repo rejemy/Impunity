@@ -38,6 +38,9 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public bool AwaitingTask { get; set; } = false;
 
+		[BsonIgnore]
+		public DateTimeOffset SentAt { get; set; }
+
 		public abstract ushort GetActionType();
 		public abstract bool HasCallback();
 		public abstract bool IsDBOperation();

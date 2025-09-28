@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 
 using UltraLiteDB;
-using UnityEngine;
-
 
 namespace Impunity.GameState
 {
@@ -234,7 +232,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = DateTimeOffset.UnixEpoch.ToUnixTimeMilliseconds();
+			Result = GameStateServer.GetServerTime();
 		}
 	}
 

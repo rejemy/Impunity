@@ -242,7 +242,9 @@ namespace Impunity.GameState
 			List<LiveEntityPersistedPropertyData> persistedPropsSoFar = null;
 			var propLookup = TypeInfo.PropertyIndexLookup;
 
-			while(true)
+			long currTime = GameStateServer.GetServerTime();
+
+			while (true)
 			{
 				int propId = propReader.ReadByte();
 				if (propId == 0)
@@ -250,14 +252,14 @@ namespace Impunity.GameState
 					break;
 				}
 
-				if(propId >= Properties.Length)
+				if (propId >= Properties.Length)
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
 				}
 
-				var propertyInstance = Properties[propId];
-				propertyInstance.ReadFrom(propReader);
-
+				Properties[propId].ReadFrom(propReader);
+				Properties[propId].LastModifiedTime = currTime;
+				
 				var propInfo = propLookup[propId];
 				if (propInfo.PersistedAs != null)
 				{
@@ -266,7 +268,7 @@ namespace Impunity.GameState
 						persistedPropsSoFar = new List<LiveEntityPersistedPropertyData>();
 					}
 
-					persistedPropsSoFar.Add(new LiveEntityPersistedPropertyData(propInfo.PersistedAs, propertyInstance.AsBsonValue()));
+					persistedPropsSoFar.Add(new LiveEntityPersistedPropertyData(propInfo.PersistedAs, Properties[propId].AsBsonValue()));
 				}
 			}
 
@@ -304,9 +306,14 @@ namespace Impunity.GameState
 			BinaryWriter writer = LiveData.GetTempBufferWriter();
 			writer.BaseStream.Position = 0;
 
-			foreach(var propInfo in TypeInfo.PackedProperties)
+			long currServerTime = GameStateServer.GetServerTime();
+			foreach (var propInfo in TypeInfo.PackedProperties)
 			{
 				writer.Write((byte)propInfo.Index);
+				if (propInfo.IsTemporal)
+				{
+					writer.Write((uint)(currServerTime - Properties[propInfo.Index].LastModifiedTime));
+				}
 				Properties[propInfo.Index].WriteTo(writer);
 			}
 
@@ -316,8 +323,13 @@ namespace Impunity.GameState
 			writer.BaseStream.Position = 0;
 
 			byte[] propBytes = new byte[length];
-			writer.BaseStream.Read(propBytes, 0, length);
+			int bytesRead = writer.BaseStream.Read(propBytes, 0, length);
 			writer.BaseStream.Position = 0;
+
+			if (bytesRead != length)
+			{
+				throw new Exception("Incomplete read of prop bytes from write's base stream");
+			}
 
 			return propBytes;
 		}

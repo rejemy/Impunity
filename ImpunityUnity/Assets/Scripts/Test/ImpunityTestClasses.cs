@@ -7,6 +7,9 @@ using Impunity.Connection;
 
 using UltraLiteDB;
 using Impunity.Unity;
+using System.IO;
+using System;
+using System.Collections;
 
 
 public static class TestCollectionTypes
@@ -26,7 +29,7 @@ public static class TestEntityTypes
 	public const int EMPTY_OBJ = 10;
 }
 
-public class BsonDataRecord
+public class BsonDataRecord : IEquatable<BsonDataRecord>
 {
 	[BsonField("T1")]
 	public string Thingy1;
@@ -36,6 +39,71 @@ public class BsonDataRecord
 
 	[BsonField("T3")]
 	public float Thingy3;
+
+	public bool Equals(BsonDataRecord other)
+	{
+		if (other == null)
+		{
+			return false;
+		}
+		return Thingy1 == other.Thingy1 && Thingy2 == other.Thingy2 && Thingy3 == other.Thingy3;
+	}
+}
+
+public class CustomMovementStateData : IEquatable<CustomMovementStateData>
+{
+	public Vector3 StartPos;
+	public Vector3 Velocity;
+
+	public bool Equals(CustomMovementStateData other)
+	{
+		if (other == null)
+		{
+			return false;
+		}
+		return StartPos.Equals(other.StartPos) && Velocity.Equals(other.Velocity);
+	}
+}
+
+public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<CustomMovementStateData>
+{
+	public void WriteTo(CustomMovementStateData value, BinaryWriter w)
+	{
+		if (value == null)
+		{
+			w.Write(false);
+			return;
+		}
+
+		w.Write(true);
+		w.Write(value.StartPos.x);
+		w.Write(value.StartPos.y);
+		w.Write(value.StartPos.z);
+		w.Write(value.Velocity.x);
+		w.Write(value.Velocity.y);
+		w.Write(value.Velocity.z);
+	}
+
+	public CustomMovementStateData ReadFrom(BinaryReader r)
+	{
+		if (r.ReadBoolean() == false)
+		{
+			return null;
+		}
+
+		CustomMovementStateData value = new CustomMovementStateData();
+
+		value.StartPos.x = r.ReadSingle();
+		value.StartPos.y = r.ReadSingle();
+		value.StartPos.z = r.ReadSingle();
+		value.Velocity.x = r.ReadSingle();
+		value.Velocity.y = r.ReadSingle();
+		value.Velocity.z = r.ReadSingle();
+
+		return value;
+	}
+
+	public GameStateEntityPropertyValueType ValueType { get { return GameStateEntityPropertyValueType.CustomSmallNullable; }}
 }
 
 [DistributedEntity(TestEntityTypes.EMPTY_OBJ)]
@@ -72,7 +140,7 @@ public partial class TestDistObj : DistributedEntityBase
 
 
 [DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "TestPlayerFactory")]
-public partial class TestPlayer : TestDistObj
+public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 {
 	enum DistributedPropIds : byte
 	{
@@ -80,7 +148,8 @@ public partial class TestPlayer : TestDistObj
 		DIRECTION = 11,
 		FLAGS = 12,
 		QUESTS = 13,
-		BIGDATA = 14
+		BIGDATA = 14,
+		MOVEMENT = 15
 	}
 
 	public static IDistributedEntity TestPlayerFactory() { return new TestPlayer(); }
@@ -89,12 +158,13 @@ public partial class TestPlayer : TestDistObj
 	{
 		InitializeDistributedFields();
 		base.InitializeDistributedFields();
-		
+
 		TestBool.OnChanged += OnTestBoolChanged;
 		Direction.OnChanged += OnDirectionChanged;
 		Flags.OnChanged += OnFlagsChanged;
 		Quests.OnChanged += OnQuestsChanged;
 		BigData.OnChanged += OnBigDataChanged;
+		MovementState.OnInitialized += OnMovementStateInitialized;
 	}
 
 
@@ -134,10 +204,19 @@ public partial class TestPlayer : TestDistObj
 	[Distributed((byte)DistributedPropIds.BIGDATA)]
 	public DistributedValue<BsonDataRecord, BsonSerializer<BsonDataRecord>> BigData;
 
+	[Distributed((byte)DistributedPropIds.MOVEMENT)]
+	public DistributedTemporalValue<CustomMovementStateData, CustomMovementStateDataSerializer> MovementState;
+
 	private void OnBigDataChanged(BsonDataRecord oldData, BsonDataRecord newData)
 	{
 		ImpunityLogger.LogInformation("Got bigdata change on TestPlayer");
 		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	private void OnMovementStateInitialized(CustomMovementStateData oldData, CustomMovementStateData newData, TimeSpan age)
+	{
+		ImpunityLogger.LogInformation("Got MovementState initialized on TestPlayer with age " + age.ToString());
+		//ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
 	public override void OnEventTriggered(int eventType, BsonValue eventData)
@@ -151,11 +230,20 @@ public partial class TestPlayer : TestDistObj
 		ImpunityLogger.LogInformation("Player deleted: " + deleteData?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
+
+	public bool Equals(TestPlayer other)
+	{
+		return TestBool.Equals(other.TestBool)
+			&& Direction.Equals(other.Direction)
+			&& Flags.Equals(other.Flags)
+			&& BigData.Equals(other.BigData)
+			&& MovementState.Equals(other.MovementState);
+	}
 }
 
 
 [DistributedEntity(TestEntityTypes.ZONE)]
-public partial class TestZone : DistributedChannelBase
+public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 {
 	enum DistributedPropIds : byte
 	{
@@ -210,6 +298,13 @@ public partial class TestZone : DistributedChannelBase
 	{
 		ImpunityLogger.LogInformation("Got chat replaced on TestZone");
 		ImpunityTestComponent.WaitingForCount -= 1;
+	}
+
+	public bool Equals(TestZone other)
+	{
+		return Status.Equals(other.Status)
+				&& Scalar.Equals(other.Scalar)
+				&& Grid.Equals(other.Grid);
 	}
 }
 

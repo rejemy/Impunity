@@ -19,6 +19,7 @@ namespace Impunity.GameState
 	{
 		BsonValue AsBsonValue();
 		void FromBsonValue(BsonValue value);
+		long LastModifiedTime { get; set; }
 	}
 
 	// Single values
@@ -27,9 +28,12 @@ namespace Impunity.GameState
 	{
 		private bool Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DBool(bool v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -56,9 +60,12 @@ namespace Impunity.GameState
 	{
 		private sbyte Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DInt8(sbyte v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -85,9 +92,12 @@ namespace Impunity.GameState
 	{
 		private byte Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DUInt8(byte v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -114,9 +124,12 @@ namespace Impunity.GameState
 	{
 		private short Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DInt16(short v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -143,9 +156,12 @@ namespace Impunity.GameState
 	{
 		private ushort Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DUInt16(ushort v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -172,9 +188,12 @@ namespace Impunity.GameState
 	{
 		private int Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DInt32(int v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -201,9 +220,12 @@ namespace Impunity.GameState
 	{
 		private uint Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DUInt32(uint v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -230,9 +252,12 @@ namespace Impunity.GameState
 	{
 		private long Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DInt64(long v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -259,9 +284,12 @@ namespace Impunity.GameState
 	{
 		private ulong Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DUInt64(ulong v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -288,9 +316,12 @@ namespace Impunity.GameState
 	{
 		private float Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DFloat(float v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -317,9 +348,12 @@ namespace Impunity.GameState
 	{
 		private double Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DDouble(double v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -346,9 +380,12 @@ namespace Impunity.GameState
 	{
 		private decimal Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DDecimal(decimal v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -375,9 +412,12 @@ namespace Impunity.GameState
 	{
 		private char Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DChar(char v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -404,9 +444,12 @@ namespace Impunity.GameState
 	{
 		private string Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DString(string v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -451,9 +494,12 @@ namespace Impunity.GameState
 	{
 		private ArraySegment<byte> Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DBlob(ArraySegment<byte> v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -498,9 +544,12 @@ namespace Impunity.GameState
 	{
 		private DateTime Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DDateTime(DateTime v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -527,9 +576,12 @@ namespace Impunity.GameState
 	{
 		private DateTimeOffset Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DDateTimeOffset(DateTimeOffset v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -572,12 +624,12 @@ namespace Impunity.GameState
 	{
 		private TimeSpan Value;
 
-		public long LastChangedMillis { get; set; }
+		public long LastModifiedTime { get; set; }
 
 		public DTimeSpan(TimeSpan v)
 		{
 			Value = v;
-			LastChangedMillis = 0;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)
@@ -604,9 +656,12 @@ namespace Impunity.GameState
 	{
 		private Guid Value;
 
+		public long LastModifiedTime { get; set; }
+
 		public DGuid(Guid v)
 		{
 			Value = v;
+			LastModifiedTime = 0;
 		}
 
 		public void WriteTo(BinaryWriter w)

@@ -31,6 +31,7 @@ namespace Impunity
 		public ushort ServerPort = ImpunityConstants.DefaultServerPort;
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
 		public string GameTypeCode = "IMP";
+		public int ActionTimeoutMillis = 5 * 1000;
 	}
 
 	[Flags]
@@ -63,6 +64,7 @@ namespace Impunity
 
 		ClientUnableToConnectError = 1000,
 		ClientConnectionBrokenError = 1001,
+		TimeoutError = 1002,
 
 		ServerUnavailable = 2000, // New connections to the server are temporarily paused
 		ServerPasswordIncorrect = 2001, // Attempt to connect to password protected server with the wrong password
@@ -320,7 +322,7 @@ namespace Impunity
 	}
 
 	public class GameStateEntityPropertyDef
-    {
+	{
 		[BsonField("id")]
 		public int Index;
 
@@ -335,6 +337,9 @@ namespace Impunity
 
 		[BsonField("pa")]
 		public string PersistedAs;
+
+		[BsonField("tm")]
+		public bool IsTemporal;
 	}
 
 	public class GameStateEntityTypeDef

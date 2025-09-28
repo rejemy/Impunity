@@ -202,9 +202,11 @@ namespace Impunity.Connection
 		public byte FieldId;
 		public string FieldName;
 		public string PersistedAs;
+		public bool IsTemporal;
 		public GameStateEntityFieldType FieldType;
 		public GameStateEntityPropertyValueType FieldValueType;
 		public MethodInfo WriteMethod;
+		public MethodInfo InitMethod;
 		public MethodInfo UpdateMethod;
 	}
 
@@ -653,6 +655,9 @@ namespace Impunity.Connection
 					throw new Exception("Distributed fields must implement IDistributedField");
 				}
 
+				bool isTemporalValue = fieldType.GetInterface(nameof(IDistributedTemporalField)) != null;
+
+
 				// Create a throw-away instance so we can get its type info
 				IDistributedField tempFieldValue = (IDistributedField)Activator.CreateInstance(fieldType);
 
@@ -662,13 +667,15 @@ namespace Impunity.Connection
 				dfield.FieldType = tempFieldValue.FieldType;
 				dfield.FieldValueType = tempFieldValue.ValueType;
 				dfield.PersistedAs = fieldAttr.PersistAs?.Trim();
+				dfield.IsTemporal = isTemporalValue;
+
 				if (dfield.PersistedAs != null)
 				{
 					if (dfield.PersistedAs.Length == 0)
 					{
 						throw new Exception("Can't use empty string as PersistedAs value");
 					}
-					else if(dfield.PersistedAs.StartsWith("_"))
+					else if (dfield.PersistedAs.StartsWith("_"))
 					{
 						throw new Exception("Can't start PersistedAs with underscore");
 					}
@@ -682,14 +689,21 @@ namespace Impunity.Connection
 				}
 
 
-				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
 				{
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
 				dfield.WriteMethod = writeMethod;
 
-				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "_imp_ReadWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo initMethod = GetTypeMethodInherited(entityType, "_imp_ReadInitialWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (initMethod == null)
+				{
+					throw new Exception("Cant find init method for property " + fieldInfo.Name + " on type " + entityType.Name);
+				}
+				dfield.InitMethod = initMethod;
+
+				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "_imp_ReadChangeWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (updateMethod == null)
 				{
 					throw new Exception("Cant find update method for property " + fieldInfo.Name + " on type " + entityType.Name);
@@ -722,6 +736,7 @@ namespace Impunity.Connection
 				propDef.FieldType = (byte)dfield.FieldType;
 				propDef.PropValueType = (byte)dfield.FieldValueType;
 				propDef.PersistedAs = dfield.PersistedAs;
+				propDef.IsTemporal = dfield.IsTemporal;
 
 				entityData.Properties[p++] = propDef;
 			}
@@ -832,7 +847,7 @@ namespace Impunity.Connection
 			channel.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 			RegisterEntity(channel, channelId);
 
-			SetPropertyBytes(channel, propData);
+			SetPropertyBytes(channel, propData, true);
 
 			try
 			{
@@ -890,7 +905,7 @@ namespace Impunity.Connection
 				ImpunityLogger.LogError("Excpetion in channel OnObjectAdded:", e);
 			}
 
-			SetPropertyBytes(entity, propData);
+			SetPropertyBytes(entity, propData, true);
 
 			try
 			{
@@ -939,7 +954,7 @@ namespace Impunity.Connection
 				return;
             }
 
-			SetPropertyBytes(entity, updateData);
+			SetPropertyBytes(entity, updateData, false);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
@@ -1074,7 +1089,7 @@ namespace Impunity.Connection
 			return new ArraySegment<byte>(PropertyEncodingBuffer, startPos, bufferSize);
 		}
 
-		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes)
+		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead)
         {
 			if (propertyBytes == null || propertyBytes.Count == 0)
             {
@@ -1107,7 +1122,14 @@ namespace Impunity.Connection
 					throw new Exception("Invalid property id: " + propId);
 				}
 
-				fieldInfo.UpdateMethod.Invoke(entity, UpdateMethodArgs);
+				if (initialRead)
+				{
+					fieldInfo.InitMethod.Invoke(entity, UpdateMethodArgs);
+				}
+				else
+				{
+					fieldInfo.UpdateMethod.Invoke(entity, UpdateMethodArgs);
+				}
 
 			}
 		}
