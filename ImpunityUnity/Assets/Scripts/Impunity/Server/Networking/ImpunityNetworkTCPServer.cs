@@ -441,7 +441,7 @@ namespace Impunity.Networking
 			UDPListenerThread = null;
 		}
 
-		private async void UDPListener()
+		private void UDPListener()
 		{
 			ServerUdpSocket = null;
 
@@ -459,8 +459,7 @@ namespace Impunity.Networking
 
 				while (ServerUdpSocket != null)
 				{
-					var receiveTask = await ServerUdpSocket.ReceiveAsync();
-					byte[] packet = receiveTask.Buffer;
+					byte[] packet = ServerUdpSocket.Receive(ref groupEP);
 					ImpunityLogger.LogInformation("Got bytes");
 					if (ImpunityUtil.StartsWith(packet, SearchPacket))
 					{
@@ -470,7 +469,10 @@ namespace Impunity.Networking
 			}
 			catch (SocketException e)
 			{
-				ImpunityLogger.LogError("UDP Socket error:", e);
+				if (ServerUdpSocket != null)
+				{
+					ImpunityLogger.LogError("UDP Socket error:", e);
+				}
 			}
 			finally
 			{
@@ -498,11 +500,11 @@ namespace Impunity.Networking
 			}
 
 			ImpunityLogger.LogDebug("Sent server announce");
-			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Any, Options.ClientPort);
+			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, Options.ClientPort);
 
 			foreach(PerGameTCPServerData gameData in PerGameData.Values)
 			{
-				ServerUdpSocket.SendAsync(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
+				ServerUdpSocket.Send(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
 			}
 			
 		}

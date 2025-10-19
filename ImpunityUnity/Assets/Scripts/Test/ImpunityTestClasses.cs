@@ -213,7 +213,7 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	private void OnMovementStateInitialized(CustomMovementStateData oldData, CustomMovementStateData newData, TimeSpan age)
+	private void OnMovementStateInitialized(CustomMovementStateData newData, TimeSpan age)
 	{
 		ImpunityLogger.LogInformation("Got MovementState initialized on TestPlayer with age " + age.ToString());
 		//ImpunityTestComponent.WaitingForCount -= 1;

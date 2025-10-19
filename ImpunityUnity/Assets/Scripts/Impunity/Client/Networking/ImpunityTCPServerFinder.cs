@@ -173,8 +173,8 @@ namespace Impunity.Networking
 		{
 			ImpunityLogger.LogDebug("Sending server search");
 
-			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Any, Options.ServerPort);
-			FinderUdpSocket.SendAsync(SearchPacket, SearchPacket.Length, broadcastEp);
+			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, Options.ServerPort);
+			FinderUdpSocket.Send(SearchPacket, SearchPacket.Length, broadcastEp);
 		}
 	}
 

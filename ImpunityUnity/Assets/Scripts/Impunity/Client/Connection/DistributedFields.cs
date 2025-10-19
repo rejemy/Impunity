@@ -133,7 +133,7 @@ namespace Impunity.Connection
 	
 	public struct DistributedTemporalValue<T,S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
-		public event Action<T,T,TimeSpan> OnInitialized;
+		public event Action<T,TimeSpan> OnInitialized;
 		public event Action<T,T> OnChanged;
 
 		private static readonly S Serializer = default;
@@ -208,10 +208,9 @@ namespace Impunity.Connection
 			long ageMilliseconds = r.ReadUInt32();
 			LastModifiedTime = Entity.Manager.Connection.GetServerTime() - ageMilliseconds;
 
-			T oldValue = CurrentValue;
 			CurrentValue = Serializer.ReadFrom(r);
 
-			InvokeOnInitialized(oldValue, CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
+			InvokeOnInitialized(CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
 		}
 
 		public void ReadChangesFrom(BinaryReader r)
@@ -224,11 +223,11 @@ namespace Impunity.Connection
 			InvokeOnChanged(oldValue, CurrentValue);
 		}
 
-		private readonly void InvokeOnInitialized(T oldValue, T newValue, TimeSpan age)
+		private readonly void InvokeOnInitialized(T newValue, TimeSpan age)
 		{
 			try
 			{
-				OnInitialized?.Invoke(oldValue, newValue, age);
+				OnInitialized?.Invoke(newValue, age);
 			}
 			catch(Exception e)
 			{
