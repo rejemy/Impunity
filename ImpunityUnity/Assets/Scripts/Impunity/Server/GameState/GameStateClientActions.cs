@@ -143,7 +143,13 @@ namespace Impunity.GameState
 
 	// Metadata operations
 
-	public class EstablishConnectionAction : ClientActionResultlessBase
+	public class EstablishConnectResult
+	{
+		[BsonField("cid")]
+		public string ConnectionId;
+	}
+
+	public class EstablishConnectionAction : ClientActionResultBase<EstablishConnectResult>
 	{
 		[BsonField("gid")]
 		public string GameId;
@@ -162,7 +168,7 @@ namespace Impunity.GameState
 
 		public EstablishConnectionAction() { }
 
-		public EstablishConnectionAction(string gameId, string passwordHash, GameStateFormatData format, string connectionKey, ImpunityCallback onComplete = null)
+		public EstablishConnectionAction(string gameId, string passwordHash, GameStateFormatData format, string connectionKey, ImpunityCallback<EstablishConnectResult> onComplete = null)
 		{
 			GameId = gameId;
 			PasswordHash = passwordHash;
@@ -173,7 +179,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.EstablishConnection(Origin, Format);
+			Result = game.EstablishConnection(Origin, Format);
 		}
 	}
 

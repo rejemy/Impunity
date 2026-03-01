@@ -8,6 +8,7 @@ using UltraLiteDB;
 
 using Impunity.GameState;
 using System.Net;
+using System.Runtime.Serialization;
 
 namespace Impunity.Networking
 {
@@ -31,16 +32,14 @@ namespace Impunity.Networking
 		byte[] SendBuffer;
 		Semaphore SendLock;
 
-		public string ConnectionId { get { return "NetworkConnection_" + ClientContext.GetAddress(); } }
+		public string ConnectionId { get => ClientContext.ConnectionId; }
 		public string ConnectionKey { get; set; }
 		public GameStateReplicant ConnectionReplicant { get; set; }
 
 		public bool IsRemote { get { return true; } }
 
-		public bool SupportsUnguaranteed()
-		{
-			return ClientContext.SupportsUnguaranteed();
-		}
+		public bool SupportsUnguaranteed { get => ClientContext.SupportsUnguaranteed; }
+
 
 		public ServerSideNetworkConnectionProxy(ImpunityServer server, IImpunityNetworkServerClientContext clientContext)
 		{
@@ -65,7 +64,7 @@ namespace Impunity.Networking
 			if (GameServer == null && msg.MessageType != (ushort)ClientActionType.ESTABLISH_CONNECTION)
 			{
 				// Before a connection is established, only the "Establish Connection" action is allowed
-				ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " didn't establish connection before trying to do an action");
+				ImpunityLogger.LogInformation("Connection " + context.RemoteAddress + " didn't establish connection before trying to do an action");
 				context.Disconnect();
 				return;
 			}
@@ -84,7 +83,7 @@ namespace Impunity.Networking
 				// Establish connection is only legal action here
 				if (action is not EstablishConnectionAction)
 				{
-					ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " sent " + action.GetActionType() + " on connection");
+					ImpunityLogger.LogInformation("Connection " + context.RemoteAddress + " sent " + action.GetActionType() + " on connection");
 					action.CloseConnectionOnComplete = true;
 					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Failed to establish connection");
 					ReportActionResult(action);
@@ -101,7 +100,7 @@ namespace Impunity.Networking
 				GameServer = NetworkServer.GetGameStateServer(establish.GameId);
 				if (GameServer == null)
 				{
-					ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get invalid game id " + establish.GameId);
+					ImpunityLogger.LogInformation("Connection " + context.RemoteAddress + " tried to get invalid game id " + establish.GameId);
 					action.CloseConnectionOnComplete = true;
 					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Invalid game id");
 					ReportActionResult(action);
@@ -112,7 +111,7 @@ namespace Impunity.Networking
 				{
 					if (GameServer.GamePasswordHash != establish.PasswordHash)
 					{
-						ImpunityLogger.LogInformation("Connection " + context.GetAddress() + " tried to get into a game with an invalid password");
+						ImpunityLogger.LogInformation("Connection " + context.RemoteAddress + " tried to get into a game with an invalid password");
 						action.CloseConnectionOnComplete = true;
 						action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Invalid password");
 						ReportActionResult(action);
@@ -221,7 +220,7 @@ namespace Impunity.Networking
 		public ImpunityOptions Options { get; private set; }
 
 		Dictionary<string, GameStateServer> GameServers;
-		ConcurrentDictionary<string, ServerSideNetworkConnectionProxy> Clients;
+		ConcurrentDictionary<string, ServerSideNetworkConnectionProxy> ClientsByConnectionId;
 
 		BlockingCollection<GameStateActionBase> PendingWrite;
 
@@ -230,7 +229,7 @@ namespace Impunity.Networking
 
 		public IPEndPoint TCPEndpoint { get; private set; }
 
-		public int NumConnections { get {return Clients.Count; }}
+		public int NumConnections { get {return ClientsByConnectionId.Count; }}
 
 		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer>{gameState}, options)
 		{
@@ -243,7 +242,7 @@ namespace Impunity.Networking
 				options = new ImpunityOptions();
 			}
 
-			Clients = new ConcurrentDictionary<string, ServerSideNetworkConnectionProxy>();
+			ClientsByConnectionId = new ConcurrentDictionary<string, ServerSideNetworkConnectionProxy>();
 			GameServers = new Dictionary<string, GameStateServer>();
 
 			Options = options;
@@ -369,13 +368,13 @@ namespace Impunity.Networking
 		public void ClientConnected(IImpunityNetworkServerClientContext client)
 		{
 			ServerSideNetworkConnectionProxy proxy = new ServerSideNetworkConnectionProxy(this, client);
-			Clients.TryAdd(proxy.ConnectionId, proxy);
+			ClientsByConnectionId.TryAdd(proxy.ConnectionId, proxy);
 		}
 
 		// Called on socket thread
 		public void ClientDisconnected(ServerSideNetworkConnectionProxy proxy)
 		{
-			if (!Clients.TryRemove(proxy.ConnectionId, out _))
+			if (!ClientsByConnectionId.TryRemove(proxy.ConnectionId, out _))
 			{
 				ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + proxy.ConnectionId);
 				return;
@@ -405,7 +404,7 @@ namespace Impunity.Networking
 				game.RemoveListener(this);
 			}
 			GameServers.Clear();
-			Clients.Clear();
+			ClientsByConnectionId.Clear();
 		}
 	}
 

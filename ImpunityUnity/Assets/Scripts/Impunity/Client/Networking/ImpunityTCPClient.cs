@@ -5,8 +5,10 @@ using System.Threading;
 
 namespace Impunity.Networking
 {
-	public class ImpunityTCPClient : IImpunityClient
+	public class ImpunityTCPClient : IImpunityNetworkClient
 	{
+		public string ConnectionId { get; private set; }
+
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		public ImpunityCallback OnNetworkError { get; set; }
 		public Action<int> OnDisconnectedByServer { get; set; }
@@ -24,13 +26,13 @@ namespace Impunity.Networking
 
 		private ImpunityCallback OnConnectCallback;
 
-		public static IImpunityClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(serverEndpoint, options);
 			return client;
 		}
 
-		public static IImpunityClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(hostname, port, options);
 			return client;
@@ -87,6 +89,7 @@ namespace Impunity.Networking
 		{
 			return false;
 		}
+
 
 		private void SocketListenerThread()
 		{

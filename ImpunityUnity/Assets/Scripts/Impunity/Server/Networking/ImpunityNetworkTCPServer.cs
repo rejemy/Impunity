@@ -20,38 +20,32 @@ namespace Impunity.Networking
 		public ImpunityServerErrorCallback OnNetworkError { get; set; }
 		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 
+		public string ConnectionId { get; private set;}
+		public string RemoteAddress { get => RemoteEndpoint.ToString(); }
+		public bool SupportsUnguaranteed { get => false; }
+
 		private const int ConnectEstablishTimeout = 1000;
 
 		ImpunityTCPServer Server;
 		TcpClient Client;
 		NetworkStream ClientStream;
-
+		
 		int MaxBytesToReceive = ImpunityConstants.MaxMessageSize;
 		byte[] ReceiveBuffer;
 		int BytesReceived = 0;
 
-		public EndPoint RemoteEndpoint { get; private set; }
+		internal EndPoint RemoteEndpoint { get; private set; }
 
 
-		public ImpunityTCPServerClientContext(ImpunityTCPServer server, TcpClient client)
+		public ImpunityTCPServerClientContext(ImpunityTCPServer server, TcpClient client, string connectionId)
 		{
 			Server = server;
 			Client = client;
 			ClientStream = client.GetStream();
 			ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			RemoteEndpoint = Client.Client.RemoteEndPoint;
+			ConnectionId = connectionId;
 		}
-
-		public bool SupportsUnguaranteed()
-		{
-			return false;
-		}
-
-		public string GetAddress()
-		{
-			return RemoteEndpoint.ToString();
-		}
-
 
 		public void Listen()
 		{
@@ -239,7 +233,8 @@ namespace Impunity.Networking
 		bool Running;
 		byte[] SearchPacket;
 
-		ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext> Clients;
+		public int ClientsConnected { get => ClientsByRemoteEndpoint.Count; }
+		ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext> ClientsByRemoteEndpoint;
 		Dictionary<string, PerGameTCPServerData> PerGameData;
 
 		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
@@ -249,7 +244,7 @@ namespace Impunity.Networking
 			Options = options;
 
 			PerGameData = new Dictionary<string, PerGameTCPServerData>();
-			Clients = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
+			ClientsByRemoteEndpoint = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
 			ShutdownToken = new CancellationTokenSource();
 
 			Running = true;
@@ -317,7 +312,7 @@ namespace Impunity.Networking
 			body["s"] = tcpGameData.CurrGameSummary;
 			body["p"] = tcpGameData.PasswordProtected;
 			body["mc"] = Options.MaxConnections;
-			body["cc"] = Clients.Count <= Options.MaxConnections ? Clients.Count : Options.MaxConnections;
+			body["cc"] = ClientsConnected <= Options.MaxConnections ? ClientsConnected : Options.MaxConnections;
 
 			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array,
 				ImpunityConstants.ServerAnnouncePacketHeader + tcpGameData.GameTypeCode + ":", body);
@@ -358,7 +353,8 @@ namespace Impunity.Networking
 				{
 					TcpClient client = TCPSocket.AcceptTcpClient();
 
-					ImpunityTCPServerClientContext context = new ImpunityTCPServerClientContext(this, client);
+					string connectionId = "tcp_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
+					ImpunityTCPServerClientContext context = new ImpunityTCPServerClientContext(this, client, connectionId);
 					
 					ImpunityLogger.LogInformation("Client connected");
 			
@@ -372,7 +368,7 @@ namespace Impunity.Networking
 						context.Disconnect();
 					}
 
-					Clients[context.RemoteEndpoint] = context;
+					ClientsByRemoteEndpoint[context.RemoteEndpoint] = context;
 					context.Listen();
 
 					foreach(string gameId in PerGameData.Keys.ToList())
@@ -405,7 +401,7 @@ namespace Impunity.Networking
 
 		internal void ClientDisconnected(ImpunityTCPServerClientContext context)
 		{
-			if (!Clients.TryRemove(context.RemoteEndpoint, out _))
+			if (!ClientsByRemoteEndpoint.TryRemove(context.RemoteEndpoint, out _))
 			{
 				ImpunityLogger.LogError("Got a client disconnect for a client we haven't heard about: " + context.RemoteEndpoint.ToString());
 				return;
@@ -514,11 +510,11 @@ namespace Impunity.Networking
 			Running = false;
 			StopUDPListen();
 
-			foreach (ImpunityTCPServerClientContext client in Clients.Values)
+			foreach (ImpunityTCPServerClientContext client in ClientsByRemoteEndpoint.Values)
 			{
 				client.Dispose();
 			}
-			Clients = null;
+			ClientsByRemoteEndpoint = null;
 
 			TcpListener listener = TCPSocket;
 			TCPSocket = null;

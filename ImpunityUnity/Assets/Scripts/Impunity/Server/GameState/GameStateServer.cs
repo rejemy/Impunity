@@ -13,7 +13,7 @@ namespace Impunity.GameState
 		string ConnectionKey { get; }
 		bool IsRemote { get; }
 		GameStateReplicant ConnectionReplicant { get; set; }
-		bool SupportsUnguaranteed();
+		bool SupportsUnguaranteed { get; }
 
 		void ReportActionResult(GameStateActionBase action);
 		void SendMessageToClient(ServerActionBase message);
@@ -180,7 +180,7 @@ namespace Impunity.GameState
 		}
 
 		// Called on live thread
-		public void EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
+		public EstablishConnectResult EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
 		{
 			if (NewConnectionsDisabled)
 			{
@@ -205,6 +205,11 @@ namespace Impunity.GameState
 			}
 
 			ConnectionOpened(proxy);
+
+			EstablishConnectResult result = new EstablishConnectResult();
+			result.ConnectionId = proxy.ConnectionId;
+			
+			return result;
 		}
 
 		public bool ValidateFormat(GameStateFormatData format)

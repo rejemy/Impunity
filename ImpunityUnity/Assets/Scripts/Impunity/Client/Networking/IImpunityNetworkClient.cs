@@ -4,8 +4,9 @@ namespace Impunity.Networking
 {
 	public delegate void ImpunityClientMessageHandler(ArraySegment<byte> messageBytes);
 
-	public interface IImpunityClient : IDisposable
+	public interface IImpunityNetworkClient : IDisposable
 	{
+		public string ConnectionId { get; }
 		ImpunityClientMessageHandler OnMessageRecieved { get; set; }
 		ImpunityCallback OnNetworkError { get; set; }
 		Action<int> OnDisconnectedByServer { get; set; }

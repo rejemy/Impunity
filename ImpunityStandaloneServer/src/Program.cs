@@ -10,7 +10,6 @@ using Impunity.StandaloneServer;
 using Microsoft.Extensions.Hosting.Internal;
 using Microsoft.Extensions.Hosting;
 
-// dotnet 6 style bare program with no static class oh em gee what?
 
 // --------------- Read config file section ---------------------
 string configPath = "config.json";

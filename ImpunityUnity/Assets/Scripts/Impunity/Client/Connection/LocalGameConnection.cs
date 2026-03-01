@@ -20,9 +20,8 @@ namespace Impunity.Connection
 		{
 			State = gameState;
 			ConnectionKey = "local_key";
-			
-			int id = NextLocalConnectionId++;
-			ConnectionId = "LocalConnection_" + id;
+
+			ConnectionId = "unconnected";
 		}
 
 		public override void Connect(ImpunityCallback onComplete)
@@ -30,6 +29,9 @@ namespace Impunity.Connection
 			State.AddListener(this);
 			State.ConnectionOpened(this);
 
+			int id = NextLocalConnectionId++;
+			ConnectionId = "local_" + id;
+			
 			EstablishConnection(null, null, LocalFormat, onComplete);
 		}
 
@@ -62,9 +64,9 @@ namespace Impunity.Connection
 			CompletedActions.Enqueue(action);
 		}
 
-		public bool IsRemote { get { return false; } }
+		public bool IsRemote { get => false; }
 
-		public bool SupportsUnguaranteed() { return false; }
+		public bool SupportsUnguaranteed { get => false; }
 
 
 		// Called on background thread, this is a message to us, the local client

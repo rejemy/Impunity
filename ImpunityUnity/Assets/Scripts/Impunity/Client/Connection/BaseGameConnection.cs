@@ -50,7 +50,8 @@ namespace Impunity.Connection
 			GameStateEntityTypeDef[] entityTypes = EntityManager.RegisterEntityTypes(format.EntityTypes);
 
 			ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
-
+			ConnectionId = "unconnected";
+			
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 
 			CompletedActions = new ConcurrentQueue<GameStateActionBase>();
@@ -70,7 +71,7 @@ namespace Impunity.Connection
 				onComplete?.Invoke(null);
 			}
 
-			void onEstablished(ImpunityErrorResponse err)
+			void onEstablished(ImpunityErrorResponse err, EstablishConnectResult result)
 			{
 				if (err != null)
 				{
@@ -78,6 +79,8 @@ namespace Impunity.Connection
 					return;
 				}
 				
+				this.ConnectionId = result.ConnectionId;
+				ImpunityLogger.LogInformation("Connected with connection id " + this.ConnectionId);
 				SyncServerTime(synced);
 			}
 

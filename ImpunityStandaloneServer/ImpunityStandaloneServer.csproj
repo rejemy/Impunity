@@ -14,7 +14,7 @@
     <PackageTags>unity network tcp udp save multiplayer</PackageTags>
     <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
 
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>

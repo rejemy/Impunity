@@ -21,13 +21,13 @@ namespace Impunity.Connection
 		private string GameId;
 		private string GamePassword;
 		private ImpunityOptions Options;
-		private IImpunityClient NetworkClient;
+		private IImpunityNetworkClient NetworkClient;
 		private Thread NetworkWriterThread;
 		private bool Running;
 
 		private byte[] SendBuffer;
 
-		public RemoteGameConnection(IImpunityClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options, ClientEntityManager em) : base(format, em)
+		public RemoteGameConnection(IImpunityNetworkClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options, ClientEntityManager em) : base(format, em)
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
 			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
@@ -47,7 +47,7 @@ namespace Impunity.Connection
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 
-			ConnectionId = "RemoteConnection_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
+			ConnectionId = "unconnected";
 			
 		}
 

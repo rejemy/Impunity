@@ -14,8 +14,9 @@ namespace Impunity.Networking
 		ImpunityServerErrorCallback OnNetworkError { get; set; }
 		ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 
-		string GetAddress();
-		bool SupportsUnguaranteed();
+		string ConnectionId { get; }
+		string RemoteAddress { get; }
+		bool SupportsUnguaranteed { get; }
 
 		// Writes are not thread safe, caller must ensure that send is not called while a previous send is still completing
 		// Must be prefixed by a 4 byte length header
