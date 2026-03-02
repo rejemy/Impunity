@@ -26,6 +26,7 @@ namespace Impunity.Connection
 		private bool Running;
 
 		private byte[] SendBuffer;
+		private ByteWriter SendBufferWriter;
 
 		public RemoteGameConnection(IImpunityNetworkClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options, ClientEntityManager em) : base(format, em)
 		{
@@ -46,9 +47,9 @@ namespace Impunity.Connection
 			NetworkClient.OnDisconnectedByServer = OnDisconnectedByServer;
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
+			SendBufferWriter = new ByteWriter(SendBuffer);
 
 			ConnectionId = "unconnected";
-			
 		}
 
 		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
@@ -153,8 +154,6 @@ namespace Impunity.Connection
 
 		private void SendMessage(GameStateActionBase action)
 		{
-			BsonDocument requestBson = action.SerializeRequest();
-
 			ushort flags = 0;
 			if (!action.HasCallback())
 			{
@@ -165,7 +164,7 @@ namespace Impunity.Connection
 				AwaitingReceive.Enqueue(action);
 			}
 
-			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBuffer, 0, flags, action.GetActionType(), requestBson);
+			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, flags, action.GetActionType(), action);
 
 			NetworkClient.SendGuaranteedMessage(encodedMessage);
 
@@ -216,12 +215,6 @@ namespace Impunity.Connection
 				ImpunityLogger.LogError("Got response with id " + messageId + " when we weren't expecting any responses");
 				return;
 			}
-
-			//if (action.MessageId != messageId)
-			//{
-			//	ImpunityLogger.LogError("Got response with id " + messageId + " when we were expecting response " + action.MessageId);
-			//	return;
-			//}
 
 			try
 			{

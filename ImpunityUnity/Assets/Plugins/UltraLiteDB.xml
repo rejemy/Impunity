@@ -299,6 +299,77 @@
             Write a bson document
             </summary>
         </member>
+        <member name="T:UltraLiteDB.DirectBsonReader">
+            <summary>
+            Reads BSON bytes directly into C# objects, bypassing BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+            <summary>
+            Read a BSON document from bytes directly into a C# object
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryFromPosition(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type,System.Byte,System.String,System.Int32)">
+            <summary>
+            Helper to finish reading a dictionary when we discover mid-document that the target is IDictionary
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadValueDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Byte,System.Type)">
+            <summary>
+            Read a BSON value and convert directly to the target .NET type
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+            <summary>
+            Read a BSON array directly into an Array or IList
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+            <summary>
+            Read a BSON document directly into an IDictionary
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadBsonValue(UltraLiteDB.ByteReader,System.Byte)">
+            <summary>
+            Read a BSON element value as a BsonValue (fallback for custom serializers)
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.SkipValue(UltraLiteDB.ByteReader,System.Byte)">
+            <summary>
+            Skip past a BSON element's value bytes
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectBsonWriter">
+            <summary>
+            Writes BSON bytes directly from C# objects, bypassing BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Int32)">
+            <summary>
+            Write a C# object as a BSON document directly to the ByteWriter
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.String,System.Type,System.Object,System.Int32)">
+            <summary>
+            Write a single value as a BSON element (type byte + CString key + value bytes)
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteArrayDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IEnumerable,System.Int32)">
+            <summary>
+            Write an IEnumerable as a BSON array directly
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteDictionaryDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IDictionary,System.Int32)">
+            <summary>
+            Write an IDictionary as a BSON document directly
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementFromBsonValue(UltraLiteDB.ByteWriter,System.String,UltraLiteDB.BsonValue)">
+            <summary>
+            Write a BsonValue as an element using the existing BsonWriter format.
+            Used as fallback for custom serializers and BsonValue-typed properties.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.BsonAutoId">
             <summary>
             All supported BsonTypes supported in AutoId insert operation
@@ -2112,6 +2183,36 @@
             Deserialize an BsonValue to .NET object typed in T
             </summary>
         </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes``1(System.Byte[],System.Int32)">
+            <summary>
+            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes(System.Type,System.Byte[],System.Int32)">
+            <summary>
+            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes``1(``0)">
+            <summary>
+            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes``1(``0,UltraLiteDB.ByteWriter)">
+            <summary>
+            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes(System.Type,System.Object)">
+            <summary>
+            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes(System.Type,System.Object,UltraLiteDB.ByteWriter)">
+            <summary>
+            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.ToDocument(System.Type,System.Object)">
             <summary>
             Serialize a entity class to BsonDocument
@@ -2165,6 +2266,11 @@
         <member name="P:UltraLiteDB.EntityMapper.ForType">
             <summary>
             Indicate which Type this entity mapper is
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.EntityMapper._fieldLookup">
+            <summary>
+            Cached lookup from BSON field name to MemberMapper for O(1) access during deserialization
             </summary>
         </member>
         <member name="M:UltraLiteDB.EntityMapper.GetMember(System.Linq.Expressions.Expression)">

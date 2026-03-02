@@ -30,6 +30,7 @@ namespace Impunity.Networking
 		GameStateServer GameServer;
 
 		byte[] SendBuffer;
+		ByteWriter SendBufferWriter;
 		Semaphore SendLock;
 
 		public string ConnectionId { get => ClientContext.ConnectionId; }
@@ -46,6 +47,7 @@ namespace Impunity.Networking
 			NetworkServer = server;
 			ClientContext = clientContext;
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
+			SendBufferWriter = new ByteWriter(SendBuffer);
 			SendLock = new Semaphore(1, 1);
 
 			clientContext.OnMessageRecieved = ClientMessageReceived;
@@ -124,14 +126,14 @@ namespace Impunity.Networking
 		}
 
 		// Called on network writer thread
-		public void SendMessage(ushort messageType, bool guaranteed, BsonDocument results)
+		public void SendMessage(ushort messageType, bool guaranteed, object results)
 		{
 			ArraySegment<byte> encodedMessage;
 
 			// Lock send buffer (or wait for it to be available)
 			SendLock.WaitOne();
 
-			encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBuffer, 0, 0, messageType, results);
+			encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, 0, messageType, results);
 
 			if (guaranteed)
 			{
@@ -141,7 +143,6 @@ namespace Impunity.Networking
 			{
 				ClientContext.SendUnguaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
 			}
-			
 		}
 
 		public void ProcessCloseConnnection()
@@ -348,14 +349,12 @@ namespace Impunity.Networking
 			else if (action is ServerActionBase)
 			{
 				// Server originated message
-				BsonDocument message = action.SerializeRequest();
-				clientInfo.SendMessage(action.GetActionType(), ((ServerActionBase)action).Guaranteed, message);
+				clientInfo.SendMessage(action.GetActionType(), ((ServerActionBase)action).Guaranteed, action);
 			}
 			else
 			{
 				// Reply to client action
-				BsonDocument results = action.SerializeResults();
-				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, results);
+				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, action.GetResult());
 			}
 
 			if(action.CloseConnectionOnComplete)

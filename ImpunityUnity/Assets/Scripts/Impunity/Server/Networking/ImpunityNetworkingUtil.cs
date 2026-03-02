@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using UltraLiteDB;
 
 using System.IO;
+using UnityEditor.VersionControl;
 
 namespace Impunity.Networking
 {
@@ -72,27 +73,34 @@ namespace Impunity.Networking
 		// 
 		// 12 total header bytes
 
-		public static ArraySegment<byte> WriteMessage(byte[] destBuffer, ushort messageId, ushort flags, ushort messageType, BsonDocument message)
+		public static ArraySegment<byte> WriteMessage(ByteWriter writer, ushort messageId, ushort flags, ushort messageType, object message)
 		{
-			BinaryPrimitives.WriteUInt16LittleEndian(new Span<byte>(destBuffer, 4, 2), messageType);
-			BinaryPrimitives.WriteUInt16LittleEndian(new Span<byte>(destBuffer, 6, 2), messageId);
-			BinaryPrimitives.WriteUInt16LittleEndian(new Span<byte>(destBuffer, 8, 2), flags);
-			BinaryPrimitives.WriteUInt16LittleEndian(new Span<byte>(destBuffer, 10, 2), 0); // Padding
+			// Skip 4 bytes for length prefix
+			writer.Position = 4;
+			
+			writer.Write(messageType);
+			writer.Write(messageId);
+			writer.Write(flags);
+			writer.Write((ushort)0); // Padding
 
-			int length = 12;
 			if (message != null)
 			{
-				length = BsonWriter.SerializeTo(message, destBuffer, length);
+				var mapper = ImpunityUtil.GetBsonMapper();
+				mapper.SerializeToBytes(typeof(Message), message, writer);
 			}
 
-			if (length >= ImpunityConstants.MaxMessageSize)
+			int totalLength = writer.Position;
+
+			if (totalLength >= ImpunityConstants.MaxMessageSize)
             {
-				throw new Exception("Tried to send a message that's too large! Length: " + length);
+				throw new Exception("Tried to send a message that's too large! Length: " + totalLength);
             }
 
-			BinaryPrimitives.WriteInt32LittleEndian(new Span<byte>(destBuffer, 0, 4), length);
+			// Go back and write total length at start of buffer
+			writer.Position = 0;
+			writer.Write(totalLength);
 
-			return new ArraySegment<byte>(destBuffer, 0, length);
+			return new ArraySegment<byte>(writer.Buffer, 0, totalLength);
 		}
 
 		public static void ReadMessage(ArraySegment<byte> messageBytes, out MessageStruct msg)
