@@ -26,7 +26,7 @@ namespace Impunity.GameState
 	{
 		public override bool IsDBOperation() { return false; }
 
-		public override void DeserializeResults(BsonDocument resultBody)
+		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{
 			throw new NotImplementedException();
 		}

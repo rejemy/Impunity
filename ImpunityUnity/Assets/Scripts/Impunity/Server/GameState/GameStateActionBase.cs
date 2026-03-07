@@ -118,7 +118,7 @@ namespace Impunity.GameState
 			return mapper.ToDocument(reply);
 		}
 
-		public abstract void DeserializeResults(BsonDocument resultBody);
+		public abstract void DeserializeResults(ArraySegment<byte> messageBytes);
 
 		// Final callback
 		public abstract void InvokeOnCompleteCallback();
@@ -147,10 +147,10 @@ namespace Impunity.GameState
 			return typeof(ActionResult);
 		}
 
-		public override void DeserializeResults(BsonDocument resultBody)
+		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			ActionResult reply = mapper.ToObject<ActionResult>(resultBody);
+			ActionResult reply = mapper.DeserializeFromBytes<ActionResult>(messageBytes);
 			Error = reply.Error;
 		}
 
@@ -186,10 +186,10 @@ namespace Impunity.GameState
 			return typeof(ActionResult<TResult>);
 		}
 
-		public override void DeserializeResults(BsonDocument resultBody)
+		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			ActionResult<TResult> reply = mapper.ToObject<ActionResult<TResult>>(resultBody);
+			ActionResult<TResult> reply = mapper.DeserializeFromBytes<ActionResult<TResult>>(messageBytes);
 			Error = reply.Error;
 			Result = reply.Result;
 		}
@@ -208,7 +208,7 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public bool Guaranteed { get; set; } = true;
 
-		public override void DeserializeResults(BsonDocument resultBody)
+		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{
 			throw new NotImplementedException();
 		}

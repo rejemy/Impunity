@@ -289,18 +289,20 @@ namespace Impunity.GameState
 		}
 
 
-		// Custom deserializer so that we know what generic type to expect for each result nin the list
-		public override void DeserializeResults(BsonDocument resultBody)
+		// Custom deserializer so that we know what generic type to expect for each result in the list
+		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{
-			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
+			BsonDocument resultBody = BsonReader.Deserialize(messageBytes);
 
+			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
+			
 			BsonValue errorVal = resultBody["e"];
 			if (!errorVal.IsNull)
 			{
 				Error = mapper.ToObject<ImpunityErrorResponse>(errorVal.AsDocument);
 			}
 
-			BsonArray resultArray = (BsonArray)(resultBody["r"]);
+			BsonArray resultArray = (BsonArray)resultBody["r"];
 
 			Result = new List<ActionResult>(resultArray.Count);
 

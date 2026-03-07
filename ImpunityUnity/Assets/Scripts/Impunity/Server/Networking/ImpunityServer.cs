@@ -59,9 +59,9 @@ namespace Impunity.Networking
 		// Called on socket thread
 		private void ClientMessageReceived(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
 		{
-			MessageStruct msg;
+			MessageHeaderStruct msg;
 
-			ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
+			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
 
 			if (GameServer == null && msg.MessageType != (ushort)ClientActionType.ESTABLISH_CONNECTION)
 			{
@@ -74,7 +74,7 @@ namespace Impunity.Networking
 			Type messageActionClassType = ClientActionFactory.GetActionClassType(msg.MessageType);
 
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			GameStateActionBase action = (GameStateActionBase)mapper.ToObject(messageActionClassType, msg.Body);
+			GameStateActionBase action = (GameStateActionBase)mapper.DeserializeFromBytes(messageActionClassType, messageBytes.Array, bodyOffset);
 			action.Origin = this;
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
 
@@ -132,6 +132,7 @@ namespace Impunity.Networking
 
 			// Lock send buffer (or wait for it to be available)
 			SendLock.WaitOne();
+			// Lock is released in the OnDataWritten continuation
 
 			encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, 0, messageType, results);
 

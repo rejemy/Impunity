@@ -174,14 +174,14 @@ namespace Impunity.Connection
 		// On dotnet internal socket thread
 		private void OnNetworkMessageReceived(ArraySegment<byte> messageBytes)
 		{
-			MessageStruct msg;
+			MessageHeaderStruct msg;
 
-			ImpunityNetworkingUtil.ReadMessage(messageBytes, out msg);
+			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
 
 			// Reply message
 			if (msg.MessageType == (ushort)ServerActionType.CLIENT_REPLY)
             {
-				HandleReplyMessage(msg.MessageId, msg.Body);
+				HandleReplyMessage(msg.MessageId, new ArraySegment<byte>(messageBytes.Array, bodyOffset, messageBytes.Count - bodyOffset));
 				return;
 			}
 
@@ -189,7 +189,7 @@ namespace Impunity.Connection
 			Type messageActionClassType = ServerActionFactory.GetActionClassType(msg.MessageType);
 
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			ServerActionBase action = (ServerActionBase)mapper.ToObject(messageActionClassType, msg.Body);
+			ServerActionBase action = (ServerActionBase)mapper.DeserializeFromBytes(messageActionClassType, messageBytes.Array, bodyOffset);
 
 			// Ready for callback!
 			CompletedActions.Enqueue(action);
@@ -207,7 +207,7 @@ namespace Impunity.Connection
 			ImpunityLogger.LogInformation("Disconnected by server with code " + reason);
 		}
 
-		private void HandleReplyMessage(ushort messageId, BsonDocument replyBody)
+		private void HandleReplyMessage(ushort messageId, ArraySegment<byte> messageBytes)
 		{
 			GameStateActionBase action;
 			if (!AwaitingReceive.TryDequeue(out action))
@@ -218,7 +218,7 @@ namespace Impunity.Connection
 
 			try
 			{
-				action.DeserializeResults(replyBody);
+				action.DeserializeResults(messageBytes);
 			}
 			catch (Exception e)
 			{

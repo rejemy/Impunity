@@ -2188,7 +2188,17 @@
             Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
             </summary>
         </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes``1(System.ArraySegment{System.Byte})">
+            <summary>
+            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes(System.Type,System.Byte[],System.Int32)">
+            <summary>
+            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes(System.Type,System.ArraySegment{System.Byte})">
             <summary>
             Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
             </summary>
@@ -2413,11 +2423,6 @@
         <member name="M:UltraLiteDB.Collation.Compare(System.String,System.String)">
             <summary>
             Compare 2 string values using current culture/compare options
-            </summary>
-        </member>
-        <member name="M:UltraLiteDB.Collation.Compare(System.Char,System.Char)">
-            <summary>
-            Compare 2 chars values using current culture/compare options
             </summary>
         </member>
         <member name="T:UltraLiteDB.ConnectionString">

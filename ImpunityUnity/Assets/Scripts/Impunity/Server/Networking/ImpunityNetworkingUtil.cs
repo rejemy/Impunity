@@ -28,13 +28,12 @@ namespace Impunity.Networking
 		public string GameName;
 	}
 
-	public struct MessageStruct
+	public struct MessageHeaderStruct
 	{
 		public int Length;
 		public ushort MessageType;
 		public ushort MessageId;
 		public ushort Flags;
-		public BsonDocument Body;
 	}
 
 
@@ -103,7 +102,7 @@ namespace Impunity.Networking
 			return new ArraySegment<byte>(writer.Buffer, 0, totalLength);
 		}
 
-		public static void ReadMessage(ArraySegment<byte> messageBytes, out MessageStruct msg)
+		public static int ReadMessageHeader(ArraySegment<byte> messageBytes, out MessageHeaderStruct msg)
 		{
 			msg.Length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset, 4));
 			msg.MessageType = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 4, 2));
@@ -115,14 +114,7 @@ namespace Impunity.Networking
 				throw new Exception("Received a message that's too large! Length: " + messageBytes.Count);
 			}
 
-			if (messageBytes.Count > 12)
-			{
-				msg.Body = BsonReader.Deserialize(new ArraySegment<byte>(messageBytes.Array, messageBytes.Offset + 12, msg.Length));
-			}
-			else
-			{
-				msg.Body = null;
-			}
+			return 12;
 		}
 
 		public static int GetMessageLength(ArraySegment<byte> messageBytes)
