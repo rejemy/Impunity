@@ -18,8 +18,11 @@ namespace Impunity
 		public const ushort DefaultClientPort = 29655;
 		public const int MinMessageSize = 4096;
 		public const int MaxMessageSize = 65000;
-		public const string ServerSearchPacketHeader = "IMP" + ImpunityVersion + "_SRCH:";
-		public const string ServerAnnouncePacketHeader = "IMP" + ImpunityVersion + "_ANNC:";
+		public const string ServerSearchPacketHeader = "SRCH_IMP" + ImpunityVersion + ":";
+		public const string ServerAnnouncePacketHeader = "ANNC_IMP" + ImpunityVersion + ":";
+		public const string ServerSessionDataPacketHeader = "DATA_IMP" + ImpunityVersion + ":";
+		public const string ServerPingPacketHeader = "PING_IMP" + ImpunityVersion + ":";
+		public const string ServerPongPacketHeader = "PONG_IMP" + ImpunityVersion + ":";
 	}
 
 	public class ImpunityOptions

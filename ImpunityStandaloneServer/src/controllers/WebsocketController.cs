@@ -19,7 +19,12 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	private WebSocket? Socket;
 	private readonly ILogger<WebSocketController> Logger = logger;
 	private readonly ConnectionService Connections = connectionService;
-	private IPAddress RemoteAddress = IPAddress.Any;
+	private IPAddress RemoteIPAddress = IPAddress.Any;
+
+	public bool SupportsUnguaranteed { get => false; }
+	public string RemoteAddress { get => RemoteIPAddress.ToString(); }
+
+	public string ConnectionId { get; private set; } = "";
 
     public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 	public ImpunityServerErrorCallback? OnNetworkError { get; set; }
@@ -35,7 +40,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 			throw new Exception("Null connection address");
 		}
 
-		RemoteAddress = HttpContext.Connection.RemoteIpAddress;
+		RemoteIPAddress = HttpContext.Connection.RemoteIpAddress;
 
         if (HttpContext.WebSockets.IsWebSocketRequest)
         {
@@ -49,17 +54,6 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
         {
             HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
         }
-    }
-
-
-    public string GetAddress()
-    {
-        return RemoteAddress.ToString();
-    }
-
-    public bool SupportsUnguaranteed()
-    {
-        return false;
     }
 
     public async Task Listen()

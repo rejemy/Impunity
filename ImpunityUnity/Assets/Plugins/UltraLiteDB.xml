@@ -4,64 +4,84 @@
         <name>UltraLiteDB</name>
     </assembly>
     <members>
+        <member name="T:UltraLiteDB.UltraLiteCollection`1">
+            <summary>
+            Represents a typed collection of documents in the database.
+            Provides CRUD operations, indexing, and aggregate queries with automatic POCO-to-BSON mapping.
+            For untyped access, use <c>UltraLiteCollection&lt;BsonDocument&gt;</c>.
+            </summary>
+            <typeparam name="T">The document type. Can be a POCO class or <see cref="T:UltraLiteDB.BsonDocument"/>.</typeparam>
+        </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Count">
             <summary>
-            Get document count using property on collection.
+            Returns the total number of documents in this collection.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Count(UltraLiteDB.Query)">
             <summary>
-            Count documents matching a query. This method does not deserialize any document. Needs indexes on query expression
+            Counts documents matching a query without deserializing them. Requires an index on the queried field.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.LongCount">
             <summary>
-            Get document count using property on collection.
+            Returns the total number of documents in this collection as a 64-bit integer.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.LongCount(UltraLiteDB.Query)">
             <summary>
-            Count documents matching a query. This method does not deserialize any documents. Needs indexes on query expression
+            Counts documents matching a query as a 64-bit integer, without deserializing them. Requires an index on the queried field.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Exists(UltraLiteDB.Query)">
             <summary>
-            Returns true if query returns any document. This method does not deserialize any document. Needs indexes on query expression
+            Returns true if at least one document matches the query, without deserializing. Requires an index on the queried field.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Min(System.String)">
             <summary>
-            Returns the first/min value from a index field
+            Returns the minimum value from an indexed field.
             </summary>
+            <param name="field">The indexed field name.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Max(System.String)">
             <summary>
-            Returns the last/max value from a index field
+            Returns the maximum value from an indexed field.
             </summary>
+            <param name="field">The indexed field name.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Delete(UltraLiteDB.Query)">
             <summary>
-            Remove all document based on a Query object. Returns removed document counts
+            Deletes all documents matching a query.
             </summary>
+            <param name="query">The query to match documents for deletion. Requires an index on the queried field.</param>
+            <returns>The number of documents deleted.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Delete(UltraLiteDB.BsonValue)">
             <summary>
-            Remove an document in collection using Document Id - returns false if not found document
+            Deletes a single document by its _id value.
             </summary>
+            <param name="id">The _id of the document to delete.</param>
+            <returns>True if the document was found and deleted; false otherwise.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Find(UltraLiteDB.Query,System.Int32,System.Int32)">
             <summary>
-            Find documents inside a collection using Query object.
+            Finds documents matching a <see cref="T:UltraLiteDB.Query"/>. Results are lazily deserialized into <typeparamref name="T"/>.
             </summary>
+            <param name="query">The query to filter documents. Requires an index on the queried field.</param>
+            <param name="skip">Number of documents to skip from the beginning of the result set.</param>
+            <param name="limit">Maximum number of documents to return.</param>
+            <returns>Lazily enumerated matching documents.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.FindById(UltraLiteDB.BsonValue)">
             <summary>
-            Find a document using Document Id. Returns null if not found.
+            Finds a single document by its _id value. Returns null/default if not found.
             </summary>
+            <param name="id">The document _id to look up.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.FindOne(UltraLiteDB.Query)">
             <summary>
-            Find the first document using Query object. Returns null if not found. Must have index on query expression.
+            Returns the first document matching the query, or null/default if none match.
+            Requires an index on the queried field.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.FindAll">
@@ -71,10 +91,11 @@
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.EnsureIndex(System.String,System.Boolean)">
             <summary>
-            Create a new permanent index in all documents inside this collections if index not exists already. Returns true if index was created or false if already exits
+            Creates an index on the specified field if it doesn't already exist. Indexes existing documents in the collection.
             </summary>
-            <param name="field">Document field name (case sensitive)</param>
-            <param name="unique">If is a unique index</param>
+            <param name="field">Document field name (case sensitive). Use dot notation for nested fields (e.g. "Address.City").</param>
+            <param name="unique">If true, duplicate values in this field are rejected.</param>
+            <returns>True if the index was created; false if it already existed.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.GetIndexes">
             <summary>
@@ -83,146 +104,211 @@
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.DropIndex(System.String)">
             <summary>
-            Drop index and release slot for another index
+            Drops an index on the specified field, freeing the index slot (max 16 indexes per collection).
             </summary>
+            <param name="field">The indexed field name to drop.</param>
+            <returns>True if the index was dropped; false if it didn't exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Insert(`0)">
             <summary>
-            Insert a new entity to this collection. Document Id must be a new value in collection - Returns document Id
+            Inserts a new document into this collection. If the _id field is empty or missing, an auto-generated id is assigned
+            and written back to the entity's id property.
             </summary>
+            <param name="document">The entity to insert.</param>
+            <returns>The document's _id value (auto-generated if applicable).</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Insert(UltraLiteDB.BsonValue,`0)">
             <summary>
-            Insert a new document to this collection using passed id value.
+            Inserts a new document with an explicit _id value.
             </summary>
+            <param name="id">The _id to assign to the document.</param>
+            <param name="document">The entity to insert.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Insert(System.Collections.Generic.IEnumerable{`0})">
             <summary>
-            Insert an array of new documents to this collection. Document Id must be a new value in collection. Can be set buffer size to commit at each N documents
+            Inserts multiple documents into this collection.
             </summary>
+            <param name="docs">The documents to insert.</param>
+            <returns>The number of documents inserted.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.InsertBulk(System.Collections.Generic.IEnumerable{`0},System.Int32)">
             <summary>
-            Implements bulk insert documents in a collection. Usefull when need lots of documents.
+            Bulk-inserts documents, committing in batches to reduce memory pressure.
             </summary>
+            <param name="docs">The documents to insert.</param>
+            <param name="batchSize">Number of documents per transaction batch.</param>
+            <returns>The number of documents inserted.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.UpsertBulk(System.Collections.Generic.IEnumerable{`0},System.Int32)">
             <summary>
-            Implements bulk upsert of documents in a collection. Usefull when need lots of documents.
+            Bulk-upserts documents, committing in batches to reduce memory pressure.
             </summary>
+            <param name="docs">The documents to upsert.</param>
+            <param name="batchSize">Number of documents per transaction batch.</param>
+            <returns>The number of documents inserted or updated.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.GetBsonDocs(System.Collections.Generic.IEnumerable{`0})">
             <summary>
-            Convert each T document in a BsonDocument, setting autoId for each one
+            Converts each entity to a <see cref="T:UltraLiteDB.BsonDocument"/>, removing empty _id fields for auto-id generation,
+            and writing generated ids back to the source entities.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.GetBsonDoc(`0)">
             <summary>
-            Convert each T document in a BsonDocument, setting autoId for each one
+            Converts a single entity to a <see cref="T:UltraLiteDB.BsonDocument"/>, yielding it as an enumerable for engine methods
+            that accept <c>IEnumerable&lt;BsonDocument&gt;</c>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.RemoveDocId(UltraLiteDB.BsonDocument)">
             <summary>
-            Remove document _id if contains a "empty" value (checks for autoId bson type)
+            Removes the _id field from the document if it contains a default/empty value for its auto-id type
+            (e.g. 0 for Int32, <see cref="P:UltraLiteDB.ObjectId.Empty"/> for ObjectId, <see cref="F:System.Guid.Empty"/> for Guid).
+            This signals the engine to auto-generate a new _id on insert.
             </summary>
+            <returns>True if the _id was removed and should be written back after insert.</returns>
         </member>
         <member name="P:UltraLiteDB.UltraLiteCollection`1.Name">
             <summary>
-            Get collection name
+            Gets the collection name.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteCollection`1.EntityMapper">
             <summary>
-            Getting entity mapper from current collection. Returns null if collection are BsonDocument type
+            Gets the entity mapper for <typeparamref name="T"/>. Returns null when <typeparamref name="T"/> is <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteCollection`1.#ctor(System.String,UltraLiteDB.BsonAutoId,UltraLiteDB.LazyLoad{UltraLiteDB.UltraLiteEngine},UltraLiteDB.BsonMapper,UltraLiteDB.Logger)">
+            <summary>
+            Initializes a new collection instance. Automatically determines the auto-id type from the mapped _id member.
+            </summary>
+            <param name="name">Collection name, or null to resolve from <typeparamref name="T"/>.</param>
+            <param name="autoId">Default auto-id strategy (used for <see cref="T:UltraLiteDB.BsonDocument"/> collections).</param>
+            <param name="engine">Lazy-loaded engine instance.</param>
+            <param name="mapper">The BSON mapper for POCO serialization.</param>
+            <param name="log">Logger instance.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Update(`0)">
             <summary>
-            Update a document in this collection. Returns false if not found document in collection
+            Updates a document in this collection. The document must have a valid _id field.
             </summary>
+            <param name="document">The entity with updated values.</param>
+            <returns>True if the document was found and updated; false if _id was not found.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Update(UltraLiteDB.BsonValue,`0)">
             <summary>
-            Update a document in this collection. Returns false if not found document in collection
+            Updates a document using an explicit _id value, overriding any _id in the entity.
             </summary>
+            <param name="id">The _id of the document to update.</param>
+            <param name="document">The entity with updated values.</param>
+            <returns>True if the document was found and updated; false if _id was not found.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Update(System.Collections.Generic.IEnumerable{`0})">
             <summary>
-            Update all documents
+            Updates multiple documents in this collection.
             </summary>
+            <param name="documents">The entities with updated values. Each must have a valid _id.</param>
+            <returns>The number of documents updated.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Upsert(`0)">
             <summary>
-            Insert or Update a document in this collection.
+            Inserts the document if its _id doesn't exist, otherwise updates it.
             </summary>
+            <param name="document">The entity to insert or update.</param>
+            <returns>True if the document was inserted; false if it was updated.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Upsert(System.Collections.Generic.IEnumerable{`0})">
             <summary>
-            Insert or Update all documents
+            Inserts or updates multiple documents.
             </summary>
+            <param name="documents">The entities to upsert.</param>
+            <returns>The number of documents inserted (not updated).</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteCollection`1.Upsert(UltraLiteDB.BsonValue,`0)">
             <summary>
-            Insert or Update a document in this collection.
+            Inserts or updates a document using an explicit _id value.
             </summary>
+            <param name="id">The _id to assign to the document.</param>
+            <param name="document">The entity to insert or update.</param>
+            <returns>True if the document was inserted; false if it was updated.</returns>
         </member>
         <member name="T:UltraLiteDB.UltraLiteDatabase">
             <summary>
-            The LiteDB database. Used for create a LiteDB instance and use all storage resources. It's the database connection
+            Main database class. Opens an UltraLiteDB connection and provides access to collections, database management, and compaction.
+            Wraps <see cref="T:UltraLiteDB.UltraLiteEngine"/> with higher-level POCO mapping via <see cref="T:UltraLiteDB.BsonMapper"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteDatabase.Log">
             <summary>
-            Get logger class instance
+            Gets the logger instance for this database.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteDatabase.Mapper">
             <summary>
-            Get current instance of BsonMapper used in this database instance (can be BsonMapper.Global)
+            Gets the <see cref="T:UltraLiteDB.BsonMapper"/> used by this database instance. Defaults to <see cref="F:UltraLiteDB.BsonMapper.Global"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteDatabase.Engine">
             <summary>
-            Get current database engine instance. Engine is lower data layer that works with BsonDocuments only (no mapper, no LINQ)
+            Gets the underlying <see cref="T:UltraLiteDB.UltraLiteEngine"/>. The engine operates on raw <see cref="T:UltraLiteDB.BsonDocument"/> values
+            without POCO mapping, and is lazily initialized on first access.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.#ctor(System.String,UltraLiteDB.BsonMapper,UltraLiteDB.Logger)">
             <summary>
-            Starts LiteDB database using a connection string for file system database
+            Opens a file-based database using a connection string.
             </summary>
+            <param name="connectionString">Connection string (e.g. "Filename=mydb.db;Password=secret"). See <see cref="T:UltraLiteDB.ConnectionString"/> for supported keys.</param>
+            <param name="mapper">Optional mapper for POCO serialization. Defaults to <see cref="F:UltraLiteDB.BsonMapper.Global"/>.</param>
+            <param name="log">Optional logger. A default logger is created if null.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.#ctor(UltraLiteDB.ConnectionString,UltraLiteDB.BsonMapper,UltraLiteDB.Logger)">
             <summary>
-            Starts LiteDB database using a connection string for file system database
+            Opens a file-based database using a parsed <see cref="T:UltraLiteDB.ConnectionString"/>.
             </summary>
+            <param name="connectionString">Parsed connection string with database options.</param>
+            <param name="mapper">Optional mapper for POCO serialization. Defaults to <see cref="F:UltraLiteDB.BsonMapper.Global"/>.</param>
+            <param name="log">Optional logger. A default logger is created if null.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.#ctor(System.IO.Stream,UltraLiteDB.BsonMapper,System.String,System.Boolean)">
             <summary>
-            Starts LiteDB database using a Stream disk
+            Opens a database backed by a <see cref="T:System.IO.Stream"/> (e.g. <see cref="T:System.IO.MemoryStream"/>).
+            Useful for in-memory databases or custom storage.
             </summary>
+            <param name="stream">The stream to use as the data store.</param>
+            <param name="mapper">Optional mapper for POCO serialization. Defaults to <see cref="F:UltraLiteDB.BsonMapper.Global"/>.</param>
+            <param name="password">Optional password for AES encryption of the data file.</param>
+            <param name="disposeStream">If true, the stream is disposed when the database is disposed.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.#ctor(UltraLiteDB.IDiskService,UltraLiteDB.BsonMapper,System.String,System.Nullable{System.TimeSpan},System.Int32,UltraLiteDB.Logger)">
             <summary>
-            Starts LiteDB database using a custom IDiskService with all parameters available
+            Opens a database using a custom <see cref="T:UltraLiteDB.IDiskService"/> implementation.
             </summary>
-            <param name="diskService">Custom implementation of persist data layer</param>
-            <param name="mapper">Instance of BsonMapper that map poco classes to document</param>
-            <param name="password">Password to encrypt you datafile</param>
-            <param name="timeout">Locker timeout for concurrent access</param>
-            <param name="cacheSize">Max memory pages used before flush data in Journal file (when available)</param>
-            <param name="log">Custom log implementation</param>
+            <param name="diskService">Custom disk service for data persistence.</param>
+            <param name="mapper">Optional mapper for POCO serialization. Defaults to <see cref="F:UltraLiteDB.BsonMapper.Global"/>.</param>
+            <param name="password">Optional password for AES encryption of the data file.</param>
+            <param name="timeout">Lock timeout for concurrent access. Null uses the engine default.</param>
+            <param name="cacheSize">Maximum number of memory pages cached before flushing to the journal file.</param>
+            <param name="log">Optional logger. A default logger is created if null.</param>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteDatabase.GetCollection``1(System.String)">
+            <summary>
+            Gets a typed collection by name. Creates the collection on first insert if it doesn't exist.
+            </summary>
+            <typeparam name="T">The POCO type mapped to documents in this collection.</typeparam>
+            <param name="name">Collection name (case insensitive).</param>
+            <returns>A collection instance for querying and modifying documents.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.GetCollection``1">
             <summary>
-            Get a collection using a name based on typeof(T).Name (BsonMapper.ResolveCollectionName function)
+            Gets a typed collection using the name resolved from <typeparamref name="T"/> via <see cref="F:UltraLiteDB.BsonMapper.ResolveCollectionName"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.GetCollection(System.String,UltraLiteDB.BsonAutoId)">
             <summary>
-            Get a collection using a generic BsonDocument. If collection does not exits, create a new one.
+            Gets an untyped <see cref="T:UltraLiteDB.BsonDocument"/> collection by name. Creates the collection on first insert if it doesn't exist.
             </summary>
-            <param name="name">Collection name (case insensitive)</param>
-            <param name="autoId">Define autoId data type (when document contains no _id field)</param>
+            <param name="name">Collection name (case insensitive).</param>
+            <param name="autoId">The auto-generated _id type when a document has no _id field.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.GetCollectionNames">
             <summary>
@@ -246,62 +332,116 @@
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.Shrink">
             <summary>
-            Reduce disk size re-arranging unused spaces.
+            Compacts the database file by re-arranging unused space. Uses the current password if set.
             </summary>
+            <returns>The number of bytes reduced.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteDatabase.Shrink(System.String)">
             <summary>
-            Reduce disk size re-arranging unused space. Can change password. If a temporary disk was not provided, use MemoryStream temp disk
+            Compacts the database file by re-arranging unused space, optionally changing the encryption password.
+            For file-based databases, uses a temporary file; for stream-based databases, uses a <see cref="T:System.IO.MemoryStream"/>.
+            </summary>
+            <param name="password">New password for the compacted file, or null for no encryption.</param>
+            <returns>The number of bytes reduced.</returns>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteDatabase.Dispose">
+            <summary>
+            Disposes the database engine if it has been initialized, releasing file locks and flushing pending data.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonReader">
             <summary>
-            Internal class to deserialize a byte[] into a BsonDocument using BSON data format
+            Deserializes binary BSON data into <see cref="T:UltraLiteDB.BsonDocument"/> and <see cref="T:UltraLiteDB.BsonArray"/> objects.
+            Reads the BSON wire format using <see cref="T:UltraLiteDB.ByteReader"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonReader.Deserialize(System.Byte[],System.Int32)">
             <summary>
-            Main method - deserialize using ByteReader helper
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a byte array.
+            </summary>
+            <param name="bson">BSON-encoded byte array.</param>
+            <param name="offset">Byte offset to start reading from.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonReader.Deserialize(System.ArraySegment{System.Byte})">
+            <summary>
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from an <see cref="T:System.ArraySegment`1"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonReader.ReadDocument(UltraLiteDB.ByteReader)">
             <summary>
-            Read a BsonDocument from reader
+            Reads a complete BSON document (length prefix + elements + terminator) from the reader.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonReader.ReadArray(UltraLiteDB.ByteReader)">
             <summary>
-            Read an BsonArray from reader
+            Reads a complete BSON array (length prefix + indexed elements + terminator) from the reader.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonReader.ReadElement(UltraLiteDB.ByteReader,System.String@)">
             <summary>
-            Reads an element (key-value) from an reader
+            Reads a single BSON element (type byte + CString key + value) and outputs the field name.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonSerializer">
             <summary>
-            Class to call method for convert BsonDocument to/from byte[] - based on http://bsonspec.org/spec.html
+            Static facade for converting <see cref="T:UltraLiteDB.BsonDocument"/> to/from binary BSON byte arrays.
+            Based on the BSON spec (bsonspec.org). Delegates to <see cref="T:UltraLiteDB.BsonWriter"/> and <see cref="T:UltraLiteDB.BsonReader"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonSerializer.Serialize(UltraLiteDB.BsonDocument)">
+            <summary>
+            Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> to a new byte array in BSON format.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonSerializer.SerializeTo(UltraLiteDB.BsonDocument,System.Byte[],System.Int32)">
+            <summary>
+            Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> into an existing byte array at the specified offset.
+            </summary>
+            <returns>The writer position after serialization (offset + bytes written).</returns>
+        </member>
+        <member name="M:UltraLiteDB.BsonSerializer.Deserialize(System.Byte[],System.Int32)">
+            <summary>
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a BSON byte array.
+            </summary>
+            <param name="buffer">The BSON-encoded byte array.</param>
+            <param name="offset">Byte offset to start reading from.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonSerializer.Deserialize(System.ArraySegment{System.Byte})">
+            <summary>
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a BSON <see cref="T:System.ArraySegment`1"/>.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonWriter">
             <summary>
-            Internal class to serialize a BsonDocument to BSON data format (byte[])
+            Serializes <see cref="T:UltraLiteDB.BsonDocument"/> and <see cref="T:UltraLiteDB.BsonArray"/> objects into binary BSON format.
+            Uses <see cref="T:UltraLiteDB.ByteWriter"/> for efficient byte output.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonWriter.Serialize(UltraLiteDB.BsonDocument)">
             <summary>
-            Main method - serialize document. Uses ByteWriter
+            Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> into a new byte array.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonWriter.SerializeTo(UltraLiteDB.BsonDocument,System.Byte[],System.Int32)">
+            <summary>
+            Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> into an existing byte array at the specified offset.
+            </summary>
+            <returns>The writer position after serialization.</returns>
         </member>
         <member name="M:UltraLiteDB.BsonWriter.WriteDocument(UltraLiteDB.ByteWriter,UltraLiteDB.BsonDocument)">
             <summary>
-            Write a bson document
+            Writes a BSON document (length prefix + elements + 0x00 terminator) to the writer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonWriter.WriteArray(UltraLiteDB.ByteWriter,UltraLiteDB.BsonArray)">
+            <summary>
+            Writes a BSON array (length prefix + indexed elements + 0x00 terminator) to the writer.
             </summary>
         </member>
         <member name="T:UltraLiteDB.DirectBsonReader">
             <summary>
-            Reads BSON bytes directly into C# objects, bypassing BsonDocument creation
+            Deserializes BSON bytes directly into C# objects, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
+            Reduces GC pressure for high-throughput deserialization. Supports polymorphism via _t/_type discriminators.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
@@ -341,7 +481,8 @@
         </member>
         <member name="T:UltraLiteDB.DirectBsonWriter">
             <summary>
-            Writes BSON bytes directly from C# objects, bypassing BsonDocument creation
+            Serializes C# objects directly to BSON bytes, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
+            Reduces GC pressure for high-throughput serialization. Supports polymorphism via _t/_type discriminators.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Int32)">
@@ -370,34 +511,151 @@
             Used as fallback for custom serializers and BsonValue-typed properties.
             </summary>
         </member>
+        <member name="T:UltraLiteDB.BsonArray">
+            <summary>
+            Represents a BSON array — an ordered list of <see cref="T:UltraLiteDB.BsonValue"/> elements.
+            Implements <see cref="T:System.Collections.Generic.IList`1"/> for indexed access. Null items are stored as <see cref="F:UltraLiteDB.BsonValue.Null"/>.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.BsonAutoId">
             <summary>
-            All supported BsonTypes supported in AutoId insert operation
+            Specifies the data type for auto-generated _id values when a document is inserted without an _id field.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.BsonDocument">
+            <summary>
+            Represents a BSON document — an ordered set of string-keyed <see cref="T:UltraLiteDB.BsonValue"/> fields.
+            Keys are case-insensitive. Implements <see cref="T:System.Collections.Generic.IDictionary`2"/> for convenient field access.
+            This is the primary unit of storage in UltraLiteDB.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.#ctor">
+            <summary>
+            Creates an empty BSON document.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.#ctor(System.Collections.Concurrent.ConcurrentDictionary{System.String,UltraLiteDB.BsonValue})">
+            <summary>
+            Creates a BSON document from a <see cref="T:System.Collections.Concurrent.ConcurrentDictionary`2"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.#ctor(System.Collections.Generic.IDictionary{System.String,UltraLiteDB.BsonValue})">
+            <summary>
+            Creates a BSON document from a dictionary of string keys to <see cref="T:UltraLiteDB.BsonValue"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.#ctor(System.Collections.IDictionary)">
+            <summary>
+            Creates a BSON document from a non-generic dictionary. Values are converted via <see cref="M:UltraLiteDB.BsonValue.FromObject(System.Object)"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonDocument.RawId">
             <summary>
-            Get/Set position of this document inside database. It's filled when used in Find operation.
+            Internal page address of this document within the data file. Populated during Find operations.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonDocument.Item(System.String)">
             <summary>
-            Get/Set a field for document. Fields are case sensitive
+            Gets or sets a field by key (case-insensitive). Returns <see cref="F:UltraLiteDB.BsonValue.Null"/> for missing keys.
+            Setting a null value stores <see cref="F:UltraLiteDB.BsonValue.Null"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetBool(System.String)">
+            <summary>
+            Gets a boolean field value, or null if the key is missing or not a boolean.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetBoolOrDefault(System.String,System.Boolean)">
+            <summary>
+            Gets a boolean field value, or <paramref name="def"/> if the key is missing or not a boolean.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetString(System.String)">
+            <summary>
+            Gets a string field value, or null if the key is missing or not a string.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetStringOrDefault(System.String,System.String)">
+            <summary>
+            Gets a string field value, or <paramref name="def"/> if the key is missing or not a string.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetInt32(System.String)">
+            <summary>
+            Gets a numeric field value as Int32, or null if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetInt32OrDefault(System.String,System.Int32)">
+            <summary>
+            Gets a numeric field value as Int32, or <paramref name="def"/> if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetInt64(System.String)">
+            <summary>
+            Gets a numeric field value as Int64, or null if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetInt64OrDefault(System.String,System.Int64)">
+            <summary>
+            Gets a numeric field value as Int64, or <paramref name="def"/> if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetSingle(System.String)">
+            <summary>
+            Gets a numeric field value as Single, or null if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetSingleOrDefault(System.String,System.Single)">
+            <summary>
+            Gets a numeric field value as Single, or <paramref name="def"/> if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetDouble(System.String)">
+            <summary>
+            Gets a numeric field value as Double, or null if the key is missing or not numeric.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.GetDoubleOrDefault(System.String,System.Double)">
+            <summary>
+            Gets a numeric field value as Double, or <paramref name="def"/> if the key is missing or not numeric.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonDocument.GetElements">
             <summary>
-            Get all document elements - Return "_id" as first of all (if exists)
+            Enumerates all document fields, yielding "_id" first (if present), then remaining fields.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonDocument.CopyTo(UltraLiteDB.BsonDocument)">
+            <summary>
+            Copies all fields from this document into <paramref name="other"/>, overwriting existing keys.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.BsonFields">
+            <summary>
+            Extracts a single named field value from a <see cref="T:UltraLiteDB.BsonDocument"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonFields.#ctor(System.String)">
+            <summary>
+            Creates a field extractor for the specified field name.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonFields.Execute(UltraLiteDB.BsonDocument,System.Boolean)">
+            <summary>
+            Extracts the field value from the document. Yields <see cref="F:UltraLiteDB.BsonValue.Null"/> if the field is missing
+            and <paramref name="includeNullIfEmpty"/> is true.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonType">
             <summary>
-            All supported BsonTypes in sort order
+            Enumerates all supported BSON value types. Numeric values define the sort order used for cross-type comparisons.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonValue">
             <summary>
-            Represent a Bson Value used in BsonDocument
+            Base type for all BSON values. Wraps a .NET value with its <see cref="T:UltraLiteDB.BsonType"/> tag.
+            Supports implicit conversions to/from common .NET types, comparison operators, and arithmetic on numeric types.
+            Subclassed by <see cref="T:UltraLiteDB.BsonDocument"/> and <see cref="T:UltraLiteDB.BsonArray"/>.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonValue.Null">
@@ -417,98 +675,191 @@
         </member>
         <member name="P:UltraLiteDB.BsonValue.Type">
             <summary>
-            Indicate BsonType of this BsonValue
+            Gets the BSON type of this value.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonValue.RawValue">
             <summary>
-            Get internal .NET value object
+            Gets the underlying .NET value (e.g. int, string, Dictionary, List).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonValue.FromObject(System.Object)">
+            <summary>
+            Creates a <see cref="T:UltraLiteDB.BsonValue"/> from a .NET object. Supports primitive types, collections, and BsonValue.
+            For complex POCO types, use <see cref="M:UltraLiteDB.BsonMapper.ToDocument(System.Type,System.Object)"/> instead.
+            </summary>
+            <exception cref="T:System.InvalidCastException">Thrown when the value type is not a supported BSON type.</exception>
+        </member>
+        <member name="M:UltraLiteDB.BsonValue.AsType``1">
+            <summary>
+            Casts the underlying <see cref="P:UltraLiteDB.BsonValue.RawValue"/> to <typeparamref name="T"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonValue.Item(System.String)">
             <summary>
-            Get/Set a field for document. Fields are case sensitive - Works only when value are document
+            Gets or sets a field by name. Only valid on <see cref="T:UltraLiteDB.BsonDocument"/>; throws on other types.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonValue.Item(System.Int32)">
             <summary>
-            Get/Set value in array position. Works only when value are array
+            Gets or sets a value by array index. Only valid on <see cref="T:UltraLiteDB.BsonArray"/>; throws on other types.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonValue.GetBytesCount(System.Boolean)">
             <summary>
-            Returns how many bytes this BsonValue will consume when converted into binary BSON
-            If recalc = false, use cached length value (from Array/Document only)
+            Returns the number of bytes this value will occupy in binary BSON format.
             </summary>
+            <param name="recalc">If false, returns a cached length for Document/Array types. If true, recalculates.</param>
         </member>
         <member name="M:UltraLiteDB.BsonValue.GetBytesCountElement(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Get how many bytes one single element will used in BSON format
+            Calculates the BSON byte size for a single key-value element (type byte + key CString + value bytes + variant header).
             </summary>
         </member>
         <member name="T:UltraLiteDB.JsonReader">
             <summary>
-            A class that read a json string using a tokenizer (without regex)
+            Reads and deserializes JSON text into <see cref="T:UltraLiteDB.BsonValue"/> instances using a
+            <see cref="T:UltraLiteDB.Tokenizer"/>-based parser (no regular expressions). Supports JSON extended
+            data types such as <c>$oid</c>, <c>$date</c>, <c>$guid</c>, <c>$binary</c>,
+            <c>$numberLong</c>, and <c>$numberDecimal</c>.
             </summary>
+        </member>
+        <member name="P:UltraLiteDB.JsonReader.Position">
+            <summary>
+            Gets the current character position in the input stream.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.#ctor(System.IO.TextReader)">
+            <summary>
+            Initializes a new instance of <see cref="T:UltraLiteDB.JsonReader"/> that reads from the specified <see cref="T:System.IO.TextReader"/>.
+            </summary>
+            <param name="reader">The <see cref="T:System.IO.TextReader"/> containing JSON text to parse.</param>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="reader"/> is null.</exception>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.#ctor(UltraLiteDB.Tokenizer)">
+            <summary>
+            Initializes a new instance of <see cref="T:UltraLiteDB.JsonReader"/> using an existing <see cref="T:UltraLiteDB.Tokenizer"/>.
+            </summary>
+            <param name="tokenizer">The tokenizer to read tokens from.</param>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="tokenizer"/> is null.</exception>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.Deserialize">
+            <summary>
+            Deserializes the next JSON value from the input. Returns <see cref="F:UltraLiteDB.BsonValue.Null"/> if
+            the end of input is reached.
+            </summary>
+            <returns>The deserialized <see cref="T:UltraLiteDB.BsonValue"/>.</returns>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.DeserializeArray">
+            <summary>
+            Deserializes a JSON array from the input, yielding each element lazily as a <see cref="T:UltraLiteDB.BsonValue"/>.
+            Expects the input to start with an opening bracket (<c>[</c>).
+            </summary>
+            <returns>An <see cref="T:System.Collections.Generic.IEnumerable`1"/> of the array elements.</returns>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.ReadValue(UltraLiteDB.Token)">
+            <summary>
+            Reads and converts a single <see cref="T:UltraLiteDB.Token"/> (and any subsequent tokens it implies)
+            into the corresponding <see cref="T:UltraLiteDB.BsonValue"/>.
+            </summary>
+            <param name="token">The current token to interpret.</param>
+            <returns>The <see cref="T:UltraLiteDB.BsonValue"/> represented by the token.</returns>
+            <exception cref="T:UltraLiteDB.UltraLiteException">Thrown when an unexpected token is encountered.</exception>
         </member>
         <member name="T:UltraLiteDB.JsonSerializer">
             <summary>
-            Static class for serialize/deserialize BsonDocuments into json extended format
+            Provides static methods for serializing and deserializing <see cref="T:UltraLiteDB.BsonValue"/> instances
+            to and from JSON extended format strings.
             </summary>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.Serialize(UltraLiteDB.BsonValue)">
             <summary>
-            Json serialize a BsonValue into a String
+            Serializes a <see cref="T:UltraLiteDB.BsonValue"/> into a JSON string.
             </summary>
+            <param name="value">The <see cref="T:UltraLiteDB.BsonValue"/> to serialize.</param>
+            <returns>A JSON string representation of the value.</returns>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.Serialize(UltraLiteDB.BsonValue,System.IO.TextWriter)">
             <summary>
-            Json serialize a BsonValue into a TextWriter
+            Serializes a <see cref="T:UltraLiteDB.BsonValue"/> as JSON, writing the output to a <see cref="T:System.IO.TextWriter"/>.
             </summary>
+            <param name="value">The <see cref="T:UltraLiteDB.BsonValue"/> to serialize. If null, <see cref="F:UltraLiteDB.BsonValue.Null"/> is used.</param>
+            <param name="writer">The <see cref="T:System.IO.TextWriter"/> to write the JSON output to.</param>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.Serialize(UltraLiteDB.BsonValue,System.Text.StringBuilder)">
             <summary>
-            Json serialize a BsonValue into a StringBuilder
+            Serializes a <see cref="T:UltraLiteDB.BsonValue"/> as JSON, writing the output to a <see cref="T:System.Text.StringBuilder"/>.
             </summary>
+            <param name="value">The <see cref="T:UltraLiteDB.BsonValue"/> to serialize. If null, <see cref="F:UltraLiteDB.BsonValue.Null"/> is used.</param>
+            <param name="sb">The <see cref="T:System.Text.StringBuilder"/> to append the JSON output to.</param>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.Deserialize(System.String)">
             <summary>
-            Deserialize a Json string into a BsonValue
+            Deserializes a JSON string into a <see cref="T:UltraLiteDB.BsonValue"/>.
             </summary>
+            <param name="json">The JSON string to deserialize.</param>
+            <returns>The deserialized <see cref="T:UltraLiteDB.BsonValue"/>.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="json"/> is null.</exception>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.Deserialize(System.IO.TextReader)">
             <summary>
-            Deserialize a Json TextReader into a BsonValue
+            Deserializes JSON from a <see cref="T:System.IO.TextReader"/> into a <see cref="T:UltraLiteDB.BsonValue"/>.
             </summary>
+            <param name="reader">The <see cref="T:System.IO.TextReader"/> containing JSON to deserialize.</param>
+            <returns>The deserialized <see cref="T:UltraLiteDB.BsonValue"/>.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="reader"/> is null.</exception>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.DeserializeArray(System.String)">
             <summary>
-            Deserialize a json array as an IEnumerable of BsonValue
+            Deserializes a JSON array string into a lazily-enumerated sequence of <see cref="T:UltraLiteDB.BsonValue"/> elements.
             </summary>
+            <param name="json">The JSON array string to deserialize.</param>
+            <returns>An <see cref="T:System.Collections.Generic.IEnumerable`1"/> yielding each element of the JSON array.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="json"/> is null.</exception>
         </member>
         <member name="M:UltraLiteDB.JsonSerializer.DeserializeArray(System.IO.TextReader)">
             <summary>
-            Deserialize a json array as an IEnumerable of BsonValue reading on demand TextReader
+            Deserializes a JSON array from a <see cref="T:System.IO.TextReader"/> into a lazily-enumerated sequence of
+            <see cref="T:UltraLiteDB.BsonValue"/> elements, reading from the stream on demand.
+            </summary>
+            <param name="reader">The <see cref="T:System.IO.TextReader"/> containing a JSON array to deserialize.</param>
+            <returns>An <see cref="T:System.Collections.Generic.IEnumerable`1"/> yielding each element of the JSON array.</returns>
+            <exception cref="T:System.ArgumentNullException">Thrown when <paramref name="reader"/> is null.</exception>
+        </member>
+        <member name="T:UltraLiteDB.JsonWriter">
+            <summary>
+            Writes <see cref="T:UltraLiteDB.BsonValue"/> instances as JSON text to a <see cref="T:System.IO.TextWriter"/>.
+            Supports pretty-printing with configurable indentation and encodes extended BSON data types
+            (e.g., <c>$oid</c>, <c>$date</c>, <c>$binary</c>) using the JSON extended format.
             </summary>
         </member>
         <member name="P:UltraLiteDB.JsonWriter.Indent">
             <summary>
-            Get/Set indent size
+            Gets or sets the number of spaces per indentation level when <see cref="P:UltraLiteDB.JsonWriter.Pretty"/> is enabled. Default is 4.
             </summary>
         </member>
         <member name="P:UltraLiteDB.JsonWriter.Pretty">
             <summary>
-            Get/Set if writer must print pretty (with new line/indent)
+            Gets or sets whether the writer outputs formatted JSON with newlines and indentation. Default is <c>false</c>.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.JsonWriter.#ctor(System.IO.TextWriter)">
+            <summary>
+            Initializes a new instance of <see cref="T:UltraLiteDB.JsonWriter"/> that writes JSON output to the specified <see cref="T:System.IO.TextWriter"/>.
+            </summary>
+            <param name="writer">The <see cref="T:System.IO.TextWriter"/> to write JSON output to.</param>
         </member>
         <member name="M:UltraLiteDB.JsonWriter.Serialize(UltraLiteDB.BsonValue)">
             <summary>
-            Serialize value into text writer
+            Serializes a <see cref="T:UltraLiteDB.BsonValue"/> as JSON to the underlying <see cref="T:System.IO.TextWriter"/>.
+            Resets indentation state before writing.
             </summary>
+            <param name="value">The <see cref="T:UltraLiteDB.BsonValue"/> to serialize. If null, <see cref="F:UltraLiteDB.BsonValue.Null"/> is used.</param>
         </member>
         <member name="T:UltraLiteDB.ObjectId">
             <summary>
-            Represent a 12-bytes BSON type used in document Id
+            A 12-byte unique identifier used as the default document _id type.
+            Layout: 4-byte timestamp + 3-byte machine hash + 2-byte PID + 3-byte auto-incrementing counter.
             </summary>
         </member>
         <member name="P:UltraLiteDB.ObjectId.Empty">
@@ -595,7 +946,7 @@
         </member>
         <member name="M:UltraLiteDB.ObjectId.ToByteArray(System.Byte[],System.Int32)">
             <summary>
-            Represent ObjectId as 12 bytes array
+            Writes the 12-byte ObjectId into the specified byte array at the given offset.
             </summary>
         </member>
         <member name="M:UltraLiteDB.ObjectId.NewObjectId">
@@ -605,12 +956,13 @@
         </member>
         <member name="T:UltraLiteDB.FileDiskService">
             <summary>
-            Implement NTFS File disk
+            File-based <see cref="T:UltraLiteDB.IDiskService"/> implementation that reads/writes pages to a physical file on disk.
+            Supports write-ahead journaling (appended to the end of the data file) and configurable file options.
             </summary>
         </member>
         <member name="F:UltraLiteDB.FileDiskService.PAGE_TYPE_POSITION">
             <summary>
-            Position, on page, about page type
+            Byte offset within a page buffer where the <see cref="T:UltraLiteDB.PageType"/> byte is stored.
             </summary>
         </member>
         <member name="F:UltraLiteDB.FileDiskService.LOCK_INITIAL_POSITION">
@@ -655,7 +1007,7 @@
         </member>
         <member name="M:UltraLiteDB.FileDiskService.ClearJournal(System.UInt32)">
             <summary>
-            Shrink datafile to crop journal area
+            Truncate the data file to remove the appended journal area after successful recovery or commit.
             </summary>
         </member>
         <member name="M:UltraLiteDB.FileDiskService.Flush">
@@ -668,49 +1020,55 @@
             Create a new filestream. Can be synced over async task (netstandard)
             </summary>
         </member>
+        <member name="T:UltraLiteDB.IDiskService">
+            <summary>
+            Abstraction over physical storage for the database engine. Implementations handle
+            reading/writing pages and optional write-ahead journal support for crash recovery.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.IDiskService.Initialize(UltraLiteDB.Logger,System.String)">
             <summary>
-            Open data file (creating if doest exists) and return header content bytes
+            Open or create the data file and initialize internal streams. Must be called before any read/write operations.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.ReadPage(System.UInt32)">
             <summary>
-            Read a page from disk datafile
+            Read a single page (BasePage.PAGE_SIZE bytes) from the data file.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.WritePage(System.UInt32,System.Byte[])">
             <summary>
-            Write a page in disk datafile
+            Write a single page (BasePage.PAGE_SIZE bytes) to the data file.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.SetLength(System.Int64)">
             <summary>
-            Set datafile length before start writing in disk
+            Pre-allocate the data file to the specified length before writing new pages.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IDiskService.FileLength">
             <summary>
-            Gets file length in bytes
+            Gets the current data file length in bytes.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IDiskService.IsJournalEnabled">
             <summary>
-            Get if journal are enabled or not. Can optimize with has no jounal
+            Whether this disk service supports write-ahead journaling. When false, the engine skips journal I/O.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.ReadJournal(System.UInt32)">
             <summary>
-            Read journal file returning IEnumerable of pages
+            Read all pages from the journal file for crash recovery. Returns raw page buffers in write order.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.WriteJournal(System.Collections.Generic.ICollection{System.Byte[]},System.UInt32)">
             <summary>
-            Write original bytes page in a journal file (in sequence) - if journal not exists, create.
+            Write original (pre-modification) page bytes to the journal file for rollback support. Creates the journal if it does not exist.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.ClearJournal(System.UInt32)">
             <summary>
-            Clear journal file
+            Delete or truncate the journal file after a successful commit.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IDiskService.Flush">
@@ -720,8 +1078,8 @@
         </member>
         <member name="T:UltraLiteDB.StreamDiskService">
             <summary>
-            Implement generic Stream disk service. Used for any read/write/seek stream
-            No journal implemented
+            Stream-based <see cref="T:UltraLiteDB.IDiskService"/> implementation that reads/writes pages to any seekable <see cref="T:System.IO.Stream"/>.
+            Does not support journaling or flush — suitable for in-memory streams or scenarios where crash recovery is not needed.
             </summary>
         </member>
         <member name="F:UltraLiteDB.StreamDiskService.PAGE_TYPE_POSITION">
@@ -776,12 +1134,18 @@
         </member>
         <member name="T:UltraLiteDB.TempDiskService">
             <summary>
-            Implement temporary disk access. Open datafile only when be used and delete when dispose. No journal, no sharing
+            Temporary file-based <see cref="T:UltraLiteDB.IDiskService"/> that lazily creates a temp file on first use and deletes it on dispose.
+            Used internally for sort operations that exceed memory. No journaling or file sharing support.
             </summary>
         </member>
         <member name="F:UltraLiteDB.TempDiskService.PAGE_TYPE_POSITION">
             <summary>
             Position, on page, about page type
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.TempDiskService.InternalInitialize">
+            <summary>
+            Lazily creates the temporary file and opens a FileStream to it.
             </summary>
         </member>
         <member name="M:UltraLiteDB.TempDiskService.ReadPage(System.UInt32)">
@@ -836,157 +1200,199 @@
         </member>
         <member name="T:UltraLiteDB.UltraLiteEngine">
             <summary>
-            A public class that take care of all engine data structure access - it´s basic implementation of a NoSql database
-            Its isolated from complete solution - works on low level only (no linq, no poco... just Bson objects)
+            Core database engine that manages all low-level data structure access for UltraLiteDB.
+            Operates directly on BSON objects without LINQ or POCO support. Provides CRUD operations,
+            indexing, collection management, and transaction handling over an <see cref="T:UltraLiteDB.IDiskService"/>.
+            This class is implemented as a partial class with operations split across multiple files.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Min(System.String,System.String)">
             <summary>
-            Returns first value from an index (first is min value)
+            Returns the minimum value from the specified index field in the given collection.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="field">The indexed field name to retrieve the minimum value from.</param>
+            <returns>The minimum <see cref="T:UltraLiteDB.BsonValue"/> in the index, or <see cref="F:UltraLiteDB.BsonValue.MinValue"/> if the collection or index does not exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Max(System.String,System.String)">
             <summary>
-            Returns last value from an index (last is max value)
+            Returns the maximum value from the specified index field in the given collection.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="field">The indexed field name to retrieve the maximum value from.</param>
+            <returns>The maximum <see cref="T:UltraLiteDB.BsonValue"/> in the index, or <see cref="F:UltraLiteDB.BsonValue.MaxValue"/> if the collection or index does not exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Count(System.String,UltraLiteDB.Query)">
             <summary>
-            Count all nodes from a query execution - do not deserialize documents to count. If query is null, use Collection counter variable
+            Counts documents matching a query without fully deserializing them (unless the query requires filtering).
+            If <paramref name="query"/> is <c>null</c>, returns the collection's stored document count.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="query">Optional query to filter documents. If <c>null</c>, returns total document count.</param>
+            <returns>The number of matching documents, or 0 if the collection does not exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Exists(System.String,UltraLiteDB.Query)">
             <summary>
-            Check if has at least one node in a query execution - do not deserialize documents to check
+            Checks whether at least one document matching the query exists in the collection.
+            Avoids full deserialization when an index is used without filtering.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="query">The query to evaluate.</param>
+            <returns><c>true</c> if at least one matching document exists; otherwise <c>false</c>.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.GetCollectionNames">
             <summary>
-            Returns all collection inside datafile
+            Returns all collection names stored in the database header page.
             </summary>
+            <returns>An enumerable of collection name strings.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.DropCollection(System.String)">
             <summary>
-            Drop collection including all documents, indexes and extended pages
+            Drops a collection including all its documents, indexes, and extended pages.
             </summary>
+            <param name="collection">The collection name to drop.</param>
+            <returns><c>true</c> if the collection was found and dropped; <c>false</c> if it did not exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.RenameCollection(System.String,System.String)">
             <summary>
-            Rename a collection
+            Renames a collection. Throws if <paramref name="newName"/> already exists.
             </summary>
+            <param name="collection">The current collection name.</param>
+            <param name="newName">The new collection name.</param>
+            <returns><c>true</c> if the collection was found and renamed; <c>false</c> if it did not exist.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Delete(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Implement delete command based on _id value. Returns true if deleted
+            Deletes a single document by its <c>_id</c> value.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="id">The <c>_id</c> value of the document to delete.</param>
+            <returns><c>true</c> if the document was found and deleted; otherwise <c>false</c>.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Delete(System.String,UltraLiteDB.Query)">
             <summary>
-            Implements delete based on a query result
+            Deletes all documents matching a query. Removes associated index nodes and data pages.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="query">The query selecting documents to delete.</param>
+            <returns>The number of documents deleted.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Find(System.String,UltraLiteDB.Query,System.Int32,System.Int32)">
             <summary>
-            Find for documents in a collection using Query definition
+            Finds documents in a collection matching a <see cref="T:UltraLiteDB.Query"/>, with optional skip/limit pagination.
+            Uses a <see cref="T:UltraLiteDB.QueryCursor"/> to stream results in batches.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="query">The query filter.</param>
+            <param name="skip">Number of documents to skip.</param>
+            <param name="limit">Maximum number of documents to return.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.FindOne(System.String,UltraLiteDB.Query)">
             <summary>
-            Find first or default document based in collection based on Query filter
+            Returns the first document matching the query, or null if none found.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.FindById(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Find first or default document based in _id field
+            Returns the document with the specified _id value, or null if not found.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.FindAll(System.String)">
             <summary>
-            Returns all documents inside collection order by _id index.
+            Returns all documents in the collection ordered by the _id index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.EnsureIndex(System.String,System.String,System.Boolean)">
             <summary>
-            Create a new index (or do nothing if already exists) to a collection/field
+            Creates a new index on the specified field, or returns false if the index already exists.
+            Reads all existing documents to populate the new index. Maximum 16 indexes per collection.
             </summary>
+            <param name="collection">The collection name.</param>
+            <param name="field">The field expression to index (supports dot notation).</param>
+            <param name="unique">If true, enforces unique values for this index.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.DropIndex(System.String,System.String)">
             <summary>
-            Drop an index from a collection
+            Removes an index from a collection. Returns false if the collection or index does not exist.
+            The _id index cannot be dropped.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.GetIndexes(System.String)">
             <summary>
-            List all indexes inside a collection
+            Enumerates all indexes defined on a collection, including the _id primary key index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Info">
             <summary>
-            Get internal information about database. Can filter collections
+            Returns a <see cref="T:UltraLiteDB.BsonDocument"/> with internal database metadata: user version,
+            encryption status, file size, and details for each collection (name, page ID, document count, indexes).
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Insert(System.String,UltraLiteDB.BsonDocument,UltraLiteDB.BsonAutoId)">
             <summary>
-            Implements insert documents in a collection - returns _id value
+            Inserts a single document into a collection. Returns the document's _id value (auto-generated if not set).
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Insert(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonDocument},UltraLiteDB.BsonAutoId)">
             <summary>
-            Implements insert documents in a collection - use a buffer to commit transaction in each buffer count
+            Inserts multiple documents into a collection within a single transaction. Returns the number of documents inserted.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.InsertBulk(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonDocument},System.Int32,UltraLiteDB.BsonAutoId)">
             <summary>
-            Bulk documents to a collection - use data chunks for most efficient insert
+            Inserts documents in batches for efficient bulk loading. Each batch runs in its own transaction.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.UpsertBulk(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonDocument},System.Int32,UltraLiteDB.BsonAutoId)">
             <summary>
-            Bulk upsert documents to a collection - use data chunks for most efficient insert
+            Upserts documents in batches for efficient bulk loading. Each batch runs in its own transaction.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.InsertDocument(UltraLiteDB.CollectionPage,UltraLiteDB.BsonDocument,UltraLiteDB.BsonAutoId)">
             <summary>
-            Internal implementation of insert a document
+            Core insert logic: assigns auto-ID if needed, serializes the document to BSON bytes,
+            stores in data pages, creates the PK index node, and populates all secondary indexes.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Shrink(System.String,UltraLiteDB.IDiskService)">
             <summary>
-            Reduce disk size re-arranging unused spaces. Can change password. If temporary disk was not provided, use MemoryStream temp disk
+            Compacts the database by copying all data to a temporary file, eliminating fragmentation.
+            Optionally changes the encryption password. Returns the number of bytes saved.
             </summary>
+            <param name="password">New password, or null to remove encryption.</param>
+            <param name="tempDisk">Temporary disk for the compacted copy; defaults to an in-memory stream.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Update(System.String,UltraLiteDB.BsonDocument)">
             <summary>
-            Implement update command to a document inside a collection. Returns true if document was updated
+            Updates a single document in a collection by its _id. Returns true if the document was found and updated.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Update(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonDocument})">
             <summary>
-            Implement update command to a document inside a collection. Return number of documents updated
+            Updates multiple documents in a collection. Returns the number of documents successfully updated.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.UpdateDocument(UltraLiteDB.CollectionPage,UltraLiteDB.BsonDocument)">
             <summary>
-            Implement internal update document
+            Core update logic: finds the document by _id, re-serializes it, updates data storage,
+            and reconciles all secondary index nodes (deleting stale keys, inserting new ones).
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Upsert(System.String,UltraLiteDB.BsonDocument,UltraLiteDB.BsonAutoId)">
             <summary>
-            Implement upsert command to documents in a collection. Calls update on all documents,
-            then any documents not updated are then attempted to insert.
-            This will have the side effect of throwing if duplicate items are attempted to be inserted. Returns true if document is inserted
+            Inserts or updates a single document. Attempts update first; if the document has no _id or is not found, inserts it.
+            Returns true if the document was inserted (false if updated).
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Upsert(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonDocument},UltraLiteDB.BsonAutoId)">
             <summary>
-            Implement upsert command to documents in a collection. Calls update on all documents,
-            then any documents not updated are then attempted to insert.
-            This will have the side effect of throwing if duplicate items are attempted to be inserted.
+            Inserts or updates multiple documents. Returns the count of documents that were inserted (not updated).
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteEngine.UserVersion">
             <summary>
-            Get/Set User version internal database
+            Gets or sets a user-defined version number stored in the database header.
+            Useful for tracking schema migrations.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteEngine.Log">
@@ -996,38 +1402,51 @@
         </member>
         <member name="P:UltraLiteDB.UltraLiteEngine.CacheSize">
             <summary>
-            Get memory cache size limit. Works only with journal enabled (number in pages). If journal is disabled, pages in cache can exceed this limit. Default is 5000 pages
+            Gets the memory cache size limit in pages. Only enforced when journaling is enabled;
+            if journaling is disabled, cached pages may exceed this limit. Default is 5000 pages.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteEngine.CacheUsed">
             <summary>
-            Get how many pages are on cache
+            Gets the number of clean (non-dirty) pages currently held in cache.
             </summary>
         </member>
         <member name="P:UltraLiteDB.UltraLiteEngine.Timeout">
             <summary>
-            Gets time waiting write lock operation before throw UltraLiteException timeout
+            Gets the maximum time to wait for a write lock before throwing a timeout <see cref="T:UltraLiteDB.UltraLiteException"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.#ctor(System.String,System.Boolean)">
             <summary>
-            Initialize UltraLiteEngine using default FileDiskService
+            Initializes a new <see cref="T:UltraLiteDB.UltraLiteEngine"/> using the default <see cref="T:UltraLiteDB.FileDiskService"/>.
             </summary>
+            <param name="filename">Path to the database file.</param>
+            <param name="journal">Whether to enable write-ahead journaling for crash recovery.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.#ctor(System.String,System.String,System.Boolean)">
             <summary>
-            Initialize UltraLiteEngine with password encryption
+            Initializes a new <see cref="T:UltraLiteDB.UltraLiteEngine"/> with AES password encryption using the default <see cref="T:UltraLiteDB.FileDiskService"/>.
             </summary>
+            <param name="filename">Path to the database file.</param>
+            <param name="password">Password used for AES encryption of data pages.</param>
+            <param name="journal">Whether to enable write-ahead journaling for crash recovery.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.#ctor(System.IO.Stream,System.String)">
             <summary>
-            Initialize UltraLiteEngine using StreamDiskService
+            Initializes a new <see cref="T:UltraLiteDB.UltraLiteEngine"/> backed by a <see cref="T:System.IO.Stream"/> via <see cref="T:UltraLiteDB.StreamDiskService"/>.
             </summary>
+            <param name="stream">The stream to use as the database storage.</param>
+            <param name="password">Optional password for AES encryption of data pages.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.#ctor(UltraLiteDB.IDiskService,System.String,System.Nullable{System.TimeSpan},System.Int32,UltraLiteDB.Logger)">
             <summary>
-            Initialize UltraLiteEngine using custom disk service implementation and full engine options
+            Initializes a new <see cref="T:UltraLiteDB.UltraLiteEngine"/> using a custom <see cref="T:UltraLiteDB.IDiskService"/> implementation with full engine options.
             </summary>
+            <param name="disk">The disk service implementation for storage I/O.</param>
+            <param name="password">Optional password for AES encryption of data pages.</param>
+            <param name="timeout">Maximum time to wait for a write lock. Defaults to 1 minute.</param>
+            <param name="cacheSize">Maximum number of pages to hold in the memory cache. Defaults to 5000.</param>
+            <param name="log">Optional <see cref="T:UltraLiteDB.Logger"/> instance for diagnostic output.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.InitializeServices">
             <summary>
@@ -1036,22 +1455,64 @@
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.GetCollectionPage(System.String,System.Boolean)">
             <summary>
-            Get the collection page only when needed. Gets from pager always to grantee that wil be the last (in case of clear cache will get a new one - pageID never changes)
+            Retrieves the <see cref="T:UltraLiteDB.CollectionPage"/> for the given collection name, optionally creating it if it does not exist.
+            Always reads from the pager to guarantee the latest version (the page ID never changes for a collection).
             </summary>
+            <param name="name">The collection name, or <c>null</c> to return <c>null</c>.</param>
+            <param name="addIfNotExits">If <c>true</c>, creates the collection when it does not exist.</param>
+            <returns>The <see cref="T:UltraLiteDB.CollectionPage"/>, or <c>null</c> if not found and <paramref name="addIfNotExits"/> is <c>false</c>.</returns>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Transaction``1(System.String,System.Boolean,System.Func{UltraLiteDB.CollectionPage,``0})">
             <summary>
-            Encapsulate all operations in a single write transaction
+            Executes an operation within a write transaction. Persists dirty pages on success or discards them on failure.
+            </summary>
+            <typeparam name="T">The return type of the operation.</typeparam>
+            <param name="collection">The collection name to operate on.</param>
+            <param name="addIfNotExists">If <c>true</c>, creates the collection when it does not exist.</param>
+            <param name="action">The action to execute, receiving the <see cref="T:UltraLiteDB.CollectionPage"/> (may be <c>null</c>).</param>
+            <returns>The result of the <paramref name="action"/>.</returns>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.Dispose">
+            <summary>
+            Releases all resources used by the engine, including the underlying disk service and any AES encryption state.
             </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.CreateDatabase(System.IO.Stream,System.String,System.Int64)">
             <summary>
-            Initialize new datafile with header page + lock reserved area zone
+            Creates a new empty database in the provided stream, writing the header page and lock-reserved area.
+            Optionally pre-allocates empty pages and sets up AES encryption.
             </summary>
+            <param name="stream">The stream to write the new database into.</param>
+            <param name="password">Optional password for AES encryption.</param>
+            <param name="initialSize">Optional initial file size in bytes. If greater than two pages, empty pages are pre-allocated.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Recovery(System.String)">
             <summary>
-            Try recovery data from current datafile into a new datafile.
+            Attempt to recover documents from a potentially corrupted data file into a new file.
+            Scans all data pages, deserializes documents, and inserts them into a "-recovery" copy.
+            Returns a log string with recovery count and any per-page/per-document errors.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.RecoveryCollectionPages(UltraLiteDB.UltraLiteEngine,UltraLiteDB.HeaderPage,System.Text.StringBuilder)">
+            <summary>
+            Build a mapping of data page IDs to collection names by traversing collection pages and their indexes.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.RecoveryDetectCollectionByIndexPages(UltraLiteDB.UltraLiteEngine,System.Collections.Generic.HashSet{System.UInt32},System.Text.StringBuilder)">
+            <summary>
+            Starting from a set of index page IDs, crawl all linked index pages to discover which data page IDs belong to this collection.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.PageType">
+            <summary>
+            Identifies the type of content stored in a <see cref="T:UltraLiteDB.BasePage"/>.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.BasePage">
+            <summary>
+            Base class for all page types in the database file. Each page is a fixed-size block
+            (<see cref="F:UltraLiteDB.BasePage.PAGE_SIZE"/> bytes) that stores a common header and type-specific content.
+            Pages are linked via <see cref="P:UltraLiteDB.BasePage.PrevPageID"/>/<see cref="P:UltraLiteDB.BasePage.NextPageID"/> to form sequences.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BasePage.PAGE_SIZE">
@@ -1112,37 +1573,54 @@
             This is the data when read first from disk - used to journal operations (IDiskService only will use)
             </summary>
         </member>
+        <member name="M:UltraLiteDB.BasePage.#ctor(System.UInt32)">
+            <summary>
+            Initializes a new page with default empty state.
+            </summary>
+            <param name="pageID">The unique page identifier.</param>
+        </member>
         <member name="M:UltraLiteDB.BasePage.GetSizeOfPages(System.UInt32)">
             <summary>
-            Returns a size of specified number of pages
+            Returns the total byte size for the specified number of pages.
             </summary>
-            <param name="pageCount">The page count</param>
+            <param name="pageCount">The number of pages.</param>
+            <returns>Total size in bytes.</returns>
         </member>
         <member name="M:UltraLiteDB.BasePage.GetSizeOfPages(System.Int32)">
             <summary>
-            Returns a size of specified number of pages
+            Returns the total byte size for the specified number of pages.
             </summary>
-            <param name="pageCount">The page count</param>
+            <param name="pageCount">The number of pages. Must be non-negative.</param>
+            <returns>Total size in bytes.</returns>
         </member>
         <member name="M:UltraLiteDB.BasePage.CreateInstance``1(System.UInt32)">
             <summary>
-            Create a new instance of page based on T type
+            Create a new empty page instance based on the generic page type <typeparamref name="T"/>.
             </summary>
+            <typeparam name="T">The concrete page type to create.</typeparam>
+            <param name="pageID">The page identifier to assign.</param>
+            <returns>A new instance of the specified page type.</returns>
         </member>
         <member name="M:UltraLiteDB.BasePage.CreateInstance(System.UInt32,UltraLiteDB.PageType)">
             <summary>
-            Create a new instance of page based on PageType
+            Create a new empty page instance based on the specified <see cref="P:UltraLiteDB.BasePage.PageType"/>.
             </summary>
+            <param name="pageID">The page identifier to assign.</param>
+            <param name="pageType">The type of page to create.</param>
+            <returns>A new instance of the appropriate page subclass.</returns>
         </member>
         <member name="M:UltraLiteDB.BasePage.ReadPage(System.Byte[])">
             <summary>
-            Read a page with correct instance page object. Checks for pageType
+            Deserialize a page from a raw byte buffer, creating the correct page subclass based on the embedded page type.
             </summary>
+            <param name="buffer">A byte array of <see cref="F:UltraLiteDB.BasePage.PAGE_SIZE"/> length containing the serialized page.</param>
+            <returns>A fully populated page instance.</returns>
         </member>
         <member name="M:UltraLiteDB.BasePage.WritePage">
             <summary>
-            Write a page to byte array
+            Serialize this page to a byte array of <see cref="F:UltraLiteDB.BasePage.PAGE_SIZE"/> length, updating <see cref="P:UltraLiteDB.BasePage.DiskData"/>.
             </summary>
+            <returns>The serialized page bytes.</returns>
         </member>
         <member name="T:UltraLiteDB.CollectionPage">
             <summary>
@@ -1152,6 +1630,11 @@
         <member name="F:UltraLiteDB.CollectionPage.MAX_COLLECTIONS_SIZE">
             <summary>
             Represent maximum bytes that all collections names can be used in header
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.CollectionPage.NamePattern">
+            <summary>
+            Regex pattern that validates collection names: 1-60 word characters or hyphens.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionPage.PageType">
@@ -1185,15 +1668,24 @@
             Storage number sequence to be used in auto _id values
             </summary>
         </member>
+        <member name="M:UltraLiteDB.CollectionPage.#ctor(System.UInt32)">
+            <summary>
+            Initializes a new <see cref="T:UltraLiteDB.CollectionPage"/> with default index slots and counters.
+            </summary>
+            <param name="pageID">The page identifier for this collection page.</param>
+        </member>
         <member name="M:UltraLiteDB.CollectionPage.GetFreeIndex">
             <summary>
-            Returns first free index slot to be used
+            Returns the first unused index slot in the <see cref="P:UltraLiteDB.CollectionPage.Indexes"/> array.
             </summary>
+            <returns>An empty <see cref="T:UltraLiteDB.CollectionIndex"/> ready for use.</returns>
         </member>
         <member name="M:UltraLiteDB.CollectionPage.GetIndex(System.String)">
             <summary>
-            Get index from field name (index field name is case sensitive) - returns null if not found
+            Get the <see cref="T:UltraLiteDB.CollectionIndex"/> for the given field name (case-sensitive). Returns null if not found.
             </summary>
+            <param name="field">The field name to look up.</param>
+            <returns>The matching index, or null if no index exists for the field.</returns>
         </member>
         <member name="P:UltraLiteDB.CollectionPage.PK">
             <summary>
@@ -1202,17 +1694,21 @@
         </member>
         <member name="M:UltraLiteDB.CollectionPage.GetIndexes(System.Boolean)">
             <summary>
-            Returns all used indexes
+            Returns all non-empty (used) indexes from this collection.
             </summary>
+            <param name="includePK">If true, includes the primary key index (slot 0); otherwise starts from slot 1.</param>
+            <returns>An enumeration of active <see cref="T:UltraLiteDB.CollectionIndex"/> entries.</returns>
         </member>
         <member name="T:UltraLiteDB.DataPage">
             <summary>
-            The DataPage thats stores object data.
+            A page that stores document data as <see cref="T:UltraLiteDB.DataBlock"/> entries. Each collection has its own
+            chain of data pages linked via the free-list. Documents larger than a single page use
+            <see cref="T:UltraLiteDB.ExtendPage"/> for overflow storage.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataPage.PageType">
             <summary>
-            Page type = Extend
+            Page type = Data
             </summary>
         </member>
         <member name="F:UltraLiteDB.DataPage.DATA_RESERVED_BYTES">
@@ -1224,6 +1720,11 @@
         <member name="F:UltraLiteDB.DataPage._dataBlocks">
             <summary>
             Returns all data blocks - Each block has one object
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.DataPage.DataBlocks">
+            <summary>
+            Gets the dictionary of all <see cref="T:UltraLiteDB.DataBlock"/> entries on this page, keyed by block index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataPage.GetBlock(System.UInt16)">
@@ -1253,7 +1754,8 @@
         </member>
         <member name="T:UltraLiteDB.EmptyPage">
             <summary>
-            Represent a empty page (reused)
+            Represents a deallocated page that has been returned to the free list for reuse.
+            Empty pages contain no meaningful content and are recycled when new pages are needed.
             </summary>
         </member>
         <member name="P:UltraLiteDB.EmptyPage.PageType">
@@ -1261,10 +1763,22 @@
             Page type = Empty
             </summary>
         </member>
+        <member name="M:UltraLiteDB.EmptyPage.#ctor(System.UInt32)">
+            <summary>
+            Initializes a new empty page with the given page identifier.
+            </summary>
+            <param name="pageID">The page identifier to assign.</param>
+        </member>
+        <member name="M:UltraLiteDB.EmptyPage.#ctor(UltraLiteDB.BasePage)">
+            <summary>
+            Creates an empty page from an existing page, preserving its disk data for journaling.
+            </summary>
+            <param name="page">The source page to convert to empty.</param>
+        </member>
         <member name="T:UltraLiteDB.ExtendPage">
             <summary>
-            Represent a extra data page that contains the object when is not possible store in DataPage (bigger then  PAGE_SIZE or on update has no more space on page)
-            Can be used in sequence of pages to store big objects
+            Stores overflow document data that does not fit in a <see cref="T:UltraLiteDB.DataPage"/>. Multiple extend pages
+            are chained via <see cref="P:UltraLiteDB.BasePage.NextPageID"/> to hold arbitrarily large documents.
             </summary>
         </member>
         <member name="P:UltraLiteDB.ExtendPage.PageType">
@@ -1277,6 +1791,12 @@
             Represent the part or full of the object - if this page has NextPageID the object is bigger than this page
             </summary>
         </member>
+        <member name="M:UltraLiteDB.ExtendPage.#ctor(System.UInt32)">
+            <summary>
+            Initializes a new extend page with the given page identifier.
+            </summary>
+            <param name="pageID">The page identifier to assign.</param>
+        </member>
         <member name="M:UltraLiteDB.ExtendPage.SetData(System.Byte[],System.Int32,System.Int32)">
             <summary>
             Set slice of byte array source  into this page area
@@ -1285,6 +1805,12 @@
         <member name="M:UltraLiteDB.ExtendPage.GetData">
             <summary>
             Get internal page byte array data
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.HeaderPage">
+            <summary>
+            The first page (PageID 0) in the database file. Stores global metadata including the file format
+            version, encryption settings, collection page references, and the free empty page list head.
             </summary>
         </member>
         <member name="P:UltraLiteDB.HeaderPage.PageType">
@@ -1375,149 +1901,169 @@
         </member>
         <member name="T:UltraLiteDB.Query">
             <summary>
-            Class helper to create query using indexes in database. All methods are statics.
-            Queries can be executed in 3 ways: Index Seek (fast), Index Scan (good), Full Scan (slow)
+            Abstract base class for all query types. Provides static factory methods to build composable queries.
+            Execution strategies: Index Seek (fast, exact match), Index Scan (walks index range), Full Scan (checks every document).
             </summary>
+        </member>
+        <member name="P:UltraLiteDB.Query.Field">
+            <summary>The field name this query operates on.</summary>
+        </member>
+        <member name="P:UltraLiteDB.Query.Expression">
+            <summary>Parsed field expression used for evaluating document values during full scan.</summary>
+        </member>
+        <member name="P:UltraLiteDB.Query.UseIndex">
+            <summary>True if this query will use an index for execution.</summary>
+        </member>
+        <member name="P:UltraLiteDB.Query.UseFilter">
+            <summary>True if this query requires full-scan document filtering.</summary>
         </member>
         <member name="F:UltraLiteDB.Query.Ascending">
-            <summary>
-            Indicate when a query must execute in ascending order
-            </summary>
+            <summary>Ascending index traversal order.</summary>
         </member>
         <member name="F:UltraLiteDB.Query.Descending">
-            <summary>
-            Indicate when a query must execute in descending order
-            </summary>
+            <summary>Descending index traversal order.</summary>
         </member>
         <member name="M:UltraLiteDB.Query.All(System.Int32)">
             <summary>
-            Returns all documents using _id index order
+            Returns all documents ordered by the _id index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.All(System.String,System.Int32)">
             <summary>
-            Returns all documents using field index order
+            Returns all documents ordered by the specified field's index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.EQ(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all documents that value are equals to value (=)
+            Returns all documents where the field equals the value (=). Uses Index Seek when an index exists.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.LT(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all documents that value are less than value (&lt;)
+            Returns all documents where the field is less than the value (&lt;).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.LTE(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all documents that value are less than or equals value (&lt;=)
+            Returns all documents where the field is less than or equal to the value (&lt;=).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.GT(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all document that value are greater than value (&gt;)
+            Returns all documents where the field is greater than the value (&gt;).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.GTE(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all documents that value are greater than or equals value (&gt;=)
+            Returns all documents where the field is greater than or equal to the value (&gt;=).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Between(System.String,UltraLiteDB.BsonValue,UltraLiteDB.BsonValue,System.Boolean,System.Boolean)">
             <summary>
-            Returns all document that values are between "start" and "end" values (BETWEEN)
+            Returns all documents where the field value falls between start and end (inclusive/exclusive configurable).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.StartsWith(System.String,System.String)">
             <summary>
-            Returns all documents that starts with value (LIKE)
+            Returns all documents where the string field starts with the specified prefix. Uses Index Seek.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Contains(System.String,System.String)">
             <summary>
-            Returns all documents that contains value (CONTAINS)
+            Returns all documents where the string field contains the specified substring. Always uses Index Scan.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Not(System.String,UltraLiteDB.BsonValue)">
             <summary>
-            Returns all documents that are not equals to value (not equals)
+            Returns all documents where the field does not equal the value (!=). Uses Index Scan.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Not(UltraLiteDB.Query,System.Int32)">
             <summary>
-            Returns all documents that in query result (not result)
+            Negates a query — returns all documents NOT in the inner query's result set.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.In(System.String,UltraLiteDB.BsonArray)">
             <summary>
-            Returns all documents that has value in values list (IN)
+            Returns all documents where the field matches any value in the list (IN).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.In(System.String,UltraLiteDB.BsonValue[])">
             <summary>
-            Returns all documents that has value in values list (IN)
+            Returns all documents where the field matches any value in the list (IN).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.In(System.String,System.Collections.Generic.IEnumerable{UltraLiteDB.BsonValue})">
             <summary>
-            Returns all documents that has value in values list (IN)
+            Returns all documents where the field matches any value in the list (IN).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Where(System.String,System.Func{UltraLiteDB.BsonValue,System.Boolean},System.Int32)">
             <summary>
-            Apply a predicate function in an index result. Execute full index scan but it's faster then runs over deserialized document.
+            Applies a predicate function against index values. Performs an Index Scan (faster than full document deserialization).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.And(UltraLiteDB.Query,UltraLiteDB.Query)">
             <summary>
-            Returns document that exists in BOTH queries results. If both queries has indexes, left query has index preference (other side will be run in full scan)
+            Returns documents matching BOTH queries (intersection). The left query has index preference;
+            the right side falls back to full scan. Automatically optimizes GT+LT on the same field into Between.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.And(UltraLiteDB.Query[])">
             <summary>
-            Returns document that exists in ALL queries results.
+            Returns documents matching ALL queries by chaining pairwise And operations.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Or(UltraLiteDB.Query,UltraLiteDB.Query)">
             <summary>
-            Returns documents that exists in ANY queries results (Union).
+            Returns documents matching EITHER query (union).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Or(UltraLiteDB.Query[])">
             <summary>
-            Returns document that exists in ANY queries results (Union).
+            Returns documents matching ANY query by chaining pairwise Or operations.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.Run(UltraLiteDB.CollectionPage,UltraLiteDB.IndexService)">
             <summary>
-            Find witch index will be used and run Execute method
+            Determines the execution strategy (index vs full scan) and returns matching <see cref="T:UltraLiteDB.IndexNode"/> entries.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.ExecuteIndex(UltraLiteDB.IndexService,UltraLiteDB.CollectionIndex)">
             <summary>
-            Abstract method that must be implement for index seek/scan - Returns IndexNodes that match with index
+            Executes the query against a specific index, returning matching <see cref="T:UltraLiteDB.IndexNode"/> entries.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Query.FilterDocument(UltraLiteDB.BsonDocument)">
             <summary>
-            Abstract method that must implement full scan - will be called for each document and need
-            returns true if condition was satisfied
+            Full-scan filter: returns true if the deserialized document satisfies this query's condition.
             </summary>
         </member>
         <member name="T:UltraLiteDB.QueryAll">
             <summary>
-            All is an Index Scan operation
+            Returns all documents by scanning an index in the specified order. Used for unfiltered enumeration.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryAnd">
+            <summary>
+            Combines two queries with logical AND. The left query has index preference; the right falls back to full scan.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryBetween">
+            <summary>
+            Range query that matches field values between start and end bounds (inclusive/exclusive configurable).
+            Uses Index Seek to find the start position and walks the index forward.
             </summary>
         </member>
         <member name="T:UltraLiteDB.QueryContains">
             <summary>
-            Contains query do not work with index, only full scan
+            Substring match query. Always performs an Index Scan since substring matching cannot use seek.
             </summary>
         </member>
         <member name="T:UltraLiteDB.QueryCursor">
             <summary>
-            Include all components to be used in execution of a qery
+            Manages query execution state: iterates index nodes in batches, deserializes documents,
+            applies skip/limit pagination, and handles cache checkpoint boundaries.
             </summary>
         </member>
         <member name="M:UltraLiteDB.QueryCursor.Initialize(System.Collections.Generic.IEnumerator{UltraLiteDB.IndexNode})">
@@ -1545,390 +2091,461 @@
             Initializes a new instance of the <see cref="T:UltraLiteDB.QueryEmpty" /> class.
             </summary>
         </member>
+        <member name="T:UltraLiteDB.QueryEquals">
+            <summary>
+            Exact equality query (=). Uses Index Seek for O(log n) lookup.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryGreater">
+            <summary>
+            Greater-than (&gt;) or greater-than-or-equal (&gt;=) query. Uses Index Seek to find the start position.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryIn">
+            <summary>
+            Membership query (IN). Performs an Index Seek for each distinct value in the list.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryLess">
+            <summary>
+            Less-than (&lt;) or less-than-or-equal (&lt;=) query. Walks the index from the beginning until the bound is reached.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.QueryNot">
             <summary>
-            Not is an Index Scan operation
+            Logical NOT query — returns all documents that do NOT match the inner query.
+            When the inner query uses an index, computes the set difference against all _id nodes.
             </summary>
         </member>
         <member name="T:UltraLiteDB.QueryNotEquals">
             <summary>
-            Not is an Index Scan operation
+            Not-equal (!=) query. Performs an Index Scan, filtering out nodes that match the value.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryOr">
+            <summary>
+            Combines two queries with logical OR (union). Deduplicates results using <see cref="T:UltraLiteDB.IndexNodeComparer"/>.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.QueryStartsWith">
+            <summary>
+            String prefix query. Uses Index Seek to find the first matching node, then walks forward while the prefix matches.
             </summary>
         </member>
         <member name="T:UltraLiteDB.QueryWhere">
             <summary>
-            Execute an index scan passing a Func as where
+            Predicate-based query that applies a <c>Func&lt;BsonValue, bool&gt;</c> against index values.
+            Performs a full Index Scan but avoids deserializing documents.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.CacheService">
+            <summary>
+            In-memory page cache that separates clean (read-only) and dirty (modified) pages.
+            Thread-safe for concurrent read/write access.
             </summary>
         </member>
         <member name="F:UltraLiteDB.CacheService._clean">
-            <summary>
-            Collection to store clean only pages in cache
-            </summary>
+            <summary>Clean (unmodified) pages cached from disk reads.</summary>
         </member>
         <member name="F:UltraLiteDB.CacheService._dirty">
-            <summary>
-            Collection to store dirty only pages in cache. If page was in _clean, remove from there and insert here
-            </summary>
+            <summary>Dirty (modified) pages pending write to disk. Pages move here from _clean when modified.</summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.GetPage(System.UInt32)">
             <summary>
-            Get a page from cache or from disk (and put on cache)
-            [ThreadSafe]
+            Gets a page from the dirty or clean cache. Returns null if not cached. Thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.AddPage(UltraLiteDB.BasePage)">
             <summary>
-            Add page to cache
-            [ThreadSafe]
+            Adds a clean page to the cache. Thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.SetDirty(UltraLiteDB.BasePage)">
             <summary>
-            Set a page as dirty and ensure page are in cache. Should be used after any change on page 
-            Do not use on end of method because page can be deleted/change type
-            Always remove from clean list and add in dirty list
-            [ThreadSafe]
+            Marks a page as dirty, moving it from the clean cache to the dirty cache. Thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.GetDirtyPages">
             <summary>
-            Return all dirty pages
-            [ThreadSafe]
+            Returns all dirty pages for flushing to disk.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CacheService.CleanUsed">
             <summary>
-            Get how many pages are in clean cache
+            Number of clean pages currently cached.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CacheService.DirtyUsed">
             <summary>
-            Get how many pages are in dirty cache
+            Number of dirty pages pending write.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.DiscardDirtyPages">
             <summary>
-            Discard only dirty pages
-            [ThreadSafe]
+            Discards all dirty pages (used on transaction rollback). Thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.MarkDirtyAsClean">
             <summary>
-            Mark all dirty pages now as clean pages and transfer to clean collection
-            [ThreadSafe]
+            Promotes all dirty pages to clean status after a successful flush. Thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CacheService.ClearPages">
             <summary>
-            Remove from cache all clean pages
-            [Non - ThreadSafe]
+            Evicts all clean pages from cache to free memory. Thread-safe.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.CollectionService">
+            <summary>
+            Manages collection lifecycle: creating, retrieving, listing, and dropping collections.
+            Coordinates with <see cref="T:UltraLiteDB.PageService"/>, <see cref="T:UltraLiteDB.IndexService"/>, and the header page.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CollectionService.Get(System.String)">
             <summary>
-            Get a exist collection. Returns null if not exists
+            Gets a collection page by name. Returns null if the collection does not exist.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CollectionService.Add(System.String)">
             <summary>
-            Add a new collection. Check if name the not exists
+            Creates a new collection with a _id primary key index. Validates name format and collection count limits.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CollectionService.GetAll">
             <summary>
-            Get all collections pages
+            Enumerates all collection pages in the database.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CollectionService.Drop(UltraLiteDB.CollectionPage)">
             <summary>
-            Drop a collection - remove all data pages + indexes pages
+            Drops a collection by deleting all its data pages, index pages, extend pages, and the collection page itself.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DataService">
+            <summary>
+            Manages document storage in <see cref="T:UltraLiteDB.DataPage"/>s. Handles insert, update, read, and delete
+            of data blocks, including overflow to <see cref="T:UltraLiteDB.ExtendPage"/>s for large documents.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.Insert(UltraLiteDB.CollectionPage,System.Byte[])">
             <summary>
-            Insert data inside a datapage. Returns dataPageID that indicates the first page
+            Inserts serialized document bytes into a data page. Uses <see cref="T:UltraLiteDB.ExtendPage"/> if the data exceeds one page.
+            Returns the created <see cref="T:UltraLiteDB.DataBlock"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.Update(UltraLiteDB.CollectionPage,UltraLiteDB.PageAddress,System.Byte[])">
             <summary>
-            Update data inside a datapage. If new data can be used in same datapage, just update. Otherwise, copy content to a new ExtendedPage
+            Updates a data block's content. If the new data fits in the existing page, updates in-place;
+            otherwise overflows to an <see cref="T:UltraLiteDB.ExtendPage"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.Read(UltraLiteDB.PageAddress)">
             <summary>
-            Read all data from datafile using a pageID as reference. If data is not in DataPage, read from ExtendPage.
+            Reads the full byte content of a document by its block address. Reads from <see cref="T:UltraLiteDB.ExtendPage"/> if the data overflows.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.GetBlock(UltraLiteDB.PageAddress)">
             <summary>
-            Get a data block from a DataPage using address
+            Gets a <see cref="T:UltraLiteDB.DataBlock"/> from a <see cref="T:UltraLiteDB.DataPage"/> by its <see cref="T:UltraLiteDB.PageAddress"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.ReadExtendData(System.UInt32)">
             <summary>
-            Read all data from a extended page with all subsequences pages if exits
+            Reads all bytes from a chain of <see cref="T:UltraLiteDB.ExtendPage"/>s, concatenating them into a single byte array.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.Delete(UltraLiteDB.CollectionPage,UltraLiteDB.PageAddress)">
             <summary>
-            Delete one dataBlock
+            Deletes a data block and its extend pages. Removes the data page if it becomes empty.
+            Decrements the collection's document count.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DataService.StoreExtendData(UltraLiteDB.ExtendPage,System.Byte[])">
             <summary>
-            Store all bytes in one extended page. If data ir bigger than a page, store in more pages and make all in sequence
+            Writes byte data across one or more chained <see cref="T:UltraLiteDB.ExtendPage"/>s. Creates new pages as needed
+            and cleans up any surplus pages from previous writes.
             </summary>
         </member>
         <member name="T:UltraLiteDB.IndexService">
             <summary>
-            Implement a Index service - Add/Remove index nodes on SkipList
-            Based on: http://igoro.com/archive/skip-lists-are-fascinating/
+            Skip-list based index service. Creates, inserts, deletes, and searches index nodes.
+            Each index is a probabilistic skip list with up to <see cref="F:UltraLiteDB.IndexNode.MAX_LEVEL_LENGTH"/> levels.
             </summary>
         </member>
         <member name="F:UltraLiteDB.IndexService.MAX_INDEX_LENGTH">
             <summary>
-            Max size of a index entry - usde for string, binary, array and documents
+            Maximum byte size of an index key value (512 bytes).
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.CreateIndex(UltraLiteDB.CollectionPage)">
             <summary>
-            Create a new index and returns head page address (skip list)
+            Creates a new skip-list index with head (MinValue) and tail (MaxValue) sentinel nodes.
+            Returns the <see cref="T:UltraLiteDB.CollectionIndex"/> metadata.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.AddNode(UltraLiteDB.CollectionIndex,UltraLiteDB.BsonValue,UltraLiteDB.IndexNode)">
             <summary>
-            Insert a new node index inside an collection index. Flip coin to know level
+            Inserts a new index node with a randomly determined level (flip coin). Enforces unique constraints.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.AddNode(UltraLiteDB.CollectionIndex,UltraLiteDB.BsonValue,System.Byte,UltraLiteDB.IndexNode)">
             <summary>
-            Insert a new node index inside an collection index.
+            Core skip-list insertion: finds the correct position at each level and links the new node.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.GetNodeList(UltraLiteDB.IndexNode,System.Boolean)">
             <summary>
-            Gets all node list from any index node (go forward and backward)
+            Traverses the doubly-linked node list (PrevNode/NextNode) in both directions from the given node.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.Delete(UltraLiteDB.CollectionIndex,UltraLiteDB.PageAddress)">
             <summary>
-            Deletes an indexNode from a Index and adjust Next/Prev nodes
+            Deletes an index node from the skip list, re-linking neighbors at all levels.
+            Deletes the index page if it becomes empty.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.DropIndex(UltraLiteDB.CollectionIndex)">
             <summary>
-            Drop all indexes pages. Each index use a single page sequence
+            Drops an entire index by deleting all its index pages and unlinking nodes from document node lists.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.GetNode(UltraLiteDB.PageAddress)">
             <summary>
-            Get a node inside a page using PageAddress - Returns null if address IsEmpty
+            Retrieves an <see cref="T:UltraLiteDB.IndexNode"/> by its <see cref="T:UltraLiteDB.PageAddress"/>. Returns null if the address is empty.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.FlipCoin">
             <summary>
-            Flip coin - skip list - returns level node (start in 1)
+            Probabilistic level selection for skip-list insertion. Returns a level from 1 to MAX_LEVEL_LENGTH.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IndexService.FindAll(UltraLiteDB.CollectionIndex,System.Int32)">
+            <summary>
+            Enumerates all index nodes (excluding head/tail sentinels) in the specified order.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.Find(UltraLiteDB.CollectionIndex,UltraLiteDB.BsonValue,System.Boolean,System.Int32)">
             <summary>
-            Find first node that index match with value. If not found but sibling = true, returns near node (only non-unique index)
-            Before find, value must be normalized
+            Seeks to the first index node matching the value. If <paramref name="sibling"/> is true and no exact match exists,
+            returns the nearest node. For non-unique indexes, walks back to the first occurrence of the value.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.FindBoundary(UltraLiteDB.CollectionIndex,UltraLiteDB.IndexNode,UltraLiteDB.BsonValue,System.Int32,System.Int32)">
             <summary>
-            Goto the first/last occurrence of this index value
+            Walks to the boundary (first or last) occurrence of a duplicate key value.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.PageService">
+            <summary>
+            Core page management service: reads pages from disk/cache, creates new pages, deletes pages,
+            and manages free-list linked lists for efficient page reuse. Handles encryption/decryption transparently.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.GetPage``1(System.UInt32)">
             <summary>
-            Get a page from cache or from disk (get from cache or from disk)
+            Gets a page by ID, reading from cache first and falling back to disk. Decrypts if encryption is enabled.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.SetDirty(UltraLiteDB.BasePage)">
             <summary>
-            Set a page as dirty and ensure page are in cache. Should be used after any change on page 
-            Do not use on end of method because page can be deleted/change type
+            Marks a page as dirty so it will be written to disk on the next checkpoint/commit.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.GetSeqPages``1(System.UInt32)">
             <summary>
-            Read all sequences pages from a start pageID (using NextPageID)
+            Follows the <see cref="P:UltraLiteDB.BasePage.NextPageID"/> chain starting from the given page, yielding each page in sequence.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.NewPage``1(UltraLiteDB.BasePage)">
             <summary>
-            Get a new empty page - can be a reused page (EmptyPage) or a clean one (extend datafile)
+            Allocates a new page, either by reusing an <see cref="T:UltraLiteDB.EmptyPage"/> from the free list or by extending the data file.
+            Optionally links the new page to a previous page in a sequence.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.DeletePage(System.UInt32,System.Boolean)">
             <summary>
-            Delete an page using pageID - transform them in Empty Page and add to EmptyPageList
-            If you delete a page, you can using same old instance of page - page will be converter to EmptyPage
-            If need deleted page, use GetPage again
+            Converts a page (or a chain of pages) to <see cref="T:UltraLiteDB.EmptyPage"/> and adds them to the free empty page list.
             </summary>
+            <param name="pageID">The page ID to delete.</param>
+            <param name="addSequence">If true, follows the NextPageID chain and deletes all pages in the sequence.</param>
         </member>
         <member name="M:UltraLiteDB.PageService.GetFreePage``1(System.UInt32,System.Int32)">
             <summary>
-            Returns a page that contains space enough to data to insert new object - if one does not exit, creates a new page.
+            Returns a page with at least <paramref name="size"/> free bytes, or creates a new page if none available.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.AddOrRemoveToFreeList(System.Boolean,UltraLiteDB.BasePage,UltraLiteDB.BasePage,System.UInt32@)">
             <summary>
-            Add or Remove a page in a sequence
+            Adds or removes a page from a free-list doubly-linked list, maintaining descending free-space order.
             </summary>
-            <param name="add">Indicate that will add or remove from FreeList</param>
-            <param name="page">Page to add or remove from FreeList</param>
-            <param name="startPage">Page reference where start the header list node</param>
-            <param name="fieldPageID">Field reference, from startPage</param>
+            <param name="add">True to add/reposition; false to remove.</param>
+            <param name="page">The page to add or remove.</param>
+            <param name="startPage">The page containing the list head pointer.</param>
+            <param name="fieldPageID">Reference to the head pointer field on <paramref name="startPage"/>.</param>
         </member>
         <member name="M:UltraLiteDB.PageService.AddToFreeList(UltraLiteDB.BasePage,UltraLiteDB.BasePage,System.UInt32@)">
             <summary>
-            Add a page in free list in desc free size order
+            Inserts a page into the free list, maintaining descending free-space order.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.RemoveToFreeList(UltraLiteDB.BasePage,UltraLiteDB.BasePage,System.UInt32@)">
             <summary>
-            Remove a page from list - the ease part
+            Removes a page from the free list by re-linking its neighbors.
             </summary>
         </member>
         <member name="M:UltraLiteDB.PageService.MoveToFreeList(UltraLiteDB.BasePage,UltraLiteDB.BasePage,System.UInt32@)">
             <summary>
-            When a page is already on a list it's more efficient just move comparing with siblings
+            Repositions a page already on the free list by removing and re-inserting it.
             </summary>
         </member>
         <member name="T:UltraLiteDB.TransactionService">
             <summary>
-            Manages all transactions and grantees concurrency and recovery
+            Manages write transactions: checkpointing dirty pages to disk, journal-based crash recovery,
+            and cache eviction when memory limits are reached.
             </summary>
         </member>
         <member name="M:UltraLiteDB.TransactionService.CheckPoint">
             <summary>
-            Checkpoint is a safe point to clear cache pages without loose pages references.
-            Is called after each document insert/update/deleted/indexed/fetch from query
-            Clear only clean pages - do not clear dirty pages (transaction)
-            Return true if cache was clear
+            Evicts clean pages from cache when usage exceeds the configured limit.
+            Called after each document operation to bound memory usage. Returns true if pages were evicted.
             </summary>
         </member>
         <member name="M:UltraLiteDB.TransactionService.PersistDirtyPages">
             <summary>
-            Save all dirty pages to disk
+            Flushes all dirty pages to disk. Writes the journal first (if enabled), then the data pages,
+            then clears the recovery flag. Ensures crash-safe writes via write-ahead journaling.
             </summary>
         </member>
         <member name="M:UltraLiteDB.TransactionService.Recovery">
             <summary>
-            Get journal pages and override all into datafile
+            Restores the data file from the journal after a crash. Reads journal pages and writes them
+            back to their original positions in the data file.
             </summary>
+        </member>
+        <member name="T:UltraLiteDB.CollectionIndex">
+            <summary>
+            Metadata for a single index on a collection. Stores the field name, uniqueness constraint,
+            head/tail skip-list node pointers, and the free page list for index pages.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.CollectionIndex.IndexPattern">
+            <summary>Regex pattern for valid index field names (supports dot notation, up to 60 segments).</summary>
         </member>
         <member name="F:UltraLiteDB.CollectionIndex.INDEX_PER_COLLECTION">
             <summary>
-            Total indexes per collection - it's fixed because I will used fixed arrays allocations
+            Maximum number of indexes per collection (fixed at 16).
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Slot">
             <summary>
-            Represent slot position on index array on dataBlock/collection indexes - non-persistable
+            Slot position (0–15) in the collection's index array.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Field">
             <summary>
-            Field name
+            The indexed field name (supports dot notation for nested fields).
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Unique">
             <summary>
-            Indicate if this index has distinct values only
+            If true, duplicate key values are rejected on insert.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.HeadNode">
             <summary>
-            Head page address for this index
+            Address of the skip-list head sentinel node (Key = MinValue).
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.TailNode">
             <summary>
-            A link pointer to tail node
+            Address of the skip-list tail sentinel node (Key = MaxValue).
             </summary>
         </member>
         <member name="F:UltraLiteDB.CollectionIndex.FreeIndexPageID">
             <summary>
-            Get a reference for the free list index page - its private list per collection/index (must be a Field to be used as reference parameter)
+            Head of the free-list for index pages with available space. Must be a field (not property) for use as a ref parameter.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.IsEmpty">
             <summary>
-            Returns if this index slot is empty and can be used as new index
+            True if this index slot is unused and available for a new index.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.MaxLevel">
             <summary>
-            Persist max level used
+            Maximum skip-list level currently in use for this index.
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Page">
             <summary>
-            Get a reference for page
+            Reference to the parent <see cref="T:UltraLiteDB.CollectionPage"/> that owns this index.
             </summary>
         </member>
         <member name="M:UltraLiteDB.CollectionIndex.Clear">
             <summary>
-            Clear all index information
+            Resets all index metadata to empty/default state.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DataBlock">
+            <summary>
+            Represents a document's data storage within a <see cref="T:UltraLiteDB.DataPage"/>. Contains the serialized BSON bytes
+            inline, or references an <see cref="T:UltraLiteDB.ExtendPage"/> chain for documents exceeding one page.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataBlock.Position">
             <summary>
-            Position of this dataBlock inside a page (store only Position.Index)
+            Position of this data block within its <see cref="T:UltraLiteDB.DataPage"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataBlock.ExtendPageID">
             <summary>
-            If object is bigger than this page - use a ExtendPage (and do not use Data array)
+            Page ID of the first <see cref="T:UltraLiteDB.ExtendPage"/> for overflow data, or <c>uint.MaxValue</c> if data fits inline.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataBlock.Data">
             <summary>
-            Data of a record - could be empty if is used in ExtedPage
+            Serialized BSON bytes of the document. Empty if data overflows to <see cref="T:UltraLiteDB.ExtendPage"/>s.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataBlock.Page">
             <summary>
-            Get a reference for page
+            Reference to the parent <see cref="T:UltraLiteDB.DataPage"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.DataBlock.Length">
             <summary>
-            Get length of this dataBlock (persist as ushort 2 bytes)
+            Total byte length of this data block on disk (fixed header + data bytes).
             </summary>
         </member>
         <member name="T:UltraLiteDB.IndexInfo">
             <summary>
-            Represent a index information
+            Public read-only view of a collection index's metadata, returned by <see cref="M:UltraLiteDB.UltraLiteEngine.GetIndexes(System.String)"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IndexInfo.Slot">
             <summary>
-            Slot number of index
+            Slot position (0–15) in the collection's index array.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IndexInfo.Field">
             <summary>
-            Field index name
+            The indexed field name.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IndexInfo.Unique">
             <summary>
-            Index is Unique?
+            Whether this index enforces unique values.
             </summary>
         </member>
         <member name="P:UltraLiteDB.IndexInfo.MaxLevel">
             <summary>
-            Indicate max level used in skip-list
+            Maximum skip-list level currently in use.
             </summary>
         </member>
         <member name="T:UltraLiteDB.IndexNode">
             <summary>
-            Represent a index node inside a Index Page
+            A node in a skip-list index, stored within an <see cref="T:UltraLiteDB.IndexPage"/>. Contains the indexed key value,
+            level-based Next/Prev pointers for the skip list, and a reference to the document's <see cref="P:UltraLiteDB.IndexNode.DataBlock"/>.
             </summary>
         </member>
         <member name="F:UltraLiteDB.IndexNode.MAX_LEVEL_LENGTH">
@@ -2006,9 +2623,15 @@
             Cached document - if null, use DataBlock
             </summary>
         </member>
+        <member name="T:UltraLiteDB.IndexNodeComparer">
+            <summary>
+            Compares <see cref="T:UltraLiteDB.IndexNode"/>s by their <see cref="P:UltraLiteDB.IndexNode.DataBlock"/> address for deduplication.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.PageAddress">
             <summary>
-            Represents a page address inside a page structure - index could be byte offset position OR index in a list (6 bytes)
+            A 6-byte address identifying an item within a page: 4 bytes for <see cref="F:UltraLiteDB.PageAddress.PageID"/> + 2 bytes for <see cref="F:UltraLiteDB.PageAddress.Index"/>.
+            Used to reference <see cref="T:UltraLiteDB.IndexNode"/>s and <see cref="T:UltraLiteDB.DataBlock"/>s across pages.
             </summary>
         </member>
         <member name="F:UltraLiteDB.PageAddress.PageID">
@@ -2023,119 +2646,188 @@
         </member>
         <member name="T:UltraLiteDB.BsonFieldAttribute">
             <summary>
-            Set a name to this property in BsonDocument
+            Overrides the BSON field name used when serializing/deserializing this property.
+            Without this attribute, the property name is used (with optional camelCase conversion from <see cref="T:UltraLiteDB.BsonMapper"/>).
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.BsonFieldAttribute.Name">
+            <summary>The BSON field name to use instead of the CLR property name.</summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonFieldAttribute.#ctor(System.String)">
+            <summary>
+            Maps this property to the specified BSON field name.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonFieldAttribute.#ctor">
+            <summary>
+            Marks the property for field-name customization via <see cref="P:UltraLiteDB.BsonFieldAttribute.Name"/> property setter.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonIdAttribute">
             <summary>
-            Indicate that property will be used as BsonDocument Id
+            Marks a property as the document's "_id" field. The mapper will serialize this member
+            as the BSON <c>_id</c> key and use it for document identity in collections.
             </summary>
+        </member>
+        <member name="P:UltraLiteDB.BsonIdAttribute.AutoId">
+            <summary>Whether the engine should auto-generate an ID value on insert when the field has its default value.</summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonIdAttribute.#ctor">
+            <summary>
+            Marks the property as the document ID with auto-generation enabled.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonIdAttribute.#ctor(System.Boolean)">
+            <summary>
+            Marks the property as the document ID, optionally disabling auto-generation.
+            </summary>
+            <param name="autoId">If false, the caller must supply the ID value before insert.</param>
         </member>
         <member name="T:UltraLiteDB.BsonIgnoreAttribute">
             <summary>
-            Indicate that property will not be persist in Bson serialization
+            Excludes a property or field from BSON serialization and deserialization.
+            The mapper will skip any member decorated with this attribute.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonIndexAttribute">
             <summary>
-            Add an index in this entity property.
+            Declares that this property should be indexed. Deprecated — use
+            <see cref="M:UltraLiteDB.UltraLiteCollection`1.EnsureIndex(System.String,System.Boolean)"/> at database creation time instead.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonMapper">
             <summary>
-            Class that converts your entity class to/from BsonDocument
-            If you prefer use a new instance of BsonMapper (not Global), be sure cache this instance for better performance
-            Serialization rules:
-                - Classes must be "public" with a public constructor (without parameters)
-                - Properties must have public getter (can be read-only)
-                - Entity class must have Id property, [ClassName]Id property or [BsonId] attribute
-                - No circular references
-                - Fields are not valid
-                - IList, Array supports
-                - IDictionary supports (Key must be a simple datatype - converted by ChangeType)
+            Maps .NET entity classes to and from <see cref="T:UltraLiteDB.BsonDocument"/> representations.
+            If you use a new instance rather than <see cref="F:UltraLiteDB.BsonMapper.Global"/>, cache it for better performance.
+            <para>Serialization rules:</para>
+            <list type="bullet">
+              <item>Classes must be public with a public parameterless constructor</item>
+              <item>Properties must have a public getter (can be read-only)</item>
+              <item>Entity class must have an Id property, [ClassName]Id property, or <see cref="T:UltraLiteDB.BsonIdAttribute"/></item>
+              <item>No circular references</item>
+              <item>Fields are not mapped by default (see <see cref="P:UltraLiteDB.BsonMapper.IncludeFields"/>)</item>
+              <item><see cref="T:System.Collections.IList"/>, Array, <see cref="T:System.Collections.IDictionary"/> types are supported</item>
+            </list>
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper._entities">
             <summary>
-            Mapping cache between Class/BsonDocument
+            Cache of entity type mappings, keyed by CLR type.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper._customSerializer">
             <summary>
-            Map serializer/deserialize for custom types
+            Custom serialization functions registered for specific types.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._customDeserializer">
+            <summary>
+            Custom deserialization functions registered for specific types.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._customTypeToId">
+            <summary>
+            Maps CLR types to compact BSON type identifiers for polymorphic serialization.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._customIdToType">
+            <summary>
+            Reverse lookup from compact BSON type identifiers back to CLR types.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper._typeInstantiator">
             <summary>
-            Type instantiator function to support IoC
+            Factory function used to create instances of types, supporting IoC containers.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper.Global">
             <summary>
-            Global instance used when no BsonMapper are passed in UltraLiteDatabase ctor
+            Global singleton instance used when no <see cref="T:UltraLiteDB.BsonMapper"/> is passed to the database constructor.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper.ResolveFieldName">
             <summary>
-            A resolver name for field
+            Function that resolves a .NET property name to a BSON document field name.
+            Defaults to identity (no transformation).
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.SerializeNullValues">
             <summary>
-            Indicate that mapper do not serialize null values (default false)
+            When <c>true</c>, null values are included in serialized BSON documents. Default is <c>false</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.TrimWhitespace">
             <summary>
-            Apply .Trim() in strings when serialize (default true)
+            When <c>true</c>, applies <see cref="M:System.String.Trim"/> to string values during serialization. Default is <c>true</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.EmptyStringToNull">
             <summary>
-            Convert EmptyString to Null (default true)
+            When <c>true</c>, empty strings are converted to <see cref="F:UltraLiteDB.BsonValue.Null"/> during serialization. Default is <c>true</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.IncludeFields">
             <summary>
-            Get/Set that mapper must include fields (default: false)
+            When <c>true</c>, public fields (not just properties) are included in the mapping. Default is <c>false</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.IncludeNonPublic">
             <summary>
-            Get/Set that mapper must include non public (private, protected and internal) (default: false)
+            When <c>true</c>, non-public members (private, protected, internal) are included in the mapping. Default is <c>false</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.IncludeFullType">
             <summary>
-            Whether the serializer should include full typename data when the object type is a derived type (default: true)
+            When <c>true</c>, the serializer includes the assembly-qualified type name (<c>_type</c> field) for derived types to support polymorphic deserialization. Default is <c>true</c>.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper.ResolveMember">
             <summary>
-            A custom callback to change MemberInfo behavior when converting to MemberMapper.
-            Use mapper.ResolveMember(Type entity, MemberInfo property, MemberMapper documentMappedField)
-            Set FieldName to null if you want remove from mapped document
+            Optional callback invoked for each member during entity mapping, allowing customization of the <see cref="T:UltraLiteDB.MemberMapper"/>.
+            Set <see cref="P:UltraLiteDB.MemberMapper.FieldName"/> to <c>null</c> to exclude the member from the mapped document.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper.ResolveCollectionName">
             <summary>
-            Custom resolve name collection based on Type 
+            Function that resolves a collection name from a CLR type. Defaults to using the type name.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.#ctor(System.Func{System.Type,System.Object})">
+            <summary>
+            Initializes a new instance of <see cref="T:UltraLiteDB.BsonMapper"/> with default settings and optional IoC support.
+            </summary>
+            <param name="customTypeInstantiator">Optional factory function for creating type instances, enabling IoC integration. If <c>null</c>, uses <see cref="M:UltraLiteDB.Reflection.CreateInstance(System.Type)"/>.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.RegisterType``1(System.Func{``0,UltraLiteDB.BsonValue},System.Func{UltraLiteDB.BsonValue,``0})">
             <summary>
-            Register a custom type serializer/deserialize function
+            Registers custom serialization and deserialization functions for type <typeparamref name="T"/>.
             </summary>
+            <typeparam name="T">The type to register custom conversion for.</typeparam>
+            <param name="serialize">Function that converts an instance of <typeparamref name="T"/> to a <see cref="T:UltraLiteDB.BsonValue"/>.</param>
+            <param name="deserialize">Function that converts a <see cref="T:UltraLiteDB.BsonValue"/> back to an instance of <typeparamref name="T"/>.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.RegisterType(System.Type,System.Func{System.Object,UltraLiteDB.BsonValue},System.Func{UltraLiteDB.BsonValue,System.Object})">
             <summary>
-            Register a custom type serializer/deserialize function
+            Registers custom serialization and deserialization functions for the specified type (non-generic overload).
             </summary>
+            <param name="type">The type to register custom conversion for.</param>
+            <param name="serialize">Function that converts an object instance to a <see cref="T:UltraLiteDB.BsonValue"/>.</param>
+            <param name="deserialize">Function that converts a <see cref="T:UltraLiteDB.BsonValue"/> back to an object instance.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.RegisterTypeId(System.Type,UltraLiteDB.BsonValue)">
+            <summary>
+            Registers a compact type identifier for polymorphic serialization. The type will be stored
+            as a <c>_t</c> field instead of the full assembly-qualified name, reducing document size.
+            </summary>
+            <param name="t">The CLR type to register.</param>
+            <param name="id">The compact <see cref="T:UltraLiteDB.BsonValue"/> identifier for this type.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.Entity``1">
             <summary>
-            Map your entity class to BsonDocument using fluent API
+            Returns a fluent <see cref="T:UltraLiteDB.EntityBuilder`1"/> for configuring how type <typeparamref name="T"/> maps to a <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <typeparam name="T">The entity type to configure.</typeparam>
+            <returns>An <see cref="T:UltraLiteDB.EntityBuilder`1"/> for chaining mapping configuration.</returns>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.UseCamelCase">
             <summary>
@@ -2170,88 +2862,134 @@
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToObject(System.Type,UltraLiteDB.BsonDocument)">
             <summary>
-            Deserialize a BsonDocument to entity class
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> into a .NET object of the specified type.
+            Returns the document as-is if the target type is <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <param name="type">The target CLR type.</param>
+            <param name="doc">The BSON document to deserialize.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToObject``1(UltraLiteDB.BsonDocument)">
             <summary>
-            Deserialize a BsonDocument to entity class
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> into a .NET object of type <typeparamref name="T"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.Deserialize``1(UltraLiteDB.BsonValue)">
             <summary>
-            Deserialize an BsonValue to .NET object typed in T
+            Deserializes a <see cref="T:UltraLiteDB.BsonValue"/> into a .NET object of type <typeparamref name="T"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes``1(System.Byte[],System.Int32)">
             <summary>
-            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            Deserializes BSON bytes directly to a <typeparamref name="T"/> instance, bypassing intermediate
+            <see cref="T:UltraLiteDB.BsonDocument"/> creation to reduce GC pressure.
             </summary>
+            <typeparam name="T">The target entity type.</typeparam>
+            <param name="bsonBytes">BSON-encoded byte array.</param>
+            <param name="offset">Byte offset to start reading from.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes``1(System.ArraySegment{System.Byte})">
             <summary>
-            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            Deserializes BSON bytes from an <see cref="T:System.ArraySegment`1"/> directly to a <typeparamref name="T"/> instance.
             </summary>
+            <typeparam name="T">The target entity type.</typeparam>
+            <param name="bsonBytes">BSON-encoded byte segment.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes(System.Type,System.Byte[],System.Int32)">
             <summary>
-            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            Deserializes BSON bytes directly to an entity of the specified type. Falls back to
+            <see cref="T:UltraLiteDB.BsonReader"/> if the target type is <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <param name="type">The target CLR type.</param>
+            <param name="bsonBytes">BSON-encoded byte array.</param>
+            <param name="offset">Byte offset to start reading from.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.DeserializeFromBytes(System.Type,System.ArraySegment{System.Byte})">
             <summary>
-            Deserialize BSON bytes directly to an entity, bypassing intermediate BsonDocument creation
+            Deserializes BSON bytes from an <see cref="T:System.ArraySegment`1"/> directly to an entity of the specified type.
             </summary>
+            <param name="type">The target CLR type.</param>
+            <param name="bsonBytes">BSON-encoded byte segment.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes``1(``0)">
             <summary>
-            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            Serializes an entity directly to BSON bytes, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation to reduce GC pressure.
+            Returns a trimmed byte array containing the BSON data.
             </summary>
+            <typeparam name="T">The entity type.</typeparam>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes``1(``0,UltraLiteDB.ByteWriter)">
             <summary>
-            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            Serializes an entity directly to BSON bytes using the provided <see cref="T:UltraLiteDB.ByteWriter"/>,
+            allowing callers to reuse buffers and control allocation.
             </summary>
+            <typeparam name="T">The entity type.</typeparam>
+            <param name="entity">The object to serialize.</param>
+            <param name="writer">The writer to output BSON bytes to.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes(System.Type,System.Object)">
             <summary>
-            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            Serializes an entity directly to BSON bytes, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
+            Falls back to <see cref="T:UltraLiteDB.BsonWriter"/> if the entity is already a <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <param name="type">The declared type (used for polymorphic type resolution).</param>
+            <param name="entity">The object to serialize.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes(System.Type,System.Object,UltraLiteDB.ByteWriter)">
             <summary>
-            Serialize an entity directly to BSON bytes, bypassing intermediate BsonDocument creation
+            Serializes an entity directly to BSON bytes using the provided <see cref="T:UltraLiteDB.ByteWriter"/>.
+            Falls back to <see cref="T:UltraLiteDB.BsonWriter"/> if the entity is already a <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <param name="type">The declared type (used for polymorphic type resolution).</param>
+            <param name="entity">The object to serialize.</param>
+            <param name="writer">The writer to output BSON bytes to.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToDocument(System.Type,System.Object)">
             <summary>
-            Serialize a entity class to BsonDocument
+            Serializes a .NET object to a <see cref="T:UltraLiteDB.BsonDocument"/>. Returns the document as-is if already a <see cref="T:UltraLiteDB.BsonDocument"/>.
             </summary>
+            <param name="type">The declared type of the entity (used for polymorphic type resolution).</param>
+            <param name="entity">The object to serialize.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToDocument``1(``0)">
             <summary>
-            Serialize a entity class to BsonDocument
+            Serializes a .NET object to a <see cref="T:UltraLiteDB.BsonDocument"/>.
+            </summary>
+            <typeparam name="T">The entity type.</typeparam>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.Serialize(System.Type,System.Object,System.Int32)">
+            <summary>
+            Recursively serializes a .NET object to a <see cref="T:UltraLiteDB.BsonValue"/>. Handles primitive types, custom serializers,
+            dictionaries, collections, and complex objects. Tracks depth to prevent infinite recursion.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeObject(System.Object)">
+            <summary>
+            Serializes a complex object to a <see cref="T:UltraLiteDB.BsonDocument"/> using entity mapping.
             </summary>
         </member>
         <member name="T:UltraLiteDB.EntityBuilder`1">
             <summary>
-            Helper class to modify your entity mapping to document. Can be used instead attribute decorates
+            Fluent API for configuring how type <typeparamref name="T"/> maps to a <see cref="T:UltraLiteDB.BsonDocument"/>.
+            An alternative to using <see cref="T:UltraLiteDB.BsonIdAttribute"/>, <see cref="T:UltraLiteDB.BsonFieldAttribute"/>, and other mapping attributes.
+            Obtain via <see cref="M:UltraLiteDB.BsonMapper.Entity``1"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.EntityBuilder`1.Ignore``1(System.Linq.Expressions.Expression{System.Func{`0,``0}})">
             <summary>
-            Define which property will not be mapped to document
+            Excludes a property from the BSON mapping.
             </summary>
         </member>
         <member name="M:UltraLiteDB.EntityBuilder`1.Field``1(System.Linq.Expressions.Expression{System.Func{`0,``0}},System.String)">
             <summary>
-            Define a custom name for a property when mapping to document
+            Maps a property to a custom BSON field name.
             </summary>
         </member>
         <member name="M:UltraLiteDB.EntityBuilder`1.Id``1(System.Linq.Expressions.Expression{System.Func{`0,``0}},System.Boolean)">
             <summary>
-            Define which property is your document id (primary key). Define if this property supports auto-id
+            Designates a property as the document _id (primary key).
             </summary>
+            <param name="property">Expression selecting the property.</param>
+            <param name="autoId">If true, auto-generates _id values for empty/default values on insert.</param>
         </member>
         <member name="M:UltraLiteDB.EntityBuilder`1.GetProperty``2(System.Linq.Expressions.Expression{System.Func{``0,``1}},System.Action{UltraLiteDB.MemberMapper})">
             <summary>
@@ -2260,117 +2998,166 @@
         </member>
         <member name="T:UltraLiteDB.EntityMapper">
             <summary>
-            Class to map entity class to BsonDocument
+            Describes how a CLR type maps to/from a <see cref="T:UltraLiteDB.BsonDocument"/>.
+            Contains the list of <see cref="T:UltraLiteDB.MemberMapper"/> entries for each mapped property/field.
             </summary>
         </member>
         <member name="P:UltraLiteDB.EntityMapper.Members">
             <summary>
-            List all type members that will be mapped to/from BsonDocument
+            All mapped members (properties/fields) for this entity type.
             </summary>
         </member>
         <member name="P:UltraLiteDB.EntityMapper.Id">
             <summary>
-            Indicate which member is _id
+            Gets the member mapped to the "_id" field, or null if no _id member exists.
             </summary>
         </member>
         <member name="P:UltraLiteDB.EntityMapper.ForType">
             <summary>
-            Indicate which Type this entity mapper is
+            The CLR type this mapper describes.
             </summary>
         </member>
         <member name="F:UltraLiteDB.EntityMapper._fieldLookup">
             <summary>
-            Cached lookup from BSON field name to MemberMapper for O(1) access during deserialization
+            Lazily-built lookup from BSON field name to <see cref="T:UltraLiteDB.MemberMapper"/> for O(1) access during deserialization.
+            Keys are case-insensitive.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.EntityMapper.FieldLookup">
+            <summary>
+            Gets the field-name-to-member lookup dictionary, building it on first access.
             </summary>
         </member>
         <member name="M:UltraLiteDB.EntityMapper.GetMember(System.Linq.Expressions.Expression)">
             <summary>
-            Resolve expression to get member mapped
+            Finds a <see cref="T:UltraLiteDB.MemberMapper"/> by resolving the member path from a LINQ expression.
             </summary>
         </member>
         <member name="T:UltraLiteDB.MemberMapper">
             <summary>
-            Internal representation for a .NET member mapped to BsonDocument
+            Describes how a single .NET property or field maps to a BSON document field.
+            Used by <see cref="T:UltraLiteDB.EntityMapper"/> to drive serialization/deserialization.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.AutoId">
             <summary>
-            If member is Id, indicate that are AutoId
+            Whether this member should auto-generate an _id value on insert. Only relevant when <see cref="P:UltraLiteDB.MemberMapper.FieldName"/> is "_id".
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.MemberName">
             <summary>
-            Member name
+            The CLR property/field name (e.g. "FirstName").
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.DataType">
             <summary>
-            Member returns data type
+            The CLR type of this member (e.g. typeof(string), typeof(int)).
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.FieldName">
             <summary>
-            Converted document field name
+            The BSON document field name this member maps to (e.g. "first_name", "_id").
+            Set to null to exclude from mapping.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.Getter">
             <summary>
-            Delegate method to get value from entity instance
+            Delegate that reads this member's value from an entity instance.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.Setter">
             <summary>
-            Delegate method to set value to entity instance
+            Delegate that writes a value to this member on an entity instance.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.Serialize">
             <summary>
-            When used, can be define a serialization function from entity class to bson value
+            Optional custom serialization function. When set, bypasses the default serialization logic for this member.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.Deserialize">
             <summary>
-            When used, can define a deserialization function from bson value
+            Optional custom deserialization function. When set, bypasses the default deserialization logic for this member.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.IsList">
             <summary>
-            Indicate that this property contains an list of elements (IEnumerable)
+            Whether this member's type implements <see cref="T:System.Collections.IEnumerable"/> (arrays, lists, collections).
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.UnderlyingType">
             <summary>
-            When property is an array of items, gets underlying type (otherwise is same type of PropertyType)
+            For collection types, the element type (e.g. typeof(int) for List&lt;int&gt;). For non-collection types, same as <see cref="P:UltraLiteDB.MemberMapper.DataType"/>.
             </summary>
+        </member>
+        <member name="T:UltraLiteDB.CreateObject">
+            <summary>Factory delegate for parameterless object creation.</summary>
+        </member>
+        <member name="T:UltraLiteDB.GenericSetter">
+            <summary>Delegate that sets a member value on a target object.</summary>
+        </member>
+        <member name="T:UltraLiteDB.GenericGetter">
+            <summary>Delegate that gets a member value from a source object.</summary>
         </member>
         <member name="T:UltraLiteDB.Reflection">
             <summary>
-            Helper class to get entity properties and map as BsonValue
+            Reflection utilities for creating instances, building property getters/setters,
+            and inspecting generic type information used by <see cref="T:UltraLiteDB.BsonMapper"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.CreateInstance(System.Type)">
             <summary>
-            Create a new instance from a Type
+            Creates an instance of the given type using a cached parameterless constructor delegate.
+            Handles classes, structs, and known generic interfaces (IList, IDictionary, IEnumerable).
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.IsNullable(System.Type)">
+            <summary>Returns true if the type is <see cref="T:System.Nullable`1"/>.</summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.UnderlyingTypeOf(System.Type)">
             <summary>
-            Get underlying get - using to get inner Type from Nullable type
+            Gets the first generic type argument (e.g. <c>int</c> from <c>Nullable&lt;int&gt;</c>).
+            Returns the type unchanged if it is not generic.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.GetGenericListOfType(System.Type)">
+            <summary>Constructs <c>List&lt;T&gt;</c> for the given element type.</summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.GetGenericDictionaryOfType(System.Type,System.Type)">
+            <summary>Constructs <c>Dictionary&lt;K,V&gt;</c> for the given key and value types.</summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.GetListItemType(System.Type)">
             <summary>
-            Get item type from a generic List or Array
+            Gets the element type from an array type or the <c>T</c> from <c>IEnumerable&lt;T&gt;</c>.
+            Returns <c>typeof(object)</c> if no generic enumerable interface is found.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.IsList(System.Type)">
             <summary>
-            Returns true if Type is any kind of Array/IList/ICollection/....
+            Returns true if the type implements <c>IEnumerable&lt;T&gt;</c> (excluding <c>string</c> and <c>BsonDocument</c>).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.SelectMember(System.Collections.Generic.IEnumerable{System.Reflection.MemberInfo},System.Func{System.Reflection.MemberInfo,System.Boolean}[])">
             <summary>
-            Select member from a list of member using predicate order function to select
+            Returns the first member matching any of the predicates, evaluated in order of priority.
+            Used to resolve ID members by convention (e.g. "Id", "TypeNameId", "_id").
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.CreateClass(System.Type)">
+            <summary>Creates a <see cref="T:UltraLiteDB.CreateObject"/> factory for a class type using <see cref="T:System.Activator"/>.</summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.CreateStruct(System.Type)">
+            <summary>Creates a <see cref="T:UltraLiteDB.CreateObject"/> factory for a struct type using <see cref="T:System.Activator"/>.</summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.CreateGenericGetter(System.Type,System.Reflection.MemberInfo)">
+            <summary>
+            Creates a getter delegate for a field or property. Returns null if the property has no get accessor.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.CreateGenericSetter(System.Type,System.Reflection.MemberInfo)">
+            <summary>
+            Creates a setter delegate for a field or property. Returns null if the property has no set accessor.
+            Includes special handling for <c>byte[]</c> members that receive <c>ArraySegment&lt;byte&gt;</c> values.
             </summary>
         </member>
         <member name="T:UltraLiteDB.AesEncryption">
@@ -2378,36 +3165,196 @@
             Encryption AES wrapper to encrypt data pages
             </summary>
         </member>
+        <member name="M:UltraLiteDB.AesEncryption.#ctor(System.String,System.Byte[])">
+            <summary>
+            Initializes AES encryption using a password and salt to derive the key and IV via PBKDF2.
+            </summary>
+            <param name="password">The password used to derive the encryption key.</param>
+            <param name="salt">The salt bytes used in key derivation.</param>
+        </member>
         <member name="M:UltraLiteDB.AesEncryption.Encrypt(System.Byte[])">
             <summary>
-            Encrypt byte array returning new encrypted byte array with same length of original array (PAGE_SIZE)
+            Encrypts a byte array, returning a new encrypted byte array with the same length as the original.
             </summary>
+            <param name="bytes">The plaintext byte array to encrypt.</param>
+            <returns>The encrypted byte array.</returns>
         </member>
         <member name="M:UltraLiteDB.AesEncryption.Decrypt(System.Byte[])">
             <summary>
-            Decrypt and byte array returning a new byte array
+            Decrypts a byte array, returning a new plaintext byte array.
             </summary>
+            <param name="encryptedValue">The encrypted byte array to decrypt.</param>
+            <returns>The decrypted byte array.</returns>
         </member>
         <member name="M:UltraLiteDB.AesEncryption.HashSHA1(System.String)">
             <summary>
-            Hash a password using SHA1 just to verify password
+            Hashes a password using SHA1 for password verification purposes.
             </summary>
+            <param name="password">The password to hash.</param>
+            <returns>The SHA1 hash of the password as a byte array.</returns>
         </member>
         <member name="M:UltraLiteDB.AesEncryption.Salt(System.Int32)">
             <summary>
-            Generate a salt key that will be stored inside first page database
+            Generates a cryptographically random salt for use in key derivation, stored in the database header page.
             </summary>
-            <returns></returns>
+            <param name="maxLength">The length of the salt in bytes (default: 16).</param>
+            <returns>A byte array containing the random salt.</returns>
+        </member>
+        <member name="M:UltraLiteDB.AesEncryption.Dispose">
+            <summary>
+            Releases the AES encryption resources.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.ByteReader">
+            <summary>
+            Reads primitive and extended data types sequentially from a byte buffer in little-endian format.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.ByteReader.Position">
+            <summary>
+            Gets or sets the current read position within the buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.#ctor">
+            <summary>
+            Initializes an empty <see cref="T:UltraLiteDB.ByteReader"/> with no backing buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.#ctor(System.Byte[],System.Int32)">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.ByteReader"/> with the specified byte array and optional starting offset.
+            </summary>
+            <param name="buffer">The byte array to read from.</param>
+            <param name="offset">The starting position within the buffer (default: 0).</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.#ctor(System.ArraySegment{System.Byte})">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.ByteReader"/> with the specified <see cref="T:System.ArraySegment`1"/>, reading within its bounds.
+            </summary>
+            <param name="buffer">The array segment to read from.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.Clear">
+            <summary>
+            Clears the reader state, removing the buffer reference and resetting position to zero.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.Reset(System.Byte[])">
+            <summary>
+            Resets the reader to use a new byte array, starting from position zero.
+            </summary>
+            <param name="buffer">The new byte array to read from.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.Reset(System.ArraySegment{System.Byte})">
+            <summary>
+            Resets the reader to use a new <see cref="T:System.ArraySegment`1"/>, starting from the segment's offset.
+            </summary>
+            <param name="buffer">The new array segment to read from.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.Skip(System.Int32)">
+            <summary>
+            Advances the read position by the specified number of bytes without reading data.
+            </summary>
+            <param name="length">The number of bytes to skip.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.ReadString">
+            <summary>
+            Reads a length-prefixed UTF-8 string (4-byte Int32 length prefix followed by string bytes).
+            </summary>
+            <returns>The decoded string.</returns>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.ReadString(System.Int32)">
+            <summary>
+            Reads a UTF-8 string of the specified byte length from the buffer.
+            </summary>
+            <param name="length">The number of bytes to read as a string.</param>
+            <returns>The decoded string.</returns>
         </member>
         <member name="M:UltraLiteDB.ByteReader.ReadBsonString">
             <summary>
-            Read BSON string add \0x00 at and of string and add this char in length before
+            Reads a BSON-encoded string, which includes a 4-byte length prefix and a trailing null terminator (0x00).
+            The length prefix includes the null terminator byte.
             </summary>
+            <returns>The decoded string without the null terminator.</returns>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.ReadCString">
+            <summary>
+            Reads a null-terminated C-style string (CString) from the buffer.
+            </summary>
+            <returns>The decoded string, or "_" if end of buffer is reached without finding null terminator.</returns>
+        </member>
+        <member name="T:UltraLiteDB.ByteWriter">
+            <summary>
+            Writes primitive and extended data types sequentially into a byte buffer in little-endian format.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.ByteWriter.Buffer">
+            <summary>
+            Gets the underlying byte array being written to.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.ByteWriter.Position">
+            <summary>
+            Gets or sets the current write position within the buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.#ctor">
+            <summary>
+            Initializes an empty <see cref="T:UltraLiteDB.ByteWriter"/> with no backing buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.#ctor(System.Int32)">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.ByteWriter"/> with a new byte array of the specified length.
+            </summary>
+            <param name="length">The size of the byte array to allocate.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.#ctor(System.Byte[],System.Int32)">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.ByteWriter"/> with an existing byte array and optional starting offset.
+            </summary>
+            <param name="buffer">The byte array to write into.</param>
+            <param name="offset">The starting position within the buffer (default: 0).</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.#ctor(System.ArraySegment{System.Byte})">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.ByteWriter"/> with the specified <see cref="T:System.ArraySegment`1"/>, writing from its offset.
+            </summary>
+            <param name="buffer">The array segment to write into.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.Clear">
+            <summary>
+            Clears the writer state, removing the buffer reference and resetting position to zero.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.Reset(System.Byte[])">
+            <summary>
+            Resets the writer to use a new byte array, starting from position zero.
+            </summary>
+            <param name="buffer">The new byte array to write into.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.Reset(System.ArraySegment{System.Byte})">
+            <summary>
+            Resets the writer to use a new <see cref="T:System.ArraySegment`1"/>, starting from the segment's offset.
+            </summary>
+            <param name="buffer">The new array segment to write into.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.Skip(System.Int32)">
+            <summary>
+            Advances the write position by the specified number of bytes without writing data.
+            </summary>
+            <param name="length">The number of bytes to skip.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.EnsureCapacity(System.Int32)">
+            <summary>
+            Ensures the buffer has room for the specified number of additional bytes, growing it if necessary.
+            </summary>
+            <param name="additionalBytes">The number of additional bytes needed.</param>
         </member>
         <member name="T:UltraLiteDB.Collation">
             <summary>
-            Implement how database will compare to order by/find strings according defined culture/compare options
-            If not set, default is CurrentCulture with IgnoreCase
+            Defines string comparison rules (culture + <see cref="T:System.Globalization.CompareOptions"/>) used by the database for
+            ordering and matching. Default is invariant culture with <see cref="F:System.Globalization.CompareOptions.IgnoreCase"/>.
+            Also implements <see cref="T:System.Collections.Generic.IComparer`1"/> for both <see cref="T:UltraLiteDB.BsonValue"/> and <see cref="T:System.String"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.Collation.Culture">
@@ -2427,7 +3374,8 @@
         </member>
         <member name="T:UltraLiteDB.ConnectionString">
             <summary>
-            Manage ConnectionString to connect and create databases. Connection string are NameValue using Name1=Value1; Name2=Value2
+            Parsed representation of a database connection string. Supports "key=value;..." format or a plain filename.
+            Keys: filename, journal, password, cache size, timeout, initial size, limit size, log, async, flush.
             </summary>
         </member>
         <member name="P:UltraLiteDB.ConnectionString.Filename">
@@ -2490,14 +3438,59 @@
             Initialize connection string parsing string in "key1=value1;key2=value2;...." format or only "filename" as default (when no ; char found)
             </summary>
         </member>
+        <member name="T:UltraLiteDB.BinaryExtensions">
+            <summary>
+            Lexicographic byte array comparison extensions, used for binary BSON value ordering.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BinaryExtensions.BinaryCompareTo(System.Byte[],System.Byte[])">
+            <summary>
+            Lexicographically compare two byte arrays. Returns -1, 0, or 1.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BinaryExtensions.BinaryCompareTo(System.ArraySegment{System.Byte},System.ArraySegment{System.Byte})">
+            <summary>
+            Lexicographically compare two ArraySegment byte spans. Returns -1, 0, or 1.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DateExtensions">
+            <summary>
+            Extension methods for <see cref="T:System.DateTime"/> truncation and calendar difference calculations.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.DateExtensions.Truncate(System.DateTime)">
             <summary>
-            Truncate DateTime in milliseconds
+            Truncate a DateTime to millisecond precision (removes sub-millisecond ticks).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DateExtensions.MonthDifference(System.DateTime,System.DateTime)">
+            <summary>
+            Returns the number of complete calendar months between two dates.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DateExtensions.YearDifference(System.DateTime,System.DateTime)">
+            <summary>
+            Returns the number of complete calendar years between two dates.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DictionaryExtensions">
+            <summary>
+            Extension methods for dictionaries: key lookup, connection string parsing, and file size parsing.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DictionaryExtensions.NextIndex``1(System.Collections.Generic.Dictionary{System.UInt16,``0})">
             <summary>
             Get free index based on dictionary count number (if is in use, move to next number)
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DictionaryExtensions.GetOrDefault``2(System.Collections.Generic.IDictionary{``0,``1},``0,``1)">
+            <summary>
+            Returns the value for the given key, or a default value if the key is not present.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DictionaryExtensions.ParseKeyValue(System.Collections.Generic.IDictionary{System.String,System.String},System.String)">
+            <summary>
+            Parse a "key=value;key=value" connection string into the dictionary.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DictionaryExtensions.GetValue``1(System.Collections.Generic.Dictionary{System.String,System.String},System.String,``0)">
@@ -2510,6 +3503,11 @@
             Get a value from a key converted in file size format: "1gb", "10 mb", "80000"
             </summary>
         </member>
+        <member name="T:UltraLiteDB.ExpressionExtensions">
+            <summary>
+            Extension methods for LINQ <see cref="T:System.Linq.Expressions.Expression"/> trees, used to extract dotted property paths from lambda expressions.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.ExpressionExtensions.GetPath(System.Linq.Expressions.Expression)">
             <summary>
             Get Path (better ToString) from an Expression.
@@ -2517,9 +3515,19 @@
             Support list levels: x => x.Addresses.Select(z => z.StreetName)
             </summary>
         </member>
+        <member name="T:UltraLiteDB.IOExceptionExtensions">
+            <summary>
+            Extension methods for <see cref="T:System.IO.IOException"/> to detect file lock violations and wait-retry.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.IOExceptionExtensions.IsLocked(System.IO.IOException)">
             <summary>
             Detect if exception is an Locked exception
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IOExceptionExtensions.WaitIfLocked(System.IO.IOException,System.Int32)">
+            <summary>
+            If the exception is a file lock violation, wait the specified milliseconds. Otherwise, rethrow.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IOExceptionExtensions.WaitFor(System.Int32)">
@@ -2527,9 +3535,29 @@
             WaitFor function used in all platforms
             </summary>
         </member>
+        <member name="T:UltraLiteDB.LinqExtensions">
+            <summary>
+            LINQ extension methods for batching and distinct-by-key operations.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.LinqExtensions.Batch``1(System.Collections.Generic.IEnumerable{``0},System.Int32)">
+            <summary>
+            Split a sequence into batches of the specified size.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.LinqExtensions.DistinctBy``2(System.Collections.Generic.IEnumerable{``0},System.Func{``0,``1},System.Collections.Generic.IEqualityComparer{``1})">
+            <summary>
+            Returns distinct elements by a projected key, using the specified equality comparer.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.StringExtensions">
+            <summary>
+            Convenience string extension methods for null/empty/whitespace checks.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.FileHelper">
             <summary>
-            A simple file helper tool with static methods
+            Static helper methods for temp file creation, safe deletion, and retry-with-timeout for locked files.
             </summary>
         </member>
         <member name="M:UltraLiteDB.FileHelper.GetTempFile(System.String,System.String,System.Boolean)">
@@ -2544,18 +3572,42 @@
         </member>
         <member name="M:UltraLiteDB.FileHelper.TryExec(System.Action,System.TimeSpan)">
             <summary>
-            Try execute some action while has lock exception
+            Retry an action until it succeeds or the timeout expires, sleeping on <see cref="T:System.IO.IOException"/> (file lock).
             </summary>
         </member>
         <member name="T:UltraLiteDB.FileOptions">
             <summary>
-            Datafile open options (for FileDiskService)
+            Configuration options for <see cref="T:UltraLiteDB.FileDiskService"/>, controlling journaling, file size limits, and I/O behavior.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.FileOptions.Journal">
+            <summary>Whether write-ahead journaling is enabled for crash recovery.</summary>
+        </member>
+        <member name="P:UltraLiteDB.FileOptions.InitialSize">
+            <summary>Pre-allocate the data file to this size (in bytes) when creating a new database. 0 = no pre-allocation.</summary>
+        </member>
+        <member name="P:UltraLiteDB.FileOptions.LimitSize">
+            <summary>Maximum allowed data file size in bytes. Writes that exceed this throw an exception.</summary>
+        </member>
+        <member name="P:UltraLiteDB.FileOptions.Async">
+            <summary>Use "sync over async" pattern for file stream creation (needed for some UWP scenarios).</summary>
+        </member>
+        <member name="P:UltraLiteDB.FileOptions.Flush">
+            <summary>If true, flush bypasses OS write cache by calling FileStream.Flush(true).</summary>
+        </member>
+        <member name="T:UltraLiteDB.KeyDocument">
+            <summary>
+            Pairs a sort key with its document, used internally during query result sorting.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.KeyDocumentComparer">
+            <summary>
+            Compares <see cref="T:UltraLiteDB.KeyDocument"/> instances by their <see cref="P:UltraLiteDB.KeyDocument.Key"/> value.
             </summary>
         </member>
         <member name="T:UltraLiteDB.LazyLoad`1">
             <summary>
-            LazyLoad class for .NET 3.5
-            http://stackoverflow.com/questions/3207580/implementation-of-lazyt-for-net-3-5
+            Thread-safe lazy initialization wrapper. Creates the value on first access via a factory delegate.
             </summary>
         </member>
         <member name="P:UltraLiteDB.LazyLoad`1.Value">
@@ -2582,8 +3634,9 @@
         </member>
         <member name="T:UltraLiteDB.Logger">
             <summary>
-            A logger class to log all information about database. Used with levels. Level = 0 - 255
-            All log will be trigger before operation execute (better for debug)
+            Bitmask-based logger for database diagnostics. Each subsystem (DISK, CACHE, QUERY, etc.) has a
+            bit flag; messages are emitted only when the corresponding bit is set in <see cref="P:UltraLiteDB.Logger.Level"/>.
+            Log messages fire before the operation executes (useful for debugging hangs).
             </summary>
         </member>
         <member name="M:UltraLiteDB.Logger.#ctor(System.Byte,System.Action{System.String})">
@@ -2623,7 +3676,8 @@
         </member>
         <member name="T:UltraLiteDB.StringScanner">
             <summary>
-            A StringScanner is state machine used in text parsers based on regular expressions
+            Cursor-based string parser that advances through a source string using regex pattern matching.
+            Used by query and expression parsers to tokenize and extract structured data from text.
             </summary>
         </member>
         <member name="M:UltraLiteDB.StringScanner.#ctor(System.String)">
@@ -2802,8 +3856,8 @@
         </member>
         <member name="T:UltraLiteDB.Tokenizer">
             <summary>
-            Class to tokenize TextReader input used in JsonRead/BsonExpressions
-            This class are not thread safe
+            Streaming lexer that converts a <see cref="T:System.IO.TextReader"/> into a sequence of <see cref="T:UltraLiteDB.Token"/>s.
+            Used by JSON parsing and BSON expression evaluation. Not thread-safe.
             </summary>
         </member>
         <member name="M:UltraLiteDB.Tokenizer.CheckEOF">
@@ -2863,7 +3917,8 @@
         </member>
         <member name="T:UltraLiteDB.UltraLiteException">
             <summary>
-            The main exception for LiteDB
+            Base exception type for all UltraLiteDB errors. Each error has a numeric <see cref="P:UltraLiteDB.UltraLiteException.ErrorCode"/>
+            and static factory methods for common failure scenarios (index violations, lock timeouts, etc.).
             </summary>
         </member>
     </members>

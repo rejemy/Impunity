@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 
 namespace Impunity.Networking
@@ -13,18 +14,27 @@ namespace Impunity.Networking
 		public ImpunityCallback OnNetworkError { get; set; }
 		public Action<int> OnDisconnectedByServer { get; set; }
 
+		public bool SupportsUnguaranteed { get; private set; } = false;
+
 		private string ServerHost;
 		private int ServerPort;
 
 		private IPEndPoint ServerEndpoint;
 		private ImpunityOptions Options;
 
-		private TcpClient ClientSocket;
-		private Thread ClientSocketThread;
+		private TcpClient ClientTCPSocket;
+		private Thread ClientTCPSocketThread;
+		private NetworkStream TCPSocketStream;
 
-		private NetworkStream SocketStream;
-
+		private UdpClient ClientUDPSocket;
+		private Thread ClientUDPSocketThread;
+	
 		private ImpunityCallback OnConnectCallback;
+
+
+		byte[] SessionDataPacket;
+		byte[] PingPacket;
+		byte[] PongPacket;
 
 		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{
@@ -47,7 +57,7 @@ namespace Impunity.Networking
 			}
 			Options = options;
 
-			ClientSocket = new TcpClient();
+			ClientTCPSocket = new TcpClient();
 		}
 
 		private ImpunityTCPClient(string hostname, int port, ImpunityOptions options = null)
@@ -61,37 +71,40 @@ namespace Impunity.Networking
 			}
 			Options = options;
 
-			ClientSocket = new TcpClient();
+			ClientTCPSocket = new TcpClient();
 		}
 
 		public void Connect(ImpunityCallback onComplete)
 		{
 			OnConnectCallback = onComplete;
 
-			ClientSocketThread = new Thread(new ThreadStart(SocketListenerThread));
-			ClientSocketThread.IsBackground = true;
-			ClientSocketThread.Name = "TCPClient socket reader";
-			ClientSocketThread.Start();
+			ClientTCPSocketThread = new Thread(new ThreadStart(TCPSocketListenerThread));
+			ClientTCPSocketThread.IsBackground = true;
+			ClientTCPSocketThread.Name = "TCPClient socket reader";
+			ClientTCPSocketThread.Start();
+		}
+
+		private void OpenUdpClient()
+		{
+			ClientUDPSocketThread = new Thread(new ThreadStart(UDPSocketListenerThread));
+			ClientUDPSocketThread.IsBackground = true;
+			ClientUDPSocketThread.Name = "UDPClient socket reader";
+			ClientUDPSocketThread.Start();
 		}
 
 		public void Disconnect()
 		{
-			if (ClientSocket != null)
+			if (ClientTCPSocket != null)
 			{
-				TcpClient client = ClientSocket;
-				ClientSocket = null;
+				TcpClient client = ClientTCPSocket;
+				ClientTCPSocket = null;
 				client.Close();
 
 			}
 		}
 
-		public bool SupportsUnguaranteed()
-		{
-			return false;
-		}
 
-
-		private void SocketListenerThread()
+		private void TCPSocketListenerThread()
 		{
 			byte[] receiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			bool connected = false;
@@ -100,15 +113,19 @@ namespace Impunity.Networking
 			{
 				if (ServerHost != null)
 				{
-					ClientSocket.Connect(ServerHost, ServerPort);
+					ClientTCPSocket.Connect(ServerHost, ServerPort);
 				}
 				else
 				{
-					ClientSocket.Connect(ServerEndpoint);
+					ClientTCPSocket.Connect(ServerEndpoint);
 				}
 
-				SocketStream = ClientSocket.GetStream();
+				ServerEndpoint = ClientTCPSocket.Client.RemoteEndPoint as IPEndPoint;
+				TCPSocketStream = ClientTCPSocket.GetStream();
 
+				// Open Udp socket on the same port as the TCP connection
+				OpenUdpClient();
+				
 				connected = true;
 				OnConnectCallback?.Invoke(null);
 				OnConnectCallback = null;
@@ -116,9 +133,9 @@ namespace Impunity.Networking
 				int bytesReceived = 0;
 				int maxBytesToReceive = ImpunityConstants.MaxMessageSize;
 
-				while (ClientSocket != null)
+				while (ClientTCPSocket != null)
 				{
-					int bytesRead = SocketStream.Read(receiveBuffer, bytesReceived, maxBytesToReceive);
+					int bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, maxBytesToReceive);
 					if (bytesRead == 0)
 					{
 						// Socket closed
@@ -162,7 +179,7 @@ namespace Impunity.Networking
 					OnConnectCallback?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, e));
 					OnConnectCallback = null;
 				}
-				else if (ClientSocket != null)
+				else if (ClientTCPSocket != null)
 				{
 					// Client socket is null on regular requested disonnect
 					OnNetworkError?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, e));
@@ -172,11 +189,11 @@ namespace Impunity.Networking
 			}
 			finally
 			{
-				if (ClientSocket != null)
+				if (ClientTCPSocket != null)
 				{
-					ClientSocket.Close();
-					ClientSocket.Dispose();
-					ClientSocket = null;
+					ClientTCPSocket.Close();
+					ClientTCPSocket.Dispose();
+					ClientTCPSocket = null;
 
 					try
 					{
@@ -192,24 +209,133 @@ namespace Impunity.Networking
 			ImpunityLogger.LogInformation("Client socket closed");
 		}
 
+		private void UDPSocketListenerThread()
+		{
+			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
+			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
+			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
+
+			try
+			{
+				// Open Udp socket on same port/address as established TCP session
+				var localEndpoint = ClientTCPSocket.Client.LocalEndPoint;
+				ClientUDPSocket = new UdpClient(localEndpoint as IPEndPoint);
+				
+				// See if we can reach the server and vice versa
+				SendUdpPing();
+
+				while (ClientUDPSocket != null)
+				{
+					IPEndPoint sender = null;
+					byte[] packet = ClientUDPSocket.Receive(ref sender);
+					if (sender != ServerEndpoint)
+					{
+						// Some other random stray packet
+						continue;
+					}
+
+					if (ImpunityUtil.StartsWith(packet, SessionDataPacket))
+					{
+						var packetBody = new ArraySegment<byte>(packet, SessionDataPacket.Length, packet.Length - SessionDataPacket.Length);
+						OnSessionDataPacket(packetBody);
+					}
+					else if(ImpunityUtil.StartsWith(packet, PingPacket))
+					{
+						OnPingPacket();
+					}
+					else if(ImpunityUtil.StartsWith(packet, PongPacket))
+					{
+						OnPongPacket();
+					}
+					else
+					{
+						ImpunityLogger.LogDebug("Got unknown UDP packet");
+					}
+				}
+			}
+			catch (SocketException e)
+			{
+				if (ClientUDPSocket == null)
+				{
+					return;
+				}
+
+				ImpunityLogger.LogError("UDP Socket error", e);
+			}
+			finally
+			{
+				if (ClientUDPSocket != null)
+				{
+					ClientUDPSocket.Close();
+					ClientUDPSocket = null;
+				}
+			}
+		}
+
+		private void OnSessionDataPacket(ArraySegment<byte> data)
+		{
+			try
+			{
+				OnMessageRecieved.Invoke(data);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Error in OnMessageReceieved handler", e);
+			}
+		}
+
+		private void OnPingPacket()
+		{
+			try
+			{
+				ClientUDPSocket.Send(PongPacket, PongPacket.Length, ServerEndpoint);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception sending UDP packet", e);
+			}
+		}
+		
+		private void OnPongPacket()
+		{
+			this.SupportsUnguaranteed = true;
+		}
+
+		private void SendUdpPing()
+		{
+			try
+			{
+				ClientUDPSocket.Send(PingPacket, PingPacket.Length, this.ServerEndpoint);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception sending UDP packet", e);
+			}
+		}
+
 		public void SendGuaranteedMessage(ArraySegment<byte> messageBytes)
 		{
-			if (ClientSocket == null || !ClientSocket.Connected)
+			if (ClientTCPSocket == null || !ClientTCPSocket.Connected)
 			{
 				return;
 			}
 
-			SocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			TCPSocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
-			if (ClientSocket == null || !ClientSocket.Connected)
+			if (ClientUDPSocket == null || !this.SupportsUnguaranteed)
 			{
+				SendGuaranteedMessage(messageBytes);
 				return;
 			}
+			
+			byte[] buffer = new byte[messageBytes.Count + SessionDataPacket.Length];
+			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
+			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
 
-			SocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			ClientUDPSocket.Send(buffer, buffer.Length, this.ServerEndpoint);
 		}
 
 		public void Dispose()

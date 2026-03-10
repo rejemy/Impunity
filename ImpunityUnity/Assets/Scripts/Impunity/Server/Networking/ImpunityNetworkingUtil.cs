@@ -5,7 +5,6 @@ using System.Buffers.Binary;
 using UltraLiteDB;
 
 using System.IO;
-using UnityEditor.VersionControl;
 
 namespace Impunity.Networking
 {
@@ -85,7 +84,7 @@ namespace Impunity.Networking
 			if (message != null)
 			{
 				var mapper = ImpunityUtil.GetBsonMapper();
-				mapper.SerializeToBytes(typeof(Message), message, writer);
+				mapper.SerializeToBytes(message.GetType(), message, writer);
 			}
 
 			int totalLength = writer.Position;

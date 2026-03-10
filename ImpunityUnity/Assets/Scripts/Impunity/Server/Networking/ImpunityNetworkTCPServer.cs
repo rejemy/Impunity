@@ -22,19 +22,20 @@ namespace Impunity.Networking
 
 		public string ConnectionId { get; private set;}
 		public string RemoteAddress { get => RemoteEndpoint.ToString(); }
-		public bool SupportsUnguaranteed { get => false; }
+
+		public bool SupportsUnguaranteed { get; set; } = false;
 
 		private const int ConnectEstablishTimeout = 1000;
 
 		ImpunityTCPServer Server;
 		TcpClient Client;
 		NetworkStream ClientStream;
-		
+
 		int MaxBytesToReceive = ImpunityConstants.MaxMessageSize;
 		byte[] ReceiveBuffer;
 		int BytesReceived = 0;
 
-		internal EndPoint RemoteEndpoint { get; private set; }
+		internal IPEndPoint RemoteEndpoint { get; private set; }
 
 
 		public ImpunityTCPServerClientContext(ImpunityTCPServer server, TcpClient client, string connectionId)
@@ -43,7 +44,7 @@ namespace Impunity.Networking
 			Client = client;
 			ClientStream = client.GetStream();
 			ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
-			RemoteEndpoint = Client.Client.RemoteEndPoint;
+			RemoteEndpoint = Client.Client.RemoteEndPoint as IPEndPoint;
 			ConnectionId = connectionId;
 		}
 
@@ -154,7 +155,12 @@ namespace Impunity.Networking
 
 		public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
 		{
-			return ClientStream.WriteAsync(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			if (!SupportsUnguaranteed)
+			{
+				return SendGuaranteedMessageAsync(messageBytes);
+			}
+
+			return this.Server.SendUdpSessionData(this.RemoteEndpoint, messageBytes);
 		}
 
 
@@ -232,9 +238,12 @@ namespace Impunity.Networking
 
 		bool Running;
 		byte[] SearchPacket;
+		byte[] SessionDataPacket;
+		byte[] PingPacket;
+		byte[] PongPacket;
 
 		public int ClientsConnected { get => ClientsByRemoteEndpoint.Count; }
-		ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext> ClientsByRemoteEndpoint;
+		ConcurrentDictionary<IPEndPoint, ImpunityTCPServerClientContext> ClientsByRemoteEndpoint;
 		Dictionary<string, PerGameTCPServerData> PerGameData;
 
 		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
@@ -244,7 +253,7 @@ namespace Impunity.Networking
 			Options = options;
 
 			PerGameData = new Dictionary<string, PerGameTCPServerData>();
-			ClientsByRemoteEndpoint = new ConcurrentDictionary<EndPoint, ImpunityTCPServerClientContext>();
+			ClientsByRemoteEndpoint = new ConcurrentDictionary<IPEndPoint, ImpunityTCPServerClientContext>();
 			ShutdownToken = new CancellationTokenSource();
 
 			Running = true;
@@ -328,6 +337,9 @@ namespace Impunity.Networking
 			StartTcpListener();
 
 			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
+			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
+			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
+			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
 
 			StartUDPListen();
 			
@@ -371,13 +383,15 @@ namespace Impunity.Networking
 					ClientsByRemoteEndpoint[context.RemoteEndpoint] = context;
 					context.Listen();
 
+					// See if we can communicate via UDP with new session
+					SendUdpPing(context.RemoteEndpoint);
+
+					// Re-announce after new session started so connected client count gets updated
 					foreach(string gameId in PerGameData.Keys.ToList())
 					{
 						UpdateAnnouncePacket(gameId);
 					}
 				}
-
-
 			}
 			catch (SocketException e)
 			{
@@ -451,15 +465,33 @@ namespace Impunity.Networking
 
 				SendServerAnnounce();
 
-				IPEndPoint groupEP = new IPEndPoint(IPAddress.Any, Options.ServerPort);
+				
 
 				while (ServerUdpSocket != null)
 				{
-					byte[] packet = ServerUdpSocket.Receive(ref groupEP);
-					ImpunityLogger.LogInformation("Got bytes");
-					if (ImpunityUtil.StartsWith(packet, SearchPacket))
+					IPEndPoint senderEndpoint = null;
+					byte[] packet = ServerUdpSocket.Receive(ref senderEndpoint);
+					//ImpunityLogger.LogInformation("Got bytes");
+					if (ImpunityUtil.StartsWith(packet, SessionDataPacket))
+					{
+						var packetBody = new ArraySegment<byte>(packet, SessionDataPacket.Length, packet.Length - SessionDataPacket.Length);
+						OnSessionDataPacket(senderEndpoint, packetBody);
+					}
+					else if(ImpunityUtil.StartsWith(packet, PingPacket))
+					{
+						OnPingPacket(senderEndpoint);
+					}
+					else if(ImpunityUtil.StartsWith(packet, PongPacket))
+					{
+						OnPongPacket(senderEndpoint);
+					}
+					else if (ImpunityUtil.StartsWith(packet, SearchPacket))
 					{
 						OnSearchPacket();
+					}
+					else
+					{
+						ImpunityLogger.LogDebug("Got unknown UDP packet");
 					}
 				}
 			}
@@ -482,11 +514,31 @@ namespace Impunity.Networking
 
 		}
 
+		private void OnSessionDataPacket(IPEndPoint sender, ArraySegment<byte> data)
+		{
+			if(this.ClientsByRemoteEndpoint.TryGetValue(sender, out var context))
+			{
+				try
+				{
+					context.OnMessageRecieved?.Invoke(context, data);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in UDP socket message handler", e);
+				}
+			}
+			else
+			{
+				ImpunityLogger.LogDebug("Got UDP session packet from unknown source: " + sender.ToString());
+			}
+		}
+
 		private void OnSearchPacket()
 		{
 			ImpunityLogger.LogDebug("Got search packet");
 			SendServerAnnounce();
 		}
+
 
 		private void SendServerAnnounce()
 		{
@@ -503,6 +555,58 @@ namespace Impunity.Networking
 				ServerUdpSocket.Send(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
 			}
 			
+		}
+
+		private void OnPingPacket(IPEndPoint sender)
+		{
+			if(this.ClientsByRemoteEndpoint.TryGetValue(sender, out var context))
+			{
+				try
+				{
+					ServerUdpSocket.Send(PongPacket, PongPacket.Length, sender);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception sending UDP packet", e);
+				}
+			}
+			else
+			{
+				ImpunityLogger.LogDebug("Got UDP ping packet from unknown source: " + sender.ToString());
+			}
+		}
+		
+		private void OnPongPacket(IPEndPoint sender)
+		{
+			if(this.ClientsByRemoteEndpoint.TryGetValue(sender, out var context))
+			{
+				context.SupportsUnguaranteed = true;
+			}
+			else
+			{
+				ImpunityLogger.LogDebug("Got UDP pong packet from unknown source: " + sender.ToString());
+			}
+		}
+
+		private void SendUdpPing(IPEndPoint destination)
+		{
+			try
+			{
+				ServerUdpSocket.Send(PingPacket, PingPacket.Length, destination);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception sending UDP packet", e);
+			}
+		}
+
+		public Task SendUdpSessionData(IPEndPoint destination, ArraySegment<byte> messageBytes)
+		{
+			byte[] buffer = new byte[messageBytes.Count + SessionDataPacket.Length];
+			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
+			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
+
+			return ServerUdpSocket.SendAsync(buffer, buffer.Length, destination);
 		}
 
 		public void Dispose()

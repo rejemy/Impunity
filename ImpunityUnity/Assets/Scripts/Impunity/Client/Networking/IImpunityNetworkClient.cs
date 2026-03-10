@@ -14,7 +14,7 @@ namespace Impunity.Networking
 		void Connect(ImpunityCallback onComplete);
 		void Disconnect();
 
-		bool SupportsUnguaranteed();
+		bool SupportsUnguaranteed { get; }
 
 		// Must be prefixed by a 4 byte length header
 		void SendGuaranteedMessage(ArraySegment<byte> messageBytes);

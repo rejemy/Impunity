@@ -89,12 +89,12 @@ namespace Impunity.Networking
 			{
 				FinderUdpSocket = new UdpClient(Options.ClientPort);
 				FinderUdpSocket.EnableBroadcast = true;
-				IPEndPoint groupEP = new IPEndPoint(IPAddress.Any, Options.ClientPort);
-
+				
 				SendServerSearch();
 
 				while (Running)
 				{
+					IPEndPoint groupEP = null;
 					byte[] packet = FinderUdpSocket.Receive(ref groupEP);
 					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))
 					{
