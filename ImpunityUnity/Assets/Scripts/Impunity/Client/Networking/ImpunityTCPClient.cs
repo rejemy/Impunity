@@ -131,11 +131,10 @@ namespace Impunity.Networking
 				OnConnectCallback = null;
 
 				int bytesReceived = 0;
-				int maxBytesToReceive = ImpunityConstants.MaxMessageSize;
 
 				while (ClientTCPSocket != null)
 				{
-					int bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, maxBytesToReceive);
+					int bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, receiveBuffer.Length - bytesReceived);
 					if (bytesRead == 0)
 					{
 						// Socket closed
@@ -147,7 +146,6 @@ namespace Impunity.Networking
 					{
 						// Didn't read enough to get a size, this is probably some kind of error
 						ImpunityLogger.LogWarning("Only read " + bytesReceived + " from the TCP socket");
-						maxBytesToReceive = ImpunityConstants.MaxMessageSize - bytesReceived;
 						continue;
 					}
 
@@ -155,7 +153,6 @@ namespace Impunity.Networking
 					if (bytesReceived < messageLength)
 					{
 						ImpunityLogger.LogDebug("Got partial message: " + bytesReceived + " / " + messageLength);
-						maxBytesToReceive = messageLength - bytesReceived;
 						continue;
 					}
 
@@ -168,8 +165,18 @@ namespace Impunity.Networking
 						ImpunityLogger.LogError("Error in OnMessageReceieved handler", e);
 					}
 
-					bytesReceived = 0;
-					maxBytesToReceive = ImpunityConstants.MaxMessageSize;
+					if (bytesReceived > messageLength)
+					{
+						// If there is any data left over, compact it down and continue reading
+						int extraData = bytesReceived - messageLength;
+						ImpunityLogger.LogDebug("Got part of next message: " + extraData);
+						Buffer.BlockCopy(receiveBuffer, messageLength, receiveBuffer, 0, extraData);
+						bytesReceived = extraData;
+					}
+					else
+					{
+						bytesReceived = 0;
+					}
 				}
 			}
 			catch (Exception e)

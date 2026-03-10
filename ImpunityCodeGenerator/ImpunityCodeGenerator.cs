@@ -352,7 +352,7 @@ namespace SourceGenerator
 			if (genericField == null)
 			{
 				var msg = new DiagnosticDescriptor("IMP2", "Invalid Distributed Type", "Distributed attribute on an unsupported field type", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
+				context.ReportDiagnostic(Diagnostic.Create(msg, vd.GetLocation()));
 
 				return;
 			}

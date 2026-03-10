@@ -208,7 +208,7 @@ namespace Impunity
 			}
 		}
 
-		public static int ComparyArraySegments(ArraySegment<byte> lh, ArraySegment<byte> rh)
+		public static int CompareArraySegments(ArraySegment<byte> lh, ArraySegment<byte> rh)
 		{
 			if (lh.Array == null) return rh.Array == null ? 0 : -1;
 			if (rh.Array == null) return 1;

@@ -44,7 +44,7 @@ namespace Impunity
 
 		public static void LogDebug(string message, Exception exception)
 		{
-			LoggerInstance?.LogTrace(message, exception);
+			LoggerInstance?.LogDebug(message, exception);
 		}
 
 		public static void LogInformation(string message)

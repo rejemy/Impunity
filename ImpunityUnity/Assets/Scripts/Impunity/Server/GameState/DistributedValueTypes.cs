@@ -482,7 +482,7 @@ namespace Impunity.GameState
 
 		public static implicit operator string(DString d) => d.Value;
 		public static implicit operator DString(string d) => new DString(d);
-		public bool Equals(DString v) => String.Equals(Value, v.ValueType);
+		public bool Equals(DString v) => String.Equals(Value, v.Value);
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsString; }
@@ -534,7 +534,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ArraySegment<byte>(DBlob d) => d.Value;
 		public static implicit operator DBlob(ArraySegment<byte> d) => new DBlob(d);
-		public bool Equals(DBlob v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+		public bool Equals(DBlob v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
@@ -597,7 +597,7 @@ namespace Impunity.GameState
 			Value = new DateTimeOffset(ticks, offset);
 		}
 
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTimeOffset; }
 
 		public static implicit operator DateTimeOffset(DDateTimeOffset d) => d.Value;
 		public static implicit operator DDateTimeOffset(DateTimeOffset d) => new DDateTimeOffset(d);

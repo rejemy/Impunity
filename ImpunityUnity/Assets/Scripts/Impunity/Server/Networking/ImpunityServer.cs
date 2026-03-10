@@ -23,7 +23,7 @@ namespace Impunity.Networking
 		}
 	}
 
-	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy
+	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy, IDisposable
 	{
 		IImpunityNetworkServerClientContext ClientContext;
 		ImpunityServer NetworkServer;
@@ -50,9 +50,9 @@ namespace Impunity.Networking
 			SendBufferWriter = new ByteWriter(SendBuffer);
 			SendLock = new Semaphore(1, 1);
 
-			clientContext.OnMessageRecieved = ClientMessageReceived;
-			clientContext.OnNetworkError = ClientNetworkError;
-			clientContext.OnClientDisconnected = ClientDisconnected;
+			ClientContext.OnMessageRecieved = ClientMessageReceived;
+			ClientContext.OnNetworkError = ClientNetworkError;
+			ClientContext.OnClientDisconnected = ClientDisconnected;
 
 		}
 
@@ -134,19 +134,27 @@ namespace Impunity.Networking
 			SendLock.WaitOne();
 			// Lock is released in the OnDataWritten continuation
 
-			encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, 0, messageType, results);
+			try
+			{
+				encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, 0, messageType, results);
 
-			if (guaranteed)
-			{
-				ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+				if (guaranteed)
+				{
+					ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+				}
+				else
+				{
+					ClientContext.SendUnguaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+				}
 			}
-			else
+			catch (Exception e)
 			{
-				ClientContext.SendUnguaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
+				SendLock.Release();
+				ImpunityLogger.LogError("Exception encoding message: " + e.ToString());
 			}
 		}
 
-		public void ProcessCloseConnnection()
+		public void ProcessCloseConnection()
 		{
 			SendLock.WaitOne();
 
@@ -213,6 +221,22 @@ namespace Impunity.Networking
 		{
 			NetworkServer.ClientDisconnected(this);
 			GameServer?.ConnectionClosed(this);
+		}
+
+		public void Dispose()
+		{
+			if (SendLock != null)
+			{
+				SendLock.Dispose();
+				SendLock = null;
+			}
+
+			if (ClientContext != null)
+			{
+				ClientContext.OnMessageRecieved = null;
+				ClientContext.OnNetworkError = null;
+				ClientContext.OnClientDisconnected = null;
+			}
 		}
 	}
 
@@ -345,7 +369,7 @@ namespace Impunity.Networking
 
 			if (action is CloseClientConnectionAction)
 			{
-				clientInfo.ProcessCloseConnnection();
+				clientInfo.ProcessCloseConnection();
 			}
 			else if (action is ServerActionBase)
 			{
@@ -360,7 +384,7 @@ namespace Impunity.Networking
 
 			if(action.CloseConnectionOnComplete)
 			{
-				clientInfo.ProcessCloseConnnection();
+				clientInfo.ProcessCloseConnection();
 			}
 		}
 

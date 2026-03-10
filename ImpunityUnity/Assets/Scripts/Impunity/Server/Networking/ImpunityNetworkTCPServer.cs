@@ -31,7 +31,6 @@ namespace Impunity.Networking
 		TcpClient Client;
 		NetworkStream ClientStream;
 
-		int MaxBytesToReceive = ImpunityConstants.MaxMessageSize;
 		byte[] ReceiveBuffer;
 		int BytesReceived = 0;
 
@@ -93,11 +92,11 @@ namespace Impunity.Networking
 				return;
 			}
 
-			int bytesRead = readTask.Result;
+			BytesReceived += readTask.Result;
 
-			if (bytesRead > 0)
+			if (BytesReceived > 0)
 			{
-				HandleDataRead(bytesRead);
+				HandleDataRead();
 			}
 
 			if (!ClientStream.CanRead || !Client.Connected)
@@ -112,20 +111,17 @@ namespace Impunity.Networking
 			}
 
 			// And finish by going back to reading
-			ClientStream.ReadAsync(ReceiveBuffer, 0, MaxBytesToReceive)
+			ClientStream.ReadAsync(ReceiveBuffer, BytesReceived, ReceiveBuffer.Length - BytesReceived)
 				.ContinueWith(OnDataRead);
 
 		}
 
-		private void HandleDataRead(int bytesRead)
+		private void HandleDataRead()
 		{
-			BytesReceived += bytesRead;
-
 			if (BytesReceived < 4)
 			{
 				// Didn't read enough to get a size, this is probably some kind of error
 				ImpunityLogger.LogWarning("Only read " + BytesReceived + " from the TCP socket");
-				MaxBytesToReceive = ImpunityConstants.MaxMessageSize - BytesReceived;
 				return;
 			}
 
@@ -133,7 +129,6 @@ namespace Impunity.Networking
 			if (BytesReceived < messageLength)
 			{
 				ImpunityLogger.LogDebug("Got partial message: " + BytesReceived + " / " + messageLength);
-				MaxBytesToReceive = messageLength - BytesReceived;
 				return;
 			}
 
@@ -145,6 +140,19 @@ namespace Impunity.Networking
 			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in TCP socket message handler", e);
+			}
+
+			if (BytesReceived > messageLength)
+			{
+				// If there is any data left over, compact it down and continue reading
+				int extraData = BytesReceived - messageLength;
+				ImpunityLogger.LogDebug("Got part of next message: " + extraData);
+				Buffer.BlockCopy(ReceiveBuffer, messageLength, ReceiveBuffer, 0, extraData);
+				BytesReceived = extraData;
+			}
+			else
+			{
+				BytesReceived = 0;
 			}
 		}
 
@@ -464,8 +472,6 @@ namespace Impunity.Networking
 				ImpunityLogger.LogInformation("Server UDP Socket listener started");
 
 				SendServerAnnounce();
-
-				
 
 				while (ServerUdpSocket != null)
 				{

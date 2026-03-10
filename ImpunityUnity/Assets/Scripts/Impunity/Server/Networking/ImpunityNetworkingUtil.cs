@@ -108,9 +108,9 @@ namespace Impunity.Networking
 			msg.MessageId = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 6, 2));
 			msg.Flags = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 8, 2));
 
-			if (messageBytes.Count >= ImpunityConstants.MaxMessageSize)
+			if (msg.Length <= 0 || msg.Length >= ImpunityConstants.MaxMessageSize)
 			{
-				throw new Exception("Received a message that's too large! Length: " + messageBytes.Count);
+				throw new Exception("Received a message with invalid length: " + msg.Length);
 			}
 
 			return 12;

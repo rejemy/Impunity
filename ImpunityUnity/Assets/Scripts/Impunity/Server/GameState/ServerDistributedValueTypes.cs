@@ -43,7 +43,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ArraySegment<byte>?(DSmallCustom d) => d.Value;
 		public static implicit operator DSmallCustom(ArraySegment<byte> d) => new DSmallCustom(d);
-		public bool Equals(DSmallCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+		public bool Equals(DSmallCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
@@ -93,7 +93,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ArraySegment<byte>(DSmallNullableCustom d) => d.Value;
 		public static implicit operator DSmallNullableCustom(ArraySegment<byte> d) => new DSmallNullableCustom(d);
-		public bool Equals(DSmallNullableCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+		public bool Equals(DSmallNullableCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
@@ -134,7 +134,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ArraySegment<byte>(DCustom d) => d.Value;
 		public static implicit operator DCustom(ArraySegment<byte> d) => new DCustom(d);
-		public bool Equals(DCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+		public bool Equals(DCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
@@ -184,7 +184,7 @@ namespace Impunity.GameState
 
 		public static implicit operator ArraySegment<byte>(DNullableCustom d) => d.Value;
 		public static implicit operator DNullableCustom(ArraySegment<byte> d) => new DNullableCustom(d);
-		public bool Equals(DNullableCustom v) => ImpunityUtil.ComparyArraySegments(Value, v.Value) == 0;
+		public bool Equals(DNullableCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
