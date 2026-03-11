@@ -7,23 +7,37 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>Interface for value types that can be replicated over the network via binary serialization.</summary>
 	public interface IDistributableValueType
 	{
+		/// <summary>The wire type identifier for this value.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
 
+		/// <summary>Writes this value to a binary stream.</summary>
 		void WriteTo(BinaryWriter w);
+		/// <summary>Reads this value from a binary stream.</summary>
 		void ReadFrom(BinaryReader r);
 	}
 
+	/// <summary>Extended interface for standard value types that also support BSON persistence and temporal tracking.</summary>
 	public interface IStandardDistributableValueType : IDistributableValueType
 	{
+		/// <summary>Converts this value to a BSON value for database storage.</summary>
 		BsonValue AsBsonValue();
+		/// <summary>Populates this value from a BSON value loaded from database.</summary>
 		void FromBsonValue(BsonValue value);
+		/// <summary>Server timestamp (ms since epoch) of the last modification. Used for temporal conflict resolution.</summary>
 		long LastModifiedTime { get; set; }
 	}
 
-	// Single values
+	// Distributed value type wrappers (DBool, DInt8, DInt16, etc.)
+	// Each is a struct implementing IStandardDistributableValueType with:
+	//   - Implicit conversion operators to/from the underlying CLR type
+	//   - Binary serialization (WriteTo/ReadFrom)
+	//   - BSON persistence (AsBsonValue/FromBsonValue)
+	//   - Equality comparison
 
+	/// <summary>Distributed boolean value.</summary>
 	public struct DBool : IStandardDistributableValueType, IEquatable<DBool>
 	{
 		private bool Value;

@@ -7,6 +7,7 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>Runtime metadata for a registered distributed entity type, including its property definitions and lookup tables.</summary>
 	public class GameStateEntityType
 	{
 		public int Index;
@@ -20,16 +21,21 @@ namespace Impunity.GameState
 		public Dictionary<string, GameStateEntityPropertyDef> PropertyPersistedAsLookup;
 	}
 
-	// One window into the game state, maps to a single computer, either local or over network
-	// Not necessarily a single player/user
+	/// <summary>Represents one client's view of the game state. Tracks which channels they're subscribed to, which entities they hold locks on, and their ephemeral (non-persisted) entities. One per connection.</summary>
 	public class GameStateReplicant
 	{
+		/// <summary>The connection this replicant belongs to.</summary>
 		public IServerSideConnectionProxy ConnectionProxy;
+		/// <summary>Entities currently locked by this connection, keyed by entity ID.</summary>
 		public Dictionary<uint, GameStateEntity> LocksHeld;
+		/// <summary>Ephemeral entities owned by this connection (destroyed on disconnect).</summary>
 		public Dictionary<uint, GameStateEntity> EphemeralEntities;
+		/// <summary>Channels this connection is subscribed to, keyed by channel entity ID.</summary>
 		public Dictionary<uint, GameStateChannel> Subscriptions;
 
+		/// <summary>The connection's unique ID.</summary>
 		public string Id { get { return ConnectionProxy.ConnectionId;  } }
+		/// <summary>The connection's key for reconnection.</summary>
 		public string ConnectionKey { get { return ConnectionProxy.ConnectionKey;  } }
 
 		public GameStateReplicant(IServerSideConnectionProxy proxy)
@@ -40,6 +46,7 @@ namespace Impunity.GameState
 			Subscriptions = new Dictionary<uint, GameStateChannel>();
 		}
 
+		/// <summary>Releases all locks and cleans up ephemeral entities owned by this replicant. Called on disconnect.</summary>
 		public void Cleanup()
 		{
 			Dictionary<uint, GameStateEntity> locked = LocksHeld;

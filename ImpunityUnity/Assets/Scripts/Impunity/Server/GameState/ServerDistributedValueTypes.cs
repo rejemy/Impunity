@@ -8,6 +8,7 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>Distributed custom binary value (max 255 bytes). Null backing array represents uninitialized default.</summary>
 	public struct DSmallCustom : IStandardDistributableValueType, IEquatable<DSmallCustom>
 	{
 		private ArraySegment<byte> Value;
@@ -49,6 +50,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
+	/// <summary>Nullable distributed custom binary value (max 255 bytes). Distinguishes null from empty via a boolean prefix on the wire.</summary>
 	public struct DSmallNullableCustom : IStandardDistributableValueType, IEquatable<DSmallNullableCustom>
 	{
 		private ArraySegment<byte> Value;
@@ -99,6 +101,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
+	/// <summary>Distributed custom binary value (max 65535 bytes). Uses a ushort length prefix. Null backing array represents uninitialized default.</summary>
 	public struct DCustom : IStandardDistributableValueType, IEquatable<DCustom>
 	{
 		private ArraySegment<byte> Value;
@@ -140,6 +143,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
+	/// <summary>Nullable distributed custom binary value (max 65535 bytes). Distinguishes null from empty via a boolean prefix on the wire.</summary>
 	public struct DNullableCustom : IStandardDistributableValueType, IEquatable<DNullableCustom>
 	{
 		private ArraySegment<byte> Value;
@@ -190,6 +194,8 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
 	}
 
+	/// <summary>Server-side distributed fixed-size array. Supports full-set and per-index delta updates on the wire.</summary>
+	/// <typeparam name="T">Element type, must be a standard distributable value struct.</typeparam>
 	public class ServerDistributedArray<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
@@ -280,6 +286,8 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server-side distributed bounded queue. Automatically evicts oldest entries when capacity is reached. Supports full-set and append delta updates.</summary>
+	/// <typeparam name="T">Element type, must be a standard distributable value struct.</typeparam>
 	public class ServerDistributedQueue<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
@@ -391,6 +399,8 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server-side distributed dictionary with int keys. Supports full-set and per-key delta updates.</summary>
+	/// <typeparam name="T">Value type, must be a standard distributable value struct.</typeparam>
 	public class ServerDistributedIntDictionary<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
@@ -495,6 +505,8 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server-side distributed dictionary with string keys. Supports full-set and per-key delta updates.</summary>
+	/// <typeparam name="T">Value type, must be a standard distributable value struct.</typeparam>
 	public class ServerDistributedStringDictionary<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
@@ -593,9 +605,10 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Factory for creating <see cref="IStandardDistributableValueType"/> instances (scalars, arrays, queues, dictionaries) from runtime type codes.</summary>
 	public class DistributedValueFactory
     {
-		
+		/// <summary>Returns the D* struct type corresponding to the given value type enum.</summary>
 		public static Type GetDistributableType(GameStateEntityPropertyValueType type)
 		{
 			switch (type)
@@ -651,6 +664,7 @@ namespace Impunity.GameState
 			throw new Exception("Unknown propery type " + type);
 		}
 
+		/// <summary>Creates a scalar distributable value instance for the given type code.</summary>
 		public static IStandardDistributableValueType MakeValue(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
@@ -658,6 +672,7 @@ namespace Impunity.GameState
 		}
 
 
+		/// <summary>Creates a <see cref="ServerDistributedArray{T}"/> for the given element type code.</summary>
 		public static IStandardDistributableValueType MakeArray(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
@@ -666,6 +681,7 @@ namespace Impunity.GameState
 			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
+		/// <summary>Creates a <see cref="ServerDistributedQueue{T}"/> for the given element type code.</summary>
 		public static IStandardDistributableValueType MakeQueue(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
@@ -674,6 +690,7 @@ namespace Impunity.GameState
 			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
+		/// <summary>Creates a <see cref="ServerDistributedIntDictionary{T}"/> for the given value type code.</summary>
 		public static IStandardDistributableValueType MakeIntDictionary(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
@@ -682,6 +699,7 @@ namespace Impunity.GameState
 			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
 		}
 
+		/// <summary>Creates a <see cref="ServerDistributedStringDictionary{T}"/> for the given value type code.</summary>
 		public static IStandardDistributableValueType MakeStringDictionary(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);

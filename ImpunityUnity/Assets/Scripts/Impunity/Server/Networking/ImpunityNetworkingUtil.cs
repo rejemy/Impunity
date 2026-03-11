@@ -9,33 +9,43 @@ using System.IO;
 namespace Impunity.Networking
 {
 
+	/// <summary>Interface for types that can serialize/deserialize themselves to a binary stream.</summary>
 	public interface INetworkable
 	{
+		/// <summary>Writes this object's data to the writer.</summary>
 		void WriteTo(BinaryWriter w);
+		/// <summary>Reads this object's data from the reader, populating fields.</summary>
 		void ReadFrom(BinaryReader r);
 	}
 
-
+	/// <summary>Bit flags for the message header Flags field.</summary>
 	public static class ImpunityMessageFlags
 	{
+		/// <summary>Indicates the sender does not expect a reply to this message.</summary>
 		public const ushort NO_REPLY = 1;
 	}
 
+	/// <summary>BSON-serialized body of a UDP server announce broadcast packet.</summary>
 	public class ServerAnnounceMessage
 	{
 		[BsonField("gn")]
 		public string GameName;
 	}
 
+	/// <summary>Parsed binary message header. See <see cref="ImpunityNetworkingUtil"/> for wire format.</summary>
 	public struct MessageHeaderStruct
 	{
+		/// <summary>Total message length in bytes (including header).</summary>
 		public int Length;
+		/// <summary>Action type identifier.</summary>
 		public ushort MessageType;
+		/// <summary>Sequence ID for request/reply correlation.</summary>
 		public ushort MessageId;
+		/// <summary>Bit flags (see <see cref="ImpunityMessageFlags"/>).</summary>
 		public ushort Flags;
 	}
 
-
+	/// <summary>Utilities for encoding/decoding the binary wire protocol. Messages use a 12-byte header: 4-byte length, 2-byte type, 2-byte id, 2-byte flags, 2-byte padding, followed by a BSON body.</summary>
 	public static class ImpunityNetworkingUtil
 	{
 
@@ -44,6 +54,8 @@ namespace Impunity.Networking
 		// UTF8encoded: "IMP{{ImpunityVersion}}_SRCH:{{GameTypeCode}}:{{BsonBody}}
 		//
 
+		/// <summary>Writes a UDP broadcast packet (UTF-8 header + optional BSON body) into the destination buffer.</summary>
+		/// <returns>ArraySegment covering the written portion of <paramref name="destBuffer"/>.</returns>
 		public static ArraySegment<byte> MakeBroadcastPacket(byte[] destBuffer, string header, BsonDocument body)
 		{
 			byte[] headerBytes = Encoding.UTF8.GetBytes(header);
@@ -71,6 +83,9 @@ namespace Impunity.Networking
 		// 
 		// 12 total header bytes
 
+		/// <summary>Serializes a message (header + BSON body) into the writer's buffer. The length prefix is written last. The writer's buffer is reused across calls.</summary>
+		/// <returns>ArraySegment covering the complete serialized message.</returns>
+		/// <exception cref="Exception">Thrown if the serialized message exceeds <see cref="ImpunityConstants.MaxMessageSize"/>.</exception>
 		public static ArraySegment<byte> WriteMessage(ByteWriter writer, ushort messageId, ushort flags, ushort messageType, object message)
 		{
 			// Skip 4 bytes for length prefix
@@ -101,6 +116,8 @@ namespace Impunity.Networking
 			return new ArraySegment<byte>(writer.Buffer, 0, totalLength);
 		}
 
+		/// <summary>Parses the 12-byte message header from a byte segment. Validates the length field.</summary>
+		/// <returns>The header size in bytes (always 12).</returns>
 		public static int ReadMessageHeader(ArraySegment<byte> messageBytes, out MessageHeaderStruct msg)
 		{
 			msg.Length = BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset, 4));
@@ -116,6 +133,7 @@ namespace Impunity.Networking
 			return 12;
 		}
 
+		/// <summary>Reads just the 4-byte little-endian length prefix from a message buffer. Used to determine if a complete message has been received.</summary>
 		public static int GetMessageLength(ArraySegment<byte> messageBytes)
 		{
 			return BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset, 4));

@@ -2,6 +2,7 @@ using System;
 
 namespace Impunity
 {
+	/// <summary>Logger interface to be implemented by platform-specific loggers (Unity, standalone server, etc.).</summary>
 	public interface IImpunityLogger
 	{
 		void LogTrace(string message);
@@ -23,8 +24,10 @@ namespace Impunity
 		void LogCritical(string message, Exception exception);
 	}
 
+	/// <summary>Static logging facade that delegates to the platform-specific <see cref="IImpunityLogger"/> instance. Safe to call before a logger is set (calls are silently dropped).</summary>
 	public static class ImpunityLogger
 	{
+		/// <summary>The active logger implementation. Set this at startup before using any Impunity APIs.</summary>
 		public static IImpunityLogger LoggerInstance;
 
 		public static void LogTrace(string message)

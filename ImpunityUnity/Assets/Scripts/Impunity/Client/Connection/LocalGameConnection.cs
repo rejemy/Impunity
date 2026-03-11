@@ -6,6 +6,11 @@ using Impunity.GameState;
 namespace Impunity.Connection
 {
 
+	/// <summary>
+	/// In-process game connection for single-player or local hosting. Actions are queued directly to the
+	/// <see cref="GameStateServer"/> without network serialization. Implements both the client connection
+	/// and the server-side connection proxy interfaces.
+	/// </summary>
 	public class LocalGameConnection : BaseGameConnection, IGameStateListener, IServerSideConnectionProxy
 	{
 		public GameStateReplicant ConnectionReplicant { get; set; }

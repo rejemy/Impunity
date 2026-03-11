@@ -7,21 +7,30 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>Server-side interface representing a connection to a client. Implemented by network proxy and local proxy.</summary>
 	public interface IServerSideConnectionProxy
     {
+		/// <summary>Unique identifier for this connection.</summary>
 		string ConnectionId { get; }
+		/// <summary>Client-provided key for reconnection.</summary>
 		string ConnectionKey { get; }
+		/// <summary>True for remote network connections, false for in-process local connections.</summary>
 		bool IsRemote { get; }
+		/// <summary>The replicant tracking state subscriptions for this connection.</summary>
 		GameStateReplicant ConnectionReplicant { get; set; }
+		/// <summary>Whether this connection supports UDP delivery.</summary>
 		bool SupportsUnguaranteed { get; }
 
+		/// <summary>Queues an action result to be sent back to the client.</summary>
 		void ReportActionResult(GameStateActionBase action);
+		/// <summary>Queues a server-originated message to be sent to the client.</summary>
 		void SendMessageToClient(ServerActionBase message);
 
+		/// <summary>Requests that this connection be closed.</summary>
 		void CloseConnectionRequest();
 	}
 
-	// Actions that don't pass between client and server
+	/// <summary>Base class for actions that are only used internally on the server (not serialized over the network).</summary>
 	public abstract class LocalGameStateAction : GameStateActionBase
 	{
 		public override bool IsDBOperation() { return false; }
@@ -80,18 +89,24 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Core server-side game state manager. Owns the database, live state, and two worker threads (DB and Live). Actions are queued and processed on the appropriate thread.</summary>
 	public class GameStateServer
 	{
+		/// <summary>Unique identifier for this game world.</summary>
 		public string GameId { get; private set; }
+		/// <summary>SHA-256 hash of the game password, or null if no password.</summary>
 		public string GamePasswordHash { get; private set; }
+		/// <summary>Server configuration options.</summary>
 		public ImpunityOptions Options { get; private set; }
 
+		/// <summary>The persistent database for this game world.</summary>
 		public GameStateDB DB;
 		internal GameStateLive Live;
 
 		BsonDocument Summary;
 		GameMetadata Metadata;
 
+		/// <summary>When true, new connections are rejected (e.g., during shutdown or maintenance).</summary>
 		public bool NewConnectionsDisabled { get; private set; } = false;
 
 		BlockingCollection<GameStateActionBase> DBActionQueue;
@@ -142,16 +157,19 @@ namespace Impunity.GameState
 			LiveWorkerThread.Start();
 		}
 
+		/// <summary>Opens an existing game world from the database at the given path.</summary>
 		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.Open(path, options), options);
 		}
 
+		/// <summary>Creates a new game world with the given summary.</summary>
 		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.Create(path, summary, options), options);
 		}
 
+		/// <summary>Opens an existing game world or creates a new one.</summary>
 		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
@@ -179,7 +197,7 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
-		// Called on live thread
+		/// <summary>Validates the client's format, upgrades if needed, and registers the connection. Called on the live thread. Throws on incompatibility.</summary>
 		public EstablishConnectResult EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
 		{
 			if (NewConnectionsDisabled)
@@ -499,6 +517,7 @@ namespace Impunity.GameState
 		}
 
 
+		/// <summary>Routes an action to the appropriate worker thread (DB or Live) based on <see cref="GameStateActionBase.IsDBOperation"/>. Immediate actions run inline.</summary>
 		public void QueueAction(GameStateActionBase action)
         {
 			if (action.IsImmediate())
@@ -517,6 +536,7 @@ namespace Impunity.GameState
 			}
 		}
 
+		/// <summary>Queues a completed DB action back to the live thread for callback invocation.</summary>
 		public void QueueDBReply(GameStateActionBase action)
 		{
 			LiveActionQueue.Add(action);

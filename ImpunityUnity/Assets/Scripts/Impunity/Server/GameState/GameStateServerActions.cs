@@ -7,6 +7,7 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>Numeric identifiers for server-to-client push messages. 100s = entity/channel state, 200s = messaging/locks.</summary>
 	public enum ServerActionType
 	{
 		CLIENT_REPLY = 1,
@@ -24,8 +25,10 @@ namespace Impunity.GameState
 	}
 
 
+	/// <summary>Maps <see cref="ServerActionType"/> codes to their concrete server message class types for deserialization.</summary>
 	public static class ServerActionFactory
 	{
+		/// <summary>Returns the server action class type for the given numeric type. Throws if unknown.</summary>
 		public static Type GetActionClassType(int type)
 		{
 			ServerActionType typeEnum;
@@ -77,6 +80,7 @@ namespace Impunity.GameState
 
 	
 
+	/// <summary>Server push: a channel was created or the client subscribed to it. Includes the channel entity and all child objects.</summary>
 	public class ChannelCreateMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -114,6 +118,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: a new object was created in a channel the client is subscribed to.</summary>
 	public class ObjectCreateMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -146,6 +151,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: an entity's properties were updated.</summary>
 	public class EntityUpdateMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -163,6 +169,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: a one-shot event was fired on an entity.</summary>
 	public class EntityEventMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -183,6 +190,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: an entity was deleted.</summary>
 	public class EntityDeleteMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -200,6 +208,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: an entity was locked by a connection.</summary>
 	public class EntityLockedMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -214,6 +223,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: an entity was unlocked.</summary>
 	public class EntityUnlockedMessageAction : ServerActionBase
 	{
 		[BsonField("id")]
@@ -229,6 +239,7 @@ namespace Impunity.GameState
 	}
 
 
+	/// <summary>Server push: a named lock was released, notifying waiting clients.</summary>
 	public class NamedLockUnlockedMessageAction : ServerActionBase
 	{
 		[BsonField("ln")]
@@ -243,6 +254,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server push: a broadcast message sent by another client.</summary>
 	public class BroadcastMessageAction : ServerActionBase
 	{
 
@@ -265,8 +277,9 @@ namespace Impunity.GameState
 
 	}
 
-	// Actions sent to the DB from the Live server
+	// -----  Actions sent to the DB from the Live server
 
+	/// <summary>Internal action: updates the DB schema and persists metadata when the game format changes. Queued from the live thread to the DB thread.</summary>
 	public class UpdateDBFormatAction : ClientActionResultlessBase
 	{
 		public GameStateCollection[] Collections;
@@ -288,6 +301,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Name-value pair for a single persisted property of a live entity.</summary>
 	public class LiveEntityPersistedPropertyData
 	{
 		public string PropertyName;
@@ -300,6 +314,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: persists a newly created live entity to the database.</summary>
 	public class CreatePersistedEntityAction : ClientActionResultlessBase
 	{
 		public string EntityId;
@@ -328,6 +343,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: updates persisted properties of an existing live entity.</summary>
 	public class UpdatePersistedEntityPropertiesAction : ClientActionResultlessBase
 	{
 		public string EntityId;
@@ -350,6 +366,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: deletes a persisted channel and all its child entities from the database.</summary>
 	public class DeletePersistedChannelAction : ClientActionResultlessBase
 	{
 		public string ChannelId;
@@ -368,6 +385,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: deletes a single persisted object from the database.</summary>
 	public class DeletePersistedObjectAction : ClientActionResultlessBase
 	{
 		public string ObjectId;
@@ -386,6 +404,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Data loaded from DB for a single live entity: ID, type, flags, and persisted properties.</summary>
 	public class LiveEntityData
 	{
 		public string EntityId;
@@ -400,6 +419,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Data loaded from DB for a channel entity, including its child objects.</summary>
 	public class LiveChannelData : LiveEntityData
 	{
 		public List<LiveEntityData> ChannelObjects;
@@ -410,6 +430,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: loads a channel and its child objects from the database. Queues itself back to the live thread on completion via <see cref="GameStateServer.QueueDBReply"/>.</summary>
 	public class LoadChannelAction : ClientActionResultBase<LiveChannelData>
 	{
 		public string ChannelId;
@@ -430,6 +451,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Internal DB action: checks whether a named entity exists in the database. Queues itself back to the live thread on completion.</summary>
 	public class CheckEntityExistanceAction : ClientActionResultBase<bool>
 	{
 		public string Name;

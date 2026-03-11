@@ -15,6 +15,7 @@ namespace Impunity.GameState
 		public UltraLiteCollection<BsonDocument> Collection;
 	}
 
+	/// <summary>Manages the persistent database for a game world. Wraps UltraLiteDB with collection management, entity storage, and game summary persistence.</summary>
 	public class GameStateDB : IDisposable
 	{
 		private const string GameDBFile = "Game.db";
@@ -41,6 +42,7 @@ namespace Impunity.GameState
 			return Path.Combine(path, GameDBFile);
 		}
 
+		/// <summary>Opens an existing game database at the given directory path. Returns null if the database file doesn't exist.</summary>
 		public static GameStateDB Open(string path, ImpunityOptions options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
@@ -58,6 +60,7 @@ namespace Impunity.GameState
 			return game;
 		}
 
+		/// <summary>Creates a new game database at the given path with an initial summary. Returns null if a database already exists there.</summary>
 		public static GameStateDB Create(string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
@@ -79,6 +82,7 @@ namespace Impunity.GameState
 			return game;
 		}
 
+		/// <summary>Opens an existing database or creates a new one if none exists at the given path.</summary>
 		public static GameStateDB OpenOrCreate(string path, BsonDocument summary, ImpunityOptions options = null)
 		{
 			if (File.Exists(GetDBFilename(path)))
@@ -123,6 +127,7 @@ namespace Impunity.GameState
 			}
 		}
 
+		/// <summary>Writes a game summary BSON document to disk at the given directory path.</summary>
 		public static void WriteGameSummary(string path, BsonDocument summary)
 		{
 			Directory.CreateDirectory(path);
@@ -133,6 +138,7 @@ namespace Impunity.GameState
 		}
 
 
+		/// <summary>Loads a game summary from disk. Returns null if no summary file exists.</summary>
 		public static BsonDocument LoadGameSummary(string path)
 		{
 			string summaryFile = Path.Combine(path, GameSummaryFile);
@@ -159,6 +165,7 @@ namespace Impunity.GameState
         }
 
 
+		/// <summary>Loads game metadata (schema version, collections, entity types) from the database. Creates a default if none exists.</summary>
 		public GameMetadata LoadMetadata()
 		{
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
@@ -171,6 +178,7 @@ namespace Impunity.GameState
 			return metadata;
 		}
 
+		/// <summary>Persists game metadata to the database.</summary>
 		public void SaveMetadata(GameMetadata metadata)
 		{
 			UltraLiteCollection<GameMetadata> metadataCollection = GameDB.GetCollection<GameMetadata>(MetadataCollection);
@@ -182,7 +190,7 @@ namespace Impunity.GameState
 		// ------------ API -----------------
 
 
-		// Called from live thread
+		/// <summary>Persists the game summary to disk. Called from the live thread.</summary>
 		public void SetGameSummary(BsonDocument summary)
 		{
 			if (summary == null)
@@ -196,6 +204,7 @@ namespace Impunity.GameState
 		}
 
 
+		/// <summary>Initializes the database collections based on the game state format. Must be called before any document operations.</summary>
 		public void SetFormat(GameStateCollection[] collections)
 		{
 			if (collections == null || collections.Length < 1)
@@ -244,6 +253,7 @@ namespace Impunity.GameState
 			}
 		}
 
+		/// <summary>Inserts a document into the specified collection. Returns the document's _id.</summary>
 		public BsonValue InsertDocument(int collectionId, BsonDocument doc)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -254,6 +264,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Insert(doc);
 		}
 
+		/// <summary>Updates an existing document in the specified collection. Returns true if the document was found and updated.</summary>
 		public bool UpdateDocument(int collectionId, BsonDocument doc)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -264,6 +275,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Update(doc);
 		}
 
+		/// <summary>Inserts or updates a document in the specified collection.</summary>
 		public bool UpsertDocument(int collectionId, BsonDocument doc)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -274,6 +286,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Upsert(doc);
 		}
 
+		/// <summary>Merges fields from <paramref name="doc"/> into an existing document (by _id). Returns false if the document doesn't exist.</summary>
 		public bool MergeIntoDocument(int collectionId, BsonDocument doc)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -296,6 +309,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Update(existing);
 		}
 
+		/// <summary>Merges fields into an existing document, or inserts a new one if it doesn't exist.</summary>
 		public bool MergeInsertDocument(int collectionId, BsonDocument doc)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -318,6 +332,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Update(existing);
 		}
 
+		/// <summary>Finds a document by its _id in the specified collection. Returns null if not found.</summary>
 		public BsonDocument FindDocumentById(int collectionId, BsonValue id)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -328,6 +343,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.FindById(id);
 		}
 
+		/// <summary>Deletes a document by its _id. Returns true if the document was found and deleted.</summary>
 		public bool DeleteDocument(int collectionId, BsonValue id)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
@@ -338,6 +354,7 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Delete(id);
 		}
 
+		/// <summary>Returns all documents in the specified collection.</summary>
 		public List<BsonDocument> ListDocuments(int collectionId)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)

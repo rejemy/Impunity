@@ -7,6 +7,7 @@ using System.Threading;
 namespace Impunity.Connection
 {
 	
+	/// <summary>Base interface for all client-side distributed field types. Provides binary serialization for wire protocol and read/write lifecycle.</summary>
 	public interface IDistributedField
 	{
 		void WriteChangesTo(BinaryWriter w);
@@ -17,13 +18,22 @@ namespace Impunity.Connection
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
+	/// <summary>Extended distributed field that tracks the server timestamp of the last modification. Used for time-sensitive interpolation or age-based logic.</summary>
 	public interface IDistributedTemporalField : IDistributedField
 	{
+		/// <summary>Server time (Unix milliseconds) when this field was last modified.</summary>
 		long LastModifiedTime { get; set; }
 	}
 
+	/// <summary>
+	/// Client-side distributed single value. Tracks local changes and syncs them to the server via dirty-bit mechanism.
+	/// Supports client-authoritative mode where local changes are applied immediately before server confirmation.
+	/// </summary>
+	/// <typeparam name="T">The value type (must be equatable for dirty detection).</typeparam>
+	/// <typeparam name="S">The serializer struct used for binary read/write.</typeparam>
 	public struct DistributedValue<T, S> : IDistributedField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised when the value changes, providing old and new values.</summary>
 		public event Action<T, T> OnChanged;
 		private static readonly S Serializer = default;
 
@@ -39,11 +49,13 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
+		/// <summary>Returns the current replicated value.</summary>
 		public readonly T Get()
 		{
 			return CurrentValue;
 		}
 
+		/// <summary>Sets the value and marks the field dirty. Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
 		public bool Set(T newValue, bool force = false)
 		{
 			NewValue = newValue;
@@ -65,6 +77,7 @@ namespace Impunity.Connection
 			return true;
 		}
 
+		/// <summary>Updates the value locally without sending to the server. Useful for client-side prediction or cosmetic state.</summary>
 		public bool SetLocalOnly(T newValue, bool force = false)
 		{
 			NewValue = newValue;
@@ -81,16 +94,19 @@ namespace Impunity.Connection
 			return true;
 		}
 
+		/// <inheritdoc/>
 		public readonly void WriteChangesTo(BinaryWriter w)
 		{
 			Serializer.WriteTo(NewValue, w);
 		}
 
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
 		}
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			T oldValue = CurrentValue;
@@ -131,9 +147,17 @@ namespace Impunity.Connection
 		public static implicit operator T(DistributedValue<T, S> d) => d.CurrentValue;
 	}
 	
+	/// <summary>
+	/// Client-side distributed value that also tracks the server-time of the last modification.
+	/// On initial load, provides the age of the value so clients can interpolate or compensate for staleness.
+	/// </summary>
+	/// <typeparam name="T">The value type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
 	public struct DistributedTemporalValue<T,S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised on initial load with the current value and its age (time since last server modification).</summary>
 		public event Action<T,TimeSpan> OnInitialized;
+		/// <summary>Raised when the value changes, providing old and new values.</summary>
 		public event Action<T,T> OnChanged;
 
 		private static readonly S Serializer = default;
@@ -267,9 +291,17 @@ namespace Impunity.Connection
 		public static implicit operator T(DistributedTemporalValue<T,S> d) => d.CurrentValue;
 	}
 
+	/// <summary>
+	/// Client-side distributed fixed-size array. Supports both full replacement and per-index delta updates.
+	/// Only changed indices are serialized when using <see cref="Set"/> for efficient bandwidth usage.
+	/// </summary>
+	/// <typeparam name="T">The element type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
 	public struct DistributedArray<T, S> : IDistributedField, IReadOnlyList<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised when the entire array is replaced, providing old and new arrays.</summary>
 		public event Action<T[], T[]> OnReplaced;
+		/// <summary>Raised when a single element changes, providing the index, old value, and new value.</summary>
 		public event Action<int, T, T> OnChanged;
 		private static readonly S Serializer = default;
 
@@ -292,6 +324,7 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
+		/// <summary>Initializes the array with default values of the given size. Marks the field dirty for full sync.</summary>
 		public void Init(int size)
 		{
 			NewValue = new T[size];
@@ -309,6 +342,7 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Replaces the entire array contents. Marks the field dirty for full sync.</summary>
 		public void Replace(IReadOnlyCollection<T> newArray)
 		{
 			NewValue = new T[newArray.Count];
@@ -332,6 +366,7 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Returns the element at the given index, reflecting any pending local changes.</summary>
 		public readonly T Get(int index)
 		{
 			if (Changes.TryGetValue(index, out T value))
@@ -341,6 +376,7 @@ namespace Impunity.Connection
 			return CurrentValue[index];
 		}
 
+		/// <summary>Sets a single element by index. Only the changed index is sent as a delta update.</summary>
 		public bool Set(int index, T newValue, bool force = false)
 		{
 			if (NewValue != null)
@@ -509,9 +545,17 @@ namespace Impunity.Connection
 		public static implicit operator T[](DistributedArray<T, S> d) => d.CurrentValue;
 	}
 
+	/// <summary>
+	/// Client-side distributed bounded queue. Automatically evicts the oldest element when capacity is reached.
+	/// Supports full replacement or incremental enqueue deltas.
+	/// </summary>
+	/// <typeparam name="T">The element type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
 	public struct DistributedQueue<T,S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised when a new element is enqueued.</summary>
 		public event Action<T> OnChanged;
+		/// <summary>Raised when the entire queue is replaced, providing old and new queues.</summary>
 		public event Action<Queue<T>, Queue<T>> OnReplaced;
 
 		private static readonly S Serializer = default;
@@ -534,6 +578,7 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
+		/// <summary>Initializes the queue with the given maximum capacity. Marks the field dirty for full sync.</summary>
 		public void Init(int capacity)
 		{
 			NewCapacity = capacity;
@@ -553,6 +598,7 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Replaces the queue with a new capacity and initial values. Marks the field dirty for full sync.</summary>
 		public void Replace(int capacity, IEnumerable<T> initialValues)
 		{
 			NewCapacity = capacity;
@@ -607,6 +653,7 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Enqueues a value, evicting the oldest if at capacity. Sends as a delta update.</summary>
 		public void Add(T newValue)
 		{
 			if (NewValue != null)
@@ -760,9 +807,16 @@ namespace Impunity.Connection
 		public static implicit operator Queue<T>(DistributedQueue<T,S> d) => d.CurrentValue;
 	}
 
+	/// <summary>
+	/// Client-side distributed dictionary with integer keys. Supports full replacement or per-key delta updates.
+	/// </summary>
+	/// <typeparam name="T">The value type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
 	public struct DistributedIntDictionary<T,S> : IDistributedField, IReadOnlyDictionary<int,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<int,T,T> OnChanged;
+		/// <summary>Raised when the entire dictionary is replaced.</summary>
 		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
 
 		private static readonly S Serializer = default;
@@ -788,11 +842,12 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
+		/// <summary>Initializes the dictionary as empty. Marks the field dirty for full sync.</summary>
 		public void Init()
 		{
 			NewValue = new Dictionary<int, T>();
 			Changes = new Dictionary<int, T>();
-			
+
 			Entity.SetDirty(FieldId);
 
 			if (Entity.IsClientAuthoritative)
@@ -805,6 +860,7 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Replaces the entire dictionary contents. Marks the field dirty for full sync.</summary>
 		public void Replace(IReadOnlyDictionary<int,T> initialValues)
 		{
 			NewValue = new Dictionary<int, T>(initialValues);
@@ -821,6 +877,7 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Adds or updates an entry by key. Sends as a per-key delta update.</summary>
 		public void Add(int key, T newValue)
 		{
 			if (NewValue != null)
@@ -852,6 +909,7 @@ namespace Impunity.Connection
 
 		}
 
+		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
 		public readonly T Get(int key)
 		{
 			if (CurrentValue == null)
@@ -861,6 +919,7 @@ namespace Impunity.Connection
 			return CurrentValue.GetValueOrDefault(key);
 		}
 
+		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
 			if (NewValue != null)
@@ -892,7 +951,8 @@ namespace Impunity.Connection
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
 		}
-		
+
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
@@ -996,9 +1056,16 @@ namespace Impunity.Connection
 		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T,S> d) => d.CurrentValue;
 	}
 
+	/// <summary>
+	/// Client-side distributed dictionary with string keys. Supports full replacement or per-key delta updates.
+	/// </summary>
+	/// <typeparam name="T">The value type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
 	public struct DistributedStringDictionary<T,S> : IDistributedField, IReadOnlyDictionary<string,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
+		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<string,T,T> OnChanged;
+		/// <summary>Raised when the entire dictionary is replaced.</summary>
 		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
 
 		private static readonly S Serializer = default;
@@ -1024,6 +1091,7 @@ namespace Impunity.Connection
 			FieldId = fieldId;
 		}
 
+		/// <summary>Initializes the dictionary as empty. Marks the field dirty for full sync.</summary>
 		public void Init()
 		{
 			NewValue = new Dictionary<string, T>();
@@ -1041,6 +1109,7 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Replaces the entire dictionary contents. Marks the field dirty for full sync.</summary>
 		public void Replace(IReadOnlyDictionary<string, T> initialValues)
 		{
 			NewValue = new Dictionary<string, T>(initialValues);
@@ -1057,6 +1126,7 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Adds or updates an entry by key. Sends as a per-key delta update.</summary>
 		public void Add(string key, T newValue)
 		{
 			if (NewValue != null)
@@ -1088,6 +1158,7 @@ namespace Impunity.Connection
 
 		}
 
+		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
 		public readonly T Get(string key)
 		{
 			if (CurrentValue == null)
@@ -1097,6 +1168,7 @@ namespace Impunity.Connection
 			return CurrentValue.GetValueOrDefault(key);
 		}
 
+		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
 			if (NewValue != null)

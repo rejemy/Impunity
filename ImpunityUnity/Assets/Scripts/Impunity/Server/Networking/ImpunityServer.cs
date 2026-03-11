@@ -13,6 +13,7 @@ using System.Runtime.Serialization;
 namespace Impunity.Networking
 {
 
+	/// <summary>Sentinel action queued to the network writer thread to close a client connection.</summary>
 	public class CloseClientConnectionAction : LocalGameStateAction
 	{
 		public override bool IsDBOperation() { return false; }
@@ -23,6 +24,7 @@ namespace Impunity.Networking
 		}
 	}
 
+	/// <summary>Server-side proxy for a remote client connection. Handles message parsing, send serialization (via semaphore), and connection lifecycle. One instance per connected client.</summary>
 	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy, IDisposable
 	{
 		IImpunityNetworkServerClientContext ClientContext;
@@ -33,12 +35,17 @@ namespace Impunity.Networking
 		ByteWriter SendBufferWriter;
 		Semaphore SendLock;
 
+		/// <summary>Server-assigned unique ID for this connection.</summary>
 		public string ConnectionId { get => ClientContext.ConnectionId; }
+		/// <summary>Client-provided or auto-generated key for reconnection.</summary>
 		public string ConnectionKey { get; set; }
+		/// <summary>The replicant state tracker for this connection's subscribed entities.</summary>
 		public GameStateReplicant ConnectionReplicant { get; set; }
 
+		/// <summary>Always true for network connections.</summary>
 		public bool IsRemote { get { return true; } }
 
+		/// <summary>Whether the client supports UDP delivery.</summary>
 		public bool SupportsUnguaranteed { get => ClientContext.SupportsUnguaranteed; }
 
 
@@ -125,7 +132,7 @@ namespace Impunity.Networking
 			GameServer.QueueAction(action);
 		}
 
-		// Called on network writer thread
+		/// <summary>Serializes and sends a message to the client. Acquires the send lock to serialize access to the shared send buffer. Called on the network writer thread.</summary>
 		public void SendMessage(ushort messageType, bool guaranteed, object results)
 		{
 			ArraySegment<byte> encodedMessage;
@@ -154,6 +161,7 @@ namespace Impunity.Networking
 			}
 		}
 
+		/// <summary>Waits for any pending send to complete, then disconnects the client.</summary>
 		public void ProcessCloseConnection()
 		{
 			SendLock.WaitOne();
@@ -180,7 +188,7 @@ namespace Impunity.Networking
 			
 		}
 
-		// Called on server thread
+		/// <summary>Queues an action result to be sent back to the client. Called on the game server thread.</summary>
 		public void ReportActionResult(GameStateActionBase action)
 		{
 			if (!action.ResultsExpected)
@@ -192,7 +200,7 @@ namespace Impunity.Networking
 			NetworkServer.QueueNetworkAction(action);
 		}
 
-		// Called on server thread
+		/// <summary>Queues a server-originated message to be sent to the client. Called on the game server thread.</summary>
 		public void SendMessageToClient(ServerActionBase message)
 		{
 			// Don't send on server thread, queue for send on network writer thread
@@ -200,7 +208,7 @@ namespace Impunity.Networking
 			NetworkServer.QueueNetworkAction(message);
 		}
 
-		// Called on server thread
+		/// <summary>Requests the connection be closed by queuing a <see cref="CloseClientConnectionAction"/> to the network writer thread.</summary>
 		public void CloseConnectionRequest()
 		{
 			CloseClientConnectionAction action = new CloseClientConnectionAction();
@@ -240,9 +248,11 @@ namespace Impunity.Networking
 		}
 	}
 
+	/// <summary>Top-level server that manages TCP connections, routes messages between clients and game state servers, and handles the network writer thread for outbound messages.</summary>
 	public class ImpunityServer : IDisposable, IGameStateListener
 	{
 		ImpunityTCPServer TCPServer;
+		/// <summary>Server configuration options.</summary>
 		public ImpunityOptions Options { get; private set; }
 
 		Dictionary<string, GameStateServer> GameServers;
@@ -253,8 +263,10 @@ namespace Impunity.Networking
 		Thread NetworkWriterThread;
 		bool Running;
 
+		/// <summary>The local TCP endpoint the server is listening on.</summary>
 		public IPEndPoint TCPEndpoint { get; private set; }
 
+		/// <summary>Number of currently connected clients.</summary>
 		public int NumConnections { get {return ClientsByConnectionId.Count; }}
 
 		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer>{gameState}, options)
@@ -305,6 +317,7 @@ namespace Impunity.Networking
 			TCPServer.SetGameSummary(game.GameId, game.GetGameSummary());
 		}
 
+		/// <summary>Returns the game state server for the given game ID. If gameId is null and there's only one game, returns that one.</summary>
 		public GameStateServer GetGameStateServer(string gameId)
 		{
 			if (gameId == null && GameServers.Count == 1)
@@ -321,6 +334,7 @@ namespace Impunity.Networking
 		}
 
 
+		/// <summary>Starts the network writer thread and TCP/UDP listeners.</summary>
 		public void Start()
 		{
 			Running = true;
@@ -413,6 +427,7 @@ namespace Impunity.Networking
 
 		
 
+		/// <summary>Shuts down the server: disposes TCP, stops the writer thread, and removes game state listeners.</summary>
 		public void Dispose()
 		{
 			TCPServer.Dispose();

@@ -9,16 +9,23 @@ using System.IO;
 
 namespace Impunity
 {
+	/// <summary>Pooled byte buffer with associated stream, writer, and reader. Dispose returns it to the pool instead of freeing it. Used to reduce GC pressure for serialization operations.</summary>
 	public class TemporaryBuffer : IDisposable
 	{
+		/// <summary>True if this is a small buffer (<see cref="ImpunityConstants.MinMessageSize"/>), false for large (<see cref="ImpunityConstants.MaxMessageSize"/>).</summary>
 		public readonly bool IsSmall;
+		/// <summary>The underlying byte array.</summary>
 		public readonly byte[] Bytes;
+		/// <summary>MemoryStream wrapping <see cref="Bytes"/>.</summary>
 		public readonly MemoryStream Stream;
+		/// <summary>BinaryWriter for writing to the buffer.</summary>
 		public readonly BinaryWriter Writer;
+		/// <summary>BinaryReader for reading from the buffer.</summary>
 		public readonly BinaryReader Reader;
 
 		internal TemporaryBuffer NextBuffer;
 
+		/// <param name="small">True for a small buffer, false for a large buffer.</param>
 		public TemporaryBuffer(bool small)
 		{
 			IsSmall = small;
@@ -44,6 +51,7 @@ namespace Impunity
 		}
 	}
 
+	/// <summary>Shared utilities: buffer pooling, BSON mapper setup, hashing, and byte comparison helpers.</summary>
 	public static class ImpunityUtil
 	{
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
@@ -55,6 +63,7 @@ namespace Impunity
 		private static TemporaryBuffer LargeBufferPool;
 		private static object LargeBufferLock = new object();
 
+		/// <summary>Gets a small buffer from the pool, or allocates a new one if the pool is empty.</summary>
 		public static TemporaryBuffer GetSmallBuffer()
 		{
 			TemporaryBuffer buff = null;
@@ -80,6 +89,7 @@ namespace Impunity
 			return buff;
 		}
 
+		/// <summary>Gets a large buffer from the pool, or allocates a new one if the pool is empty.</summary>
 		public static TemporaryBuffer GetLargeBuffer()
 		{
 			TemporaryBuffer buff = null;
@@ -105,6 +115,7 @@ namespace Impunity
 			return buff;
 		}
 
+		/// <summary>Returns a buffer to its pool (small or large) for reuse. Resets the stream position.</summary>
 		public static void ReturnBuffer(TemporaryBuffer b)
 		{
 			b.Stream.Position = 0;
@@ -128,6 +139,7 @@ namespace Impunity
 
 		}
 
+		/// <summary>Returns the shared BsonMapper configured with all client and server action type registrations. Lazily initialized on first call.</summary>
 		public static BsonMapper GetBsonMapper()
 		{
 			if (Mapper != null)
@@ -159,6 +171,7 @@ namespace Impunity
 			return Mapper;
 		}
 
+		/// <summary>Checks if a byte array starts with the given header bytes.</summary>
 		public static bool StartsWith(byte[] packet, byte[] header)
 		{
 			for (int i = 0; i < header.Length; i++)
@@ -171,6 +184,7 @@ namespace Impunity
 			return true;
 		}
 
+		/// <summary>Computes an MD5 checksum of the BSON-serialized form of an object. Used for schema compatibility checks.</summary>
 		public static string MakeDataChecksum(object dataObject)
 		{
 			BsonMapper mapper = new BsonMapper();
@@ -194,6 +208,7 @@ namespace Impunity
 			return sb.ToString();
 		}
 
+		/// <summary>SHA-256 hashes a password string and returns it as base64. Returns null if input is null.</summary>
 		public static string HashPassword(string pass)
 		{
 			if (pass == null)
@@ -208,6 +223,7 @@ namespace Impunity
 			}
 		}
 
+		/// <summary>Lexicographic comparison of two byte array segments. Returns negative, zero, or positive.</summary>
 		public static int CompareArraySegments(ArraySegment<byte> lh, ArraySegment<byte> rh)
 		{
 			if (lh.Array == null) return rh.Array == null ? 0 : -1;
@@ -225,11 +241,13 @@ namespace Impunity
 			return 1;
 		}
 
+		/// <summary>Parses a hex string key to its integer value.</summary>
 		public static int KeyStringToInt(string key)
 		{
 			return int.Parse(key, System.Globalization.NumberStyles.HexNumber);
 		}
 
+		/// <summary>Converts an integer key to its uppercase hex string representation.</summary>
 		public static string KeyIntToString(int key)
 		{
 			return key.ToString("X");

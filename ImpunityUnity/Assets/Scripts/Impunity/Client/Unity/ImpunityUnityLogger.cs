@@ -7,6 +7,10 @@ using UnityEngine;
 namespace Impunity.Unity
 {
 
+	/// <summary>
+	/// Impunity logger implementation that routes log output to Unity's <see cref="Debug"/> console.
+	/// Prepends thread name for messages originating from background threads.
+	/// </summary>
 	public class ImpunityUnityLogger : IImpunityLogger
 	{
 		ImpunityLogLevel LogLevel;
@@ -26,6 +30,7 @@ namespace Impunity.Unity
 			LogLevel = logLevel;
 		}
 
+		/// <summary>Installs this logger as the global Impunity logger at the specified log level.</summary>
 		public static void Setup(ImpunityLogLevel logLevel)
 		{
 			ImpunityLogger.LoggerInstance = new ImpunityUnityLogger(logLevel);

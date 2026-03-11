@@ -12,10 +12,16 @@ using Impunity.Connection;
 namespace Impunity.Unity
 {
 
+	/// <summary>
+	/// Unity coroutine yield instruction that completes when an Impunity callback fires.
+	/// Use with <c>yield return</c> in coroutines to wait for server operations.
+	/// Check <see cref="Error"/> after yielding to detect failures.
+	/// </summary>
 	public class ImpunityYield : CustomYieldInstruction
 	{
 		private bool Complete = false;
 
+		/// <summary>The error response if the operation failed, or null on success.</summary>
 		public ImpunityErrorResponse Error { get; private set; }
 
 		public override bool keepWaiting
@@ -33,10 +39,17 @@ namespace Impunity.Unity
 		}
 	}
 
+	/// <summary>
+	/// Generic version of <see cref="ImpunityYield"/> for operations that return a typed result.
+	/// Access <see cref="Value"/> after yielding to get the result.
+	/// </summary>
+	/// <typeparam name="TReturn">The result type.</typeparam>
 	public class ImpunityYield<TReturn> : CustomYieldInstruction
 	{
 		private bool Complete = false;
+		/// <summary>The result value on success.</summary>
 		public TReturn Value { get; private set; }
+		/// <summary>The error response if the operation failed, or null on success.</summary>
 		public ImpunityErrorResponse Error { get; private set; }
 
 		public override bool keepWaiting
@@ -55,6 +68,10 @@ namespace Impunity.Unity
 		}
 	}
 
+	/// <summary>
+	/// Unity coroutine yield extension methods for <see cref="BaseGameConnection"/>. Each method wraps
+	/// the corresponding callback-based API as an <see cref="ImpunityYield"/> for use with <c>yield return</c>.
+	/// </summary>
 	public static class ConnectionYieldExtensions
 	{
 		// ---------- API
@@ -234,6 +251,7 @@ namespace Impunity.Unity
 
 	}
 
+	/// <summary>Unity coroutine yield extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>
 	public static class GameStateDBCollectionYieldExtensions
 	{
 
@@ -280,6 +298,7 @@ namespace Impunity.Unity
 		}
 	}
 
+	/// <summary>Unity coroutine yield extension methods for <see cref="ClientEntityManager"/>.</summary>
 	public static class ClientEntityManagerYieldExtensions
 	{
 		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedEntity
@@ -311,6 +330,7 @@ namespace Impunity.Unity
 		}
 	}
 
+	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityYieldExtensions
 	{
 		public static ImpunityYield TriggerEventYield(this IDistributedEntity entity, int eventType, BsonValue eventData)
@@ -350,6 +370,7 @@ namespace Impunity.Unity
 
 	}
 
+	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelYieldExtensions
 	{
 		public static ImpunityYield UnsubscribeYield(this IDistributedChannel channel)

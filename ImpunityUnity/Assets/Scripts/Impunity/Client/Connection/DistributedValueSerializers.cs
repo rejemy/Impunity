@@ -5,14 +5,24 @@ using UltraLiteDB;
 namespace Impunity.Connection
 {
 
+	/// <summary>
+	/// Interface for binary serializers used by distributed field types. Each implementation handles
+	/// reading and writing a specific value type to/from the wire protocol's binary stream.
+	/// Implemented as readonly structs for zero-allocation generic specialization.
+	/// </summary>
+	/// <typeparam name="T">The value type this serializer handles.</typeparam>
 	public interface IDistributableValueSerializer<T>
 	{
+		/// <summary>Writes <paramref name="value"/> to the binary stream.</summary>
 		void WriteTo(T value, BinaryWriter w);
+		/// <summary>Reads and returns a value from the binary stream.</summary>
 		T ReadFrom(BinaryReader r);
 
+		/// <summary>The property value type tag used in the wire protocol for this serializer's type.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
+	/// <summary>Binary serializer for <see cref="bool"/> values.</summary>
 	public readonly struct BoolSerializer : IDistributableValueSerializer<bool>
 	{
 		public void WriteTo(bool value, BinaryWriter w)
@@ -28,6 +38,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Boolean; }
 	}
 
+	/// <summary>Binary serializer for <see cref="sbyte"/> values.</summary>
 	public readonly struct Int8Serializer : IDistributableValueSerializer<sbyte>
 	{
 		public void WriteTo(sbyte value, BinaryWriter w)
@@ -43,6 +54,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int8; }
 	}
 
+	/// <summary>Binary serializer for <see cref="byte"/> values.</summary>
 	public readonly struct UInt8Serializer : IDistributableValueSerializer<byte>
 	{
 		public void WriteTo(byte value, BinaryWriter w)
@@ -58,6 +70,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt8; }
 	}
 
+	/// <summary>Binary serializer for <see cref="short"/> values.</summary>
 	public readonly struct Int16Serializer : IDistributableValueSerializer<short>
 	{
 		public void WriteTo(short value, BinaryWriter w)
@@ -73,6 +86,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int16; }
 	}
 
+	/// <summary>Binary serializer for <see cref="ushort"/> values.</summary>
 	public struct UInt16Serializer : IDistributableValueSerializer<ushort>
 	{
 		public readonly void WriteTo(ushort value, BinaryWriter w)
@@ -88,6 +102,7 @@ namespace Impunity.Connection
 		public readonly GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
 	}
 
+	/// <summary>Binary serializer for <see cref="int"/> values.</summary>
 	public readonly struct Int32Serializer : IDistributableValueSerializer<int>
 	{
 		public void WriteTo(int value, BinaryWriter w)
@@ -103,6 +118,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int32; }
 	}
 
+	/// <summary>Binary serializer for <see cref="uint"/> values.</summary>
 	public readonly struct UInt32Serializer : IDistributableValueSerializer<uint>
 	{
 		public readonly void WriteTo(uint value, BinaryWriter w)
@@ -118,6 +134,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt32; }
 	}
 
+	/// <summary>Binary serializer for <see cref="long"/> values.</summary>
 	public struct Int64Serializer : IDistributableValueSerializer<long>
 	{
 		public void WriteTo(long value, BinaryWriter w)
@@ -133,6 +150,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int64; }
 	}
 
+	/// <summary>Binary serializer for <see cref="ulong"/> values.</summary>
 	public readonly struct UInt64Serializer : IDistributableValueSerializer<ulong>
 	{
 		public void WriteTo(ulong value, BinaryWriter w)
@@ -148,6 +166,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt64; }
 	}
 
+	/// <summary>Binary serializer for <see cref="float"/> values.</summary>
 	public readonly struct FloatSerializer : IDistributableValueSerializer<float>
 	{
 		public void WriteTo(float value, BinaryWriter w)
@@ -163,6 +182,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Float; }
 	}
 
+	/// <summary>Binary serializer for <see cref="double"/> values.</summary>
 	public readonly struct DoubleSerializer : IDistributableValueSerializer<double>
 	{
 		public void WriteTo(double value, BinaryWriter w)
@@ -178,6 +198,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Double; }
 	}
 
+	/// <summary>Binary serializer for <see cref="decimal"/> values.</summary>
 	public readonly struct DecimalSerializer : IDistributableValueSerializer<decimal>
 	{
 		public void WriteTo(decimal value, BinaryWriter w)
@@ -193,6 +214,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Decimal; }
 	}
 
+	/// <summary>Binary serializer for <see cref="char"/> values.</summary>
 	public readonly struct CharSerializer : IDistributableValueSerializer<char>
 	{
 		public void WriteTo(char value, BinaryWriter w)
@@ -208,6 +230,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Char; }
 	}
 
+	/// <summary>Binary serializer for nullable <see cref="string"/> values. Prefixes with a boolean null indicator.</summary>
 	public readonly struct StringSerializer : IDistributableValueSerializer<string>
 	{
 		public void WriteTo(string value, BinaryWriter w)
@@ -241,6 +264,7 @@ namespace Impunity.Connection
 
 	
 
+	/// <summary>Binary serializer for nullable byte array blobs. Prefixed with a boolean null indicator and ushort length.</summary>
 	public readonly struct BlobSerializer : IDistributableValueSerializer<ArraySegment<byte>>
 	{
 		public void WriteTo(ArraySegment<byte> value, BinaryWriter w)
@@ -274,6 +298,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
 	}
 
+	/// <summary>Binary serializer for <see cref="DateTime"/> values, stored as binary ticks.</summary>
 	public readonly struct DateTimeSerializer : IDistributableValueSerializer<DateTime>
 	{
 		public void WriteTo(DateTime value, BinaryWriter w)
@@ -289,6 +314,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
 	}
 
+	/// <summary>Binary serializer for <see cref="DateTimeOffset"/> values, stored as ticks plus offset in minutes.</summary>
 	public readonly struct DateTimeOffsetSerializer : IDistributableValueSerializer<DateTimeOffset>
 	{
 		public void WriteTo(DateTimeOffset value, BinaryWriter w)
@@ -307,6 +333,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTimeOffset; }
 	}
 
+	/// <summary>Binary serializer for <see cref="TimeSpan"/> values, stored as ticks.</summary>
 	public readonly struct TimeSpanSerializer : IDistributableValueSerializer<TimeSpan>
 	{
 		public void WriteTo(TimeSpan value, BinaryWriter w)
@@ -322,6 +349,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
 	}
 
+	/// <summary>Binary serializer for <see cref="Guid"/> values, stored as 16 raw bytes.</summary>
 	public readonly struct GuidSerializer : IDistributableValueSerializer<Guid>
 	{
 		public void WriteTo(Guid value, BinaryWriter w)
@@ -337,6 +365,8 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
 	}
 
+	/// <summary>BSON serializer for small custom objects (max 254 bytes). Uses a single-byte length prefix.</summary>
+	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
 		public void WriteTo(T value, BinaryWriter w)
@@ -374,6 +404,8 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
+	/// <summary>BSON serializer for custom objects (max 65534 bytes). Uses a ushort length prefix.</summary>
+	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
 		public void WriteTo(T value, BinaryWriter w)

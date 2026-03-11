@@ -6,14 +6,20 @@ using System.Threading;
 
 namespace Impunity.Networking
 {
+	/// <summary>Client-side TCP (and optional UDP) network transport. Connects to an Impunity server, reads framed messages on a background thread, and supports both guaranteed (TCP) and unguaranteed (UDP) sends.</summary>
 	public class ImpunityTCPClient : IImpunityNetworkClient
 	{
+		/// <inheritdoc/>
 		public string ConnectionId { get; private set; }
 
+		/// <inheritdoc/>
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		/// <inheritdoc/>
 		public ImpunityCallback OnNetworkError { get; set; }
+		/// <inheritdoc/>
 		public Action<int> OnDisconnectedByServer { get; set; }
 
+		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
 		public bool SupportsUnguaranteed { get; private set; } = false;
 
 		private string ServerHost;
@@ -36,12 +42,14 @@ namespace Impunity.Networking
 		byte[] PingPacket;
 		byte[] PongPacket;
 
+		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>
 		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(serverEndpoint, options);
 			return client;
 		}
 
+		/// <summary>Creates a TCP client that connects to a server at the given hostname and port.</summary>
 		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(hostname, port, options);
@@ -74,6 +82,7 @@ namespace Impunity.Networking
 			ClientTCPSocket = new TcpClient();
 		}
 
+		/// <summary>Initiates connection on a background thread. Calls <paramref name="onComplete"/> with null on success or an error response on failure.</summary>
 		public void Connect(ImpunityCallback onComplete)
 		{
 			OnConnectCallback = onComplete;
@@ -92,6 +101,7 @@ namespace Impunity.Networking
 			ClientUDPSocketThread.Start();
 		}
 
+		/// <summary>Closes the TCP connection. The background reader thread will exit and fire <see cref="OnDisconnectedByServer"/>.</summary>
 		public void Disconnect()
 		{
 			if (ClientTCPSocket != null)
@@ -320,6 +330,7 @@ namespace Impunity.Networking
 			}
 		}
 
+		/// <summary>Sends a length-prefixed message over the TCP stream. Silently returns if not connected.</summary>
 		public void SendGuaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			if (ClientTCPSocket == null || !ClientTCPSocket.Connected)
@@ -330,6 +341,7 @@ namespace Impunity.Networking
 			TCPSocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
+		/// <summary>Sends a message via UDP if available, otherwise falls back to TCP.</summary>
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			if (ClientUDPSocket == null || !this.SupportsUnguaranteed)

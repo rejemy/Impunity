@@ -8,6 +8,7 @@ using UltraLiteDB;
 
 namespace Impunity.Connection
 {
+	/// <summary>Marks a class as a distributed entity type with a unique integer ID. Optionally specifies a factory method and persistence key.</summary>
 	[AttributeUsage(AttributeTargets.Class)]
 	public class DistributedEntity : Attribute
 	{
@@ -21,6 +22,7 @@ namespace Impunity.Connection
 		}
 	}
 
+	/// <summary>Marks a field as a distributed property with a unique byte ID (1-63). Optionally specifies a persistence key.</summary>
 	[AttributeUsage(AttributeTargets.Field)]
 	public class Distributed : Attribute
 	{
@@ -34,6 +36,7 @@ namespace Impunity.Connection
 	}
 
 
+	/// <summary>Client-side interface for a distributed entity. Provides identity, dirty tracking, lock/event/delete operations, and lifecycle callbacks.</summary>
 	public interface IDistributedEntity
 	{
 		string Name { get; set; }
@@ -66,6 +69,7 @@ namespace Impunity.Connection
 		void OnUndistributed();
 	}
 
+	/// <summary>Client-side interface for a distributed channel entity. Channels contain child objects and support subscription.</summary>
 	public interface IDistributedChannel : IDistributedEntity
 	{
 		Dictionary<uint, IDistributedEntity> DistributedObjects { get; }
@@ -76,6 +80,7 @@ namespace Impunity.Connection
 		void OnObjectRemoved(uint entityId, bool destroyed);
 	}
 
+	/// <summary>Base implementation of <see cref="IDistributedEntity"/> with dirty-bit tracking, lock waiting, and lifecycle callback stubs.</summary>
 	public abstract class DistributedEntityBase : IDistributedEntity
 	{
 		public string Name { get; set; }
@@ -166,6 +171,7 @@ namespace Impunity.Connection
 		public virtual void OnUndistributed() { }
 	}
 
+	/// <summary>Base implementation of <see cref="IDistributedChannel"/>. Maintains a dictionary of child objects and supports unsubscription.</summary>
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
 	{
 		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedEntity>();
@@ -187,6 +193,7 @@ namespace Impunity.Connection
 
 	}
 
+	/// <summary>Default channel type used when no custom channel class is specified (type ID 0).</summary>
 	public class GenericDistributedChannel : DistributedChannelBase
 	{
 		public GenericDistributedChannel() : base()
@@ -197,6 +204,7 @@ namespace Impunity.Connection
 
 	// Internal type info
 
+	/// <summary>Internal metadata for a single distributed field: ID, serialization methods, persistence info.</summary>
 	public class DistributedTypeFieldInfo
 	{
 		public byte FieldId;
@@ -210,6 +218,7 @@ namespace Impunity.Connection
 		public MethodInfo UpdateMethod;
 	}
 
+	/// <summary>Internal metadata for a distributed entity type: type ID, factory, field definitions, channel/persistence flags.</summary>
 	public class DistributedTypeInfo
 	{
 		public int DistributedTypeId;
@@ -221,8 +230,13 @@ namespace Impunity.Connection
 	}
 
 
+	/// <summary>
+	/// Client-side manager for distributed entities. Handles type registration, entity creation/subscription,
+	/// dirty tracking, property serialization/deserialization, and dispatching server state updates to entity instances.
+	/// </summary>
 	public class ClientEntityManager
 	{
+		/// <summary>The connection this manager sends actions through.</summary>
 		public BaseGameConnection Connection;
 
 		private DistributedTypeInfo[] DistributedTypes;
@@ -239,6 +253,7 @@ namespace Impunity.Connection
 		private BinaryReader PropertyDecodingReader;
 		private object[] UpdateMethodArgs;
 
+		/// <summary>Called when a distributed object is created in any subscribed channel. Parameters: entity, parent channel, newly created flag.</summary>
 		public Action<IDistributedEntity, IDistributedChannel, bool> OnDistributedObjectCreated;
 
 		public ClientEntityManager()
@@ -259,6 +274,7 @@ namespace Impunity.Connection
 
 		// -------------- Public API
 
+		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns format definitions for the server handshake.</summary>
 		public GameStateEntityTypeDef[] RegisterEntityTypes(Type[] entityTypes)
         {
 			if (entityTypes == null || entityTypes.Length == 0)
@@ -304,6 +320,7 @@ namespace Impunity.Connection
         }
 
 
+		/// <summary>Creates a distributed object in a channel. Serializes initial properties and sends to the server. Returns the entity via callback after server confirmation.</summary>
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
 		{
 			if(distObj.Name != null && distObj.Name.Contains("/"))
@@ -418,6 +435,7 @@ namespace Impunity.Connection
 			return new ObjectCreateData(entityTypeId, instanceFlags, propertyBytes, distObj.Name);
 		}
 
+		/// <summary>Creates a distributed channel with optional initial child objects.</summary>
 		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
 		{
 			channel.Name = channelName;
@@ -472,6 +490,7 @@ namespace Impunity.Connection
 			Connection.CreateChannel(channelName, entityTypeId, instanceFlags, propertyBytes, replace, objectCreateList, onComplete);
 		}
 
+		/// <summary>Subscribes to a channel by name. If already subscribed, returns the existing channel. Pass a non-null <paramref name="createIfNeeded"/> to create the channel if it doesn't exist.</summary>
 		public void SubscribeToChannel<T>(string channelName, T createIfNeeded, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
 			if (channelName == null)
@@ -557,6 +576,7 @@ namespace Impunity.Connection
 			});
         }
 
+		/// <summary>Unsubscribes from a channel and removes it from the local subscription list.</summary>
 		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete)
 		{
 			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityErrorResponse err) =>
@@ -1039,12 +1059,14 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Marks an entity as having dirty properties that need to be sent to the server on the next <see cref="SendUpdates"/> call.</summary>
 		public void SetDirty(IDistributedEntity entity)
         {
 			DirtyObjects.Add(entity);
 
 		}
 
+		/// <summary>Serializes and sends all dirty entity property changes to the server. Called each frame by <see cref="BaseGameConnection.Update"/>.</summary>
 		public void SendUpdates()
         {
 			PropertyEncodingWriter.BaseStream.Position = 0;

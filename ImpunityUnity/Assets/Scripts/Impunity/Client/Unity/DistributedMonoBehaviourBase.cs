@@ -10,6 +10,11 @@ using System;
 namespace Impunity.Unity
 {
 
+	/// <summary>
+	/// Base MonoBehaviour implementing <see cref="IDistributedEntity"/> for Unity GameObjects that participate
+	/// in distributed state replication. Provides dirty-bit tracking, lock management, and entity lifecycle callbacks.
+	/// Subclass this to create distributed entities that are Unity scene objects.
+	/// </summary>
 	public abstract class DistributedMonoBehvaiourEntityBase : MonoBehaviour, IDistributedEntity
 	{
 		public string Name { get; set; }
@@ -99,6 +104,10 @@ namespace Impunity.Unity
 		public virtual void OnUndistributed() { }
 	}
 
+	/// <summary>
+	/// Base MonoBehaviour implementing <see cref="IDistributedChannel"/> for Unity GameObjects that represent
+	/// distributed channels. Tracks child objects and provides channel lifecycle callbacks.
+	/// </summary>
 	public abstract class DistributedMonoBehvaiourChannelBase : DistributedMonoBehvaiourEntityBase, IDistributedChannel
 	{
 		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedEntity>();

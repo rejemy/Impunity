@@ -9,8 +9,10 @@ using Impunity.GameState;
 
 namespace Impunity.Connection
 {
+	/// <summary>Bridges callback-based Impunity APIs to Task-based async/await by wrapping a <see cref="TaskCompletionSource{T}"/>.</summary>
 	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
 	{
+		/// <summary>Callback handler that completes the task, setting an exception on error or a result on success.</summary>
 		public void OnComplete(ImpunityErrorResponse err)
 		{
 			if (err != null)
@@ -25,9 +27,10 @@ namespace Impunity.Connection
 
 	}
 
+	/// <summary>Generic version of <see cref="ImpunityTaskCompletionSource"/> for APIs that return a typed result.</summary>
 	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
 	{
-
+		/// <summary>Callback handler that completes the task with the result, or sets an exception on error.</summary>
 		public void OnComplete(ImpunityErrorResponse err, TResult result)
 		{
 			if (err != null)
@@ -42,11 +45,16 @@ namespace Impunity.Connection
 	}
 
 
+	/// <summary>
+	/// Async/await extension methods for <see cref="BaseGameConnection"/>. Each method wraps
+	/// the corresponding callback-based API, throwing <see cref="ImpuntyErrorResponseException"/> on failure.
+	/// </summary>
 	public static class ConnectionAsyncExtensions
 	{
 
 		// ---------- API
 
+		/// <summary>Connects to the game server asynchronously.</summary>
 		public static Task ConnectAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -231,6 +239,7 @@ namespace Impunity.Connection
 
 	}
 
+	/// <summary>Async/await extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>
 	public static class GameStateDBCollectionAsyncExtensions
 	{
 
@@ -277,6 +286,7 @@ namespace Impunity.Connection
 		}
 	}
 
+	/// <summary>Async/await extension methods for <see cref="ClientEntityManager"/>.</summary>
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
@@ -309,6 +319,7 @@ namespace Impunity.Connection
 		}
 	}
 
+	/// <summary>Async/await extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityAsyncExtensions
 	{
 		public static Task TriggerEventAsync(this IDistributedEntity entity, int eventType, BsonValue eventData)
@@ -348,6 +359,7 @@ namespace Impunity.Connection
 
 	}
 
+	/// <summary>Async/await extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelAsyncExtensions
 	{
 		public static Task UnsubscribeAsync(this IDistributedChannel channel)

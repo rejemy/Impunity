@@ -5,6 +5,7 @@ using UltraLiteDB;
 
 namespace Impunity.GameState
 {
+	/// <summary>Numeric identifiers for all client-to-server action types. Ranges: 100s = metadata, 200s = database, 300s = live state, 400s = messaging.</summary>
 	public enum ClientActionType
 	{
 		ESTABLISH_CONNECTION = 100,
@@ -37,8 +38,10 @@ namespace Impunity.GameState
 		BROADCAST_MESSAGE = 400,
 	}
 
+	/// <summary>Maps <see cref="ClientActionType"/> codes to their concrete action class types for deserialization.</summary>
 	public static class ClientActionFactory
 	{
+		/// <summary>Returns the action class type for the given numeric action type. Throws if unknown.</summary>
 		public static Type GetActionClassType(int type)
 		{
 			ClientActionType typeEnum;
@@ -55,6 +58,7 @@ namespace Impunity.GameState
 			return GetActionClassType(typeEnum);
 		}
 
+		/// <summary>Returns the action class type for the given <see cref="ClientActionType"/> enum value.</summary>
 		public static Type GetActionClassType(ClientActionType type)
 		{
 			switch (type)
@@ -120,6 +124,7 @@ namespace Impunity.GameState
 	}
 
 
+	/// <summary>Action that does nothing server-side. Used as a roundtrip ping or callback trigger.</summary>
 	public class NoOpAction : ClientActionResultlessBase
 	{
 		public override bool IsDBOperation() { return false; }
@@ -143,12 +148,14 @@ namespace Impunity.GameState
 
 	// Metadata operations
 
+	/// <summary>Result returned by <see cref="EstablishConnectionAction"/> containing the server-assigned connection ID.</summary>
 	public class EstablishConnectResult
 	{
 		[BsonField("cid")]
 		public string ConnectionId;
 	}
 
+	/// <summary>Handshake action: validates game ID, password, and format version, then registers the connection. Returns the assigned connection ID.</summary>
 	public class EstablishConnectionAction : ClientActionResultBase<EstablishConnectResult>
 	{
 		[BsonField("gid")]
@@ -183,6 +190,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Sets the game world's summary document (visible in server discovery). Runs on the live thread.</summary>
 	public class SetGameSummaryAction : ClientActionResultlessBase
 	{
 		[BsonField("s")]
@@ -205,6 +213,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Retrieves the game world's summary document. Runs on the DB thread.</summary>
 	public class GetGameSummaryAction : ClientActionResultBase<BsonDocument>
 	{
 		public override ushort GetActionType() { return (ushort)ClientActionType.GET_SUMMARY; }
@@ -223,6 +232,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Returns the server's current UTC time in Unix milliseconds. Runs immediately (no thread queuing).</summary>
 	public class GetTimeAction : ClientActionResultBase<long>
 	{
 		public override ushort GetActionType() { return (ushort)ClientActionType.GET_TIME; }
@@ -244,6 +254,7 @@ namespace Impunity.GameState
 
 	// Database operations
 
+	/// <summary>Batches multiple DB actions into a single request. All sub-actions run sequentially on the DB thread. Returns a list of individual results.</summary>
 	public class CompoundDatabaseAction : ClientActionResultBase<List<ActionResult>>
 	{
 		[BsonField("as")]
@@ -319,6 +330,7 @@ namespace Impunity.GameState
 
 	}
 
+	/// <summary>Inserts a new document into a DB collection. Returns the assigned document ID.</summary>
 	public class InsertDocumentAction : ClientActionResultBase<BsonValue>
 	{
 		[BsonField("cid")]
@@ -344,6 +356,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Replaces an existing document in a DB collection. Returns true if the document was found and updated.</summary>
 	public class UpdateDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -369,6 +382,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Inserts or replaces a document in a DB collection. Returns true if an existing document was updated (false if inserted).</summary>
 	public class UpsertDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -394,6 +408,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Merges fields from the given document into an existing document. Returns true if the target document was found.</summary>
 	public class MergeIntoDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -419,6 +434,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Merges fields into an existing document, or inserts as new if not found.</summary>
 	public class MergeInsertDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -444,6 +460,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Retrieves a single document from a DB collection by its ID.</summary>
 	public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument>
 	{
 		[BsonField("cid")]
@@ -469,6 +486,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Deletes a document from a DB collection by its ID. Returns true if found and deleted.</summary>
 	public class DeleteDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -494,6 +512,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Lists all documents in a DB collection.</summary>
 	public class ListDocumentsAction : ClientActionResultBase<List<BsonDocument>>
 	{
 		[BsonField("cid")]
@@ -519,6 +538,7 @@ namespace Impunity.GameState
 
 	// Entity actions
 
+	/// <summary>Serializable data for creating a live entity: type ID, instance flags, initial property bytes, and optional unique name.</summary>
 	public class ObjectCreateData
 	{
 		[BsonField("t")]
@@ -545,6 +565,7 @@ namespace Impunity.GameState
 
 	}
 
+	/// <summary>Creates a new live state channel with an optional initial entity and child objects. Returns true on success.</summary>
 	public class CreateChannelAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cn")]
@@ -588,6 +609,7 @@ namespace Impunity.GameState
 	}
 
 
+	/// <summary>Subscribes the connection to a channel, loading it from DB if needed. Returns the channel's entity ID. Implements <see cref="GameStateChannelLoadListener"/> for async DB load completion.</summary>
 	public class SubscribeChannelAction : ClientActionResultBase<uint>, GameStateChannelLoadListener
 	{
 		[BsonField("cn")]
@@ -678,6 +700,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Unsubscribes the connection from a channel by its entity ID.</summary>
 	public class UnsubscribeChannelAction : ClientActionResultlessBase
 	{
 		[BsonField("cid")]
@@ -700,6 +723,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Creates a new entity object within a channel. Returns the assigned entity ID.</summary>
 	public class CreateObjectAction : ClientActionResultBase<uint>
 	{
 		[BsonField("t")]
@@ -742,6 +766,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Applies a property update to a live entity using serialized update bytes.</summary>
 	public class UpdateEntityAction : ClientActionResultBase<bool>
 	{
 		[BsonField("id")]
@@ -768,6 +793,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Deletes a live entity by ID, with optional associated data for cleanup.</summary>
 	public class DeleteEntityAction : ClientActionResultBase<bool>
 	{
 		[BsonField("id")]
@@ -794,6 +820,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Sends a one-shot event to all subscribers of an entity's channel.</summary>
 	public class EventEntityAction : ClientActionResultlessBase
 	{
 		[BsonField("id")]
@@ -824,6 +851,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Acquires an exclusive lock on a live entity for this connection.</summary>
 	public class LockEntityAction : ClientActionResultBase<bool>
 	{
 		[BsonField("id")]
@@ -846,6 +874,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Releases an exclusive lock on a live entity.</summary>
 	public class UnlockEntityAction : ClientActionResultBase<bool>
 	{
 		[BsonField("id")]
@@ -868,6 +897,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Acquires a named mutex lock. Optionally waits if currently held by another connection.</summary>
 	public class LockNamedLockAction : ClientActionResultBase<bool>
 	{
 		[BsonField("ln")]
@@ -894,6 +924,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Releases a named mutex lock.</summary>
 	public class UnlockNamedLockAction : ClientActionResultBase<bool>
 	{
 		[BsonField("ln")]
@@ -916,6 +947,7 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Broadcasts a typed message to all connected clients.</summary>
 	public class SendBroadcastMessageAction : ClientActionResultlessBase
 	{
 		[BsonField("mt")]

@@ -11,8 +11,14 @@ using Impunity.Networking;
 namespace Impunity.Connection
 {
 
+	/// <summary>
+	/// Client connection that communicates with a remote server over the network (TCP). Actions are serialized
+	/// and sent on a background writer thread; replies and server pushes are deserialized on the socket thread
+	/// and queued for main-thread processing via <see cref="BaseGameConnection.Update"/>.
+	/// </summary>
 	public class RemoteGameConnection : BaseGameConnection
 	{
+		/// <summary>Called when a network-level error occurs (connection lost, socket error).</summary>
 		public ImpunityCallback OnNetworkError { get; set; }
 
 		private BlockingCollection<GameStateActionBase> PendingSend;
@@ -52,6 +58,7 @@ namespace Impunity.Connection
 			ConnectionId = "unconnected";
 		}
 
+		/// <summary>Creates a TCP remote connection to the given server endpoint.</summary>
 		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
 		{
 			if (options == null)
@@ -62,6 +69,7 @@ namespace Impunity.Connection
 			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(serverEndpoint, options), gameId, gamePassword, format, options, em);
 		}
 
+		/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
 		public static RemoteGameConnection MakeTCPRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
 		{
 			if (options == null)

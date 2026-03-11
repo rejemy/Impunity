@@ -7,9 +7,17 @@ using UltraLiteDB;
 
 namespace Impunity
 {
+	/// <summary>Callback for async operations that may fail. Null error indicates success.</summary>
+	/// <param name="err">Error response, or null on success.</param>
 	public delegate void ImpunityCallback(ImpunityErrorResponse err);
+
+	/// <summary>Callback for async operations that return a value. Null error indicates success.</summary>
+	/// <typeparam name="TReturn">Type of the return value.</typeparam>
+	/// <param name="err">Error response, or null on success.</param>
+	/// <param name="returnValue">The result value on success.</param>
 	public delegate void ImpunityCallback<TReturn>(ImpunityErrorResponse err, TReturn returnValue);
 
+	/// <summary>Protocol constants including version, ports, buffer sizes, and packet headers.</summary>
 	public static class ImpunityConstants
 	{
 		public const string ImpunityVersion = "1";
@@ -25,23 +33,35 @@ namespace Impunity
 		public const string ServerPongPacketHeader = "PONG_IMP" + ImpunityVersion + ":";
 	}
 
+	/// <summary>Configuration options for an Impunity server instance.</summary>
 	public class ImpunityOptions
 	{
+		/// <summary>Password required for database access. Null for no password.</summary>
 		public string DBPassword = null;
+		/// <summary>Whether clients can trigger database schema upgrades remotely.</summary>
 		public bool RemoteUpgradeAllowed = false;
+		/// <summary>Whether the server broadcasts its presence via UDP for LAN discovery.</summary>
 		public bool LANDiscoverable = false;
+		/// <summary>Maximum number of simultaneous client connections.</summary>
 		public int MaxConnections = 8;
+		/// <summary>TCP port the server listens on.</summary>
 		public ushort ServerPort = ImpunityConstants.DefaultServerPort;
+		/// <summary>UDP port used for client-side discovery broadcasts.</summary>
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
+		/// <summary>Short identifier for the game type, used in discovery packets.</summary>
 		public string GameTypeCode = "IMP";
+		/// <summary>Timeout in milliseconds for client actions awaiting server response.</summary>
 		public int ActionTimeoutMillis = 5 * 1000;
 	}
 
+	/// <summary>Flags describing how a game state entity instance behaves.</summary>
 	[Flags]
 	public enum ImpunityInstanceFlags : byte
 	{
 		None = 0,
+		/// <summary>Entity state is owned and updated by the client rather than the server.</summary>
 		ClientAuthoritative = 1,
+		/// <summary>Entity state is persisted to the database between sessions.</summary>
 		Persisted = 2
 	}
 
@@ -81,6 +101,7 @@ namespace Impunity
 		ActionBlockedByLock = 3005,
 	}
 
+	/// <summary>Persisted metadata about a game world, stored in the database.</summary>
 	public class GameMetadata
 	{
 		[BsonId]
@@ -99,8 +120,10 @@ namespace Impunity
 		public GameStateEntityTypeDef[] EntityTypes;
 	}
 
+	/// <summary>Exception with an associated <see cref="ImpunityErrorCode"/>, used for server-side errors that should be reported to the client.</summary>
 	public class ImpunityServerException : Exception
 	{
+		/// <summary>The error code identifying the type of failure.</summary>
 		public ImpunityErrorCode ErrorCode { get; private set; }
 
 		public ImpunityServerException(ImpunityErrorCode errorCode, string message) : base(message)
@@ -109,31 +132,37 @@ namespace Impunity
 		}
 	}
 
+	/// <summary>A fatal server exception that should terminate the connection.</summary>
 	public class ImpunityServerFatalException : ImpunityServerException
 	{
 		public ImpunityServerFatalException(ImpunityErrorCode errorCode, string message) : base(errorCode, message) {}
 	}
 
 
+	/// <summary>Serializable error response sent from server to client. Contains an error code, message, and optional stack trace.</summary>
 	public class ImpunityErrorResponse
 	{
 		[BsonField("err")]
 		protected int ErrorInt { get; private set; }
 
+		/// <summary>The error code identifying the type of failure.</summary>
 		[BsonIgnore]
 		public ImpunityErrorCode ErrorCode {
 			get { return (ImpunityErrorCode)ErrorInt; }
 			set { ErrorInt = (int)value; }
 		}
 
-
+		/// <summary>Human-readable error message.</summary>
 		[BsonField("msg")]
 		public string Message { get; private set; }
+
+		/// <summary>Server-side stack trace for debugging. May be null.</summary>
 		[BsonField("stk")]
 		public string Stacktrace { get; private set; }
 
 		public ImpunityErrorResponse() {}
 
+		/// <summary>Creates an error response from an exception. Uses <see cref="ImpunityErrorCode.InternalServerError"/> unless the exception is an <see cref="ImpunityServerException"/>.</summary>
 		public ImpunityErrorResponse(Exception e)
 		{
 			if(e is ImpunityServerException ise)
@@ -177,9 +206,12 @@ namespace Impunity
 
 	}
 
+	/// <summary>Client-side exception wrapping an <see cref="ImpunityErrorResponse"/> received from the server.</summary>
 	public class ImpuntyErrorResponseException : Exception
 	{
+		/// <summary>The error code from the server response.</summary>
 		public ImpunityErrorCode ErrorId { get; private set; }
+		/// <summary>The stack trace from the server, for debugging.</summary>
 		public string ServerStacktrace { get; private set; }
 
 		public ImpuntyErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
@@ -194,23 +226,28 @@ namespace Impunity
         }
 	}
 
+	/// <summary>Internal listener for game state changes, used by the network layer to broadcast updates.</summary>
 	internal interface IGameStateListener
     {
+		/// <summary>Called when the game's metadata (schema, version) changes.</summary>
 		void OnGameMetadataChanged(GameStateServer game);
+		/// <summary>Called when the game's summary (player count, etc.) changes.</summary>
 		void OnGameSummaryChanged(GameStateServer game);
-
-
     }
 
+	/// <summary>Defines the schema of a game's state: its version, collections, and entity types. Used at connection time to verify client/server compatibility.</summary>
 	public class GameStateFormat
 	{
+		/// <summary>Schema version number. Incremented when the format changes.</summary>
 		public int Version;
 
+		/// <summary>Named data collections (channels) clients can subscribe to.</summary>
 		public GameStateCollection[] Collections;
 
+		/// <summary>CLR types of all distributed entity classes, used to build the entity type registry.</summary>
 		public Type[] EntityTypes;
 
-
+		/// <summary>Creates a new game state format definition.</summary>
 		public GameStateFormat(int version, GameStateCollection[] collections, Type[] entityTypes)
 		{
 			Version = version;
@@ -220,6 +257,7 @@ namespace Impunity
 		}
 	}
 
+	/// <summary>Serializable version of <see cref="GameStateFormat"/> exchanged between client and server during connection handshake. Includes a checksum for compatibility verification.</summary>
 	public class GameStateFormatData
 	{
 		[BsonField("v")]
@@ -266,6 +304,7 @@ namespace Impunity
 
 	}
 
+	/// <summary>A named data collection (channel) that clients can subscribe to for state updates.</summary>
 	public class GameStateCollection
 	{
 		[BsonField("i")]
@@ -276,6 +315,7 @@ namespace Impunity
 
 	}
 
+	/// <summary>Wire type identifier for distributed entity property values. Used in serialization and schema definitions.</summary>
 	public enum GameStateEntityPropertyValueType : byte
 	{
 		Boolean = 1,
@@ -308,6 +348,7 @@ namespace Impunity
 		CustomNullable = 103
 	}
 
+	/// <summary>Container type for a distributed entity field (scalar, array, queue, or dictionary).</summary>
 	public enum GameStateEntityFieldType : byte
 	{
 		Value = 1,
@@ -317,6 +358,7 @@ namespace Impunity
 		StringDictionary = 5
 	}
 
+	/// <summary>Type of update operation for a distributed collection field.</summary>
 	public enum DistributedCollectionUpdateType : byte
 	{
 		None = 0,
@@ -324,6 +366,7 @@ namespace Impunity
 		Update = 2
 	}
 
+	/// <summary>Schema definition for a single property on a distributed entity type.</summary>
 	public class GameStateEntityPropertyDef
 	{
 		[BsonField("id")]
@@ -345,6 +388,7 @@ namespace Impunity
 		public bool IsTemporal;
 	}
 
+	/// <summary>Schema definition for a distributed entity type, including its properties.</summary>
 	public class GameStateEntityTypeDef
     {
 		[BsonField("id")]
@@ -360,6 +404,7 @@ namespace Impunity
 		public GameStateEntityPropertyDef[] Properties;
 	}
 
+	/// <summary>Info about a single game world on a standalone server, returned by the HTTP discovery API.</summary>
 	public class StandaloneServerWorldInfo
 	{
 		public string WorldId { get; set; }
@@ -372,6 +417,7 @@ namespace Impunity
 		public string DataFormatChecksum { get; set;}
 	}
 
+	/// <summary>Top-level response from the standalone server HTTP discovery API, listing all available worlds.</summary>
 	public class StandaloneServerWorldsInfo
 	{
 		public string ImpunityVersion { get; set; }
@@ -380,23 +426,34 @@ namespace Impunity
 		public List<StandaloneServerWorldInfo> Worlds { get; set; }
 	}
 
+	/// <summary>Client-side representation of a discovered server. Populated by either LAN UDP discovery or HTTP discovery.</summary>
 	public class ServerInfo
 	{
+		/// <summary>Display name of the game world.</summary>
 		public string WorldName;
 
-		// Only one of Hostname/Port or Address will be set
+		/// <summary>Hostname for remote servers (mutually exclusive with <see cref="Address"/>).</summary>
 		public string Hostname;
+		/// <summary>TCP port for remote servers (used with <see cref="Hostname"/>).</summary>
 		public int Port;
+		/// <summary>Direct IP endpoint for LAN servers (mutually exclusive with <see cref="Hostname"/>/<see cref="Port"/>).</summary>
 		public IPEndPoint Address;
-		
+
+		/// <summary>Unique identifier for the game world on the server.</summary>
 		public string GameId;
+		/// <summary>Whether the server requires a password to connect.</summary>
 		public bool PasswordProtected;
 
+		/// <summary>Number of players currently connected.</summary>
 		public int CurrentPlayers { get; set; }
+		/// <summary>Maximum players allowed.</summary>
 		public int MaxPlayers { get; set; }
 
+		/// <summary>The game state schema version the server is running.</summary>
 		public int GameStateFormatVersion;
+		/// <summary>Checksum of the game state schema, for client/server compatibility verification.</summary>
 		public string GameStateFormatChecksum;
+		/// <summary>Custom game summary data (e.g. map name, game mode) as a BSON document.</summary>
 		public BsonDocument GameSummary;
 
 	}

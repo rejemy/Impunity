@@ -14,15 +14,22 @@ using System.Linq;
 namespace Impunity.Networking
 {
 
+	/// <summary>Server-side representation of a single TCP client connection. Handles async reading, message framing, and partial message reassembly.</summary>
 	public class ImpunityTCPServerClientContext : IImpunityNetworkServerClientContext
 	{
+		/// <inheritdoc/>
 		public ImpunityServerMessageHandler OnMessageRecieved { get; set; }
+		/// <inheritdoc/>
 		public ImpunityServerErrorCallback OnNetworkError { get; set; }
+		/// <inheritdoc/>
 		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 
+		/// <inheritdoc/>
 		public string ConnectionId { get; private set;}
+		/// <inheritdoc/>
 		public string RemoteAddress { get => RemoteEndpoint.ToString(); }
 
+		/// <summary>Set to true when the client responds to a UDP ping, indicating UDP delivery is available.</summary>
 		public bool SupportsUnguaranteed { get; set; } = false;
 
 		private const int ConnectEstablishTimeout = 1000;
@@ -47,6 +54,7 @@ namespace Impunity.Networking
 			ConnectionId = connectionId;
 		}
 
+		/// <summary>Begins async reading from the client socket. The first read has a timeout to ensure the client sends the connection-establish message promptly.</summary>
 		public void Listen()
 		{
 			CancellationTokenSource timeoutSource = new CancellationTokenSource();
@@ -156,11 +164,13 @@ namespace Impunity.Networking
 			}
 		}
 
+		/// <inheritdoc/>
 		public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
 		{
 			return ClientStream.WriteAsync(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
+		/// <inheritdoc/>
 		public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
 		{
 			if (!SupportsUnguaranteed)
@@ -172,6 +182,7 @@ namespace Impunity.Networking
 		}
 
 
+		/// <summary>Closes and disposes the TCP connection, notifies the server, and fires the disconnect callback.</summary>
 		public void Disconnect()
 		{
 			try
@@ -231,8 +242,10 @@ namespace Impunity.Networking
 		}
 	}
 
+	/// <summary>TCP/UDP server that listens for client connections, handles LAN discovery broadcasts, and manages per-game announce packets. Each accepted TCP connection creates an <see cref="ImpunityTCPServerClientContext"/>.</summary>
 	public class ImpunityTCPServer
 	{
+		/// <summary>Called on the TCP listener thread when a new client connects, before reading begins.</summary>
 		public ImpunityServerClientContextCallback OnClientConnected { get; set; }
 
 		ImpunityOptions Options;
@@ -250,10 +263,12 @@ namespace Impunity.Networking
 		byte[] PingPacket;
 		byte[] PongPacket;
 
+		/// <summary>Number of currently connected TCP clients.</summary>
 		public int ClientsConnected { get => ClientsByRemoteEndpoint.Count; }
 		ConcurrentDictionary<IPEndPoint, ImpunityTCPServerClientContext> ClientsByRemoteEndpoint;
 		Dictionary<string, PerGameTCPServerData> PerGameData;
 
+		/// <summary>The local endpoint the TCP server is listening on, or null if not started.</summary>
 		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
 
 		public ImpunityTCPServer(ImpunityOptions options)
@@ -267,6 +282,7 @@ namespace Impunity.Networking
 			Running = true;
 		}
 
+		/// <summary>Registers a game world with the TCP server so it can be included in LAN discovery announce packets.</summary>
 		public void AddGameServer(GameStateServer game)
 		{
             PerGameTCPServerData tcpGameData = new PerGameTCPServerData
@@ -290,7 +306,7 @@ namespace Impunity.Networking
 			PerGameData.Add(game.GameId, tcpGameData);
 		}
 
-		// Called on Live thread
+		/// <summary>Updates the game summary for a world and rebuilds its announce packet. Called on the live thread.</summary>
 		public void SetGameSummary(string gameId, BsonDocument summary)
 		{
 			// Make copy so we can edit it without it being accessed by another thread
@@ -300,7 +316,7 @@ namespace Impunity.Networking
 			PerGameData[gameId] = tcpGameData;
 		}
 
-		// Called on Live thread
+		/// <summary>Updates the game state format version and checksum for a world. Called on the live thread.</summary>
 		public void SetGameStateFormat(string gameId, int version, string dataChecksum)
 		{
 			// Make copy so we can edit it without it being accessed by another thread
@@ -312,6 +328,7 @@ namespace Impunity.Networking
 			PerGameData[gameId] = tcpGameData;
 		}
 
+		/// <summary>Rebuilds the UDP announce packet for a game world (e.g., after player count changes).</summary>
 		public void UpdateAnnouncePacket(string gameId)
 		{
 			PerGameTCPServerData tcpGameData = PerGameData[gameId].Clone();
@@ -336,6 +353,7 @@ namespace Impunity.Networking
 		}
 
 
+		/// <summary>Starts the TCP listener, UDP listener, and LAN discovery. Returns the loopback endpoint for the TCP server.</summary>
 		public IPEndPoint Listen()
 		{
 			TCPSocket = new TcpListener(IPAddress.Any, Options.ServerPort);
@@ -606,6 +624,7 @@ namespace Impunity.Networking
 			}
 		}
 
+		/// <summary>Sends a session data packet via UDP to a specific client endpoint. The message is prefixed with the session data header.</summary>
 		public Task SendUdpSessionData(IPEndPoint destination, ArraySegment<byte> messageBytes)
 		{
 			byte[] buffer = new byte[messageBytes.Count + SessionDataPacket.Length];
@@ -615,6 +634,7 @@ namespace Impunity.Networking
 			return ServerUdpSocket.SendAsync(buffer, buffer.Length, destination);
 		}
 
+		/// <summary>Shuts down the server: stops UDP, disconnects all clients, and stops the TCP listener.</summary>
 		public void Dispose()
 		{
 			Running = false;

@@ -10,8 +10,12 @@ using System.Collections;
 namespace Impunity.Networking
 {
 
+	/// <summary>Discovers game worlds on a remote standalone server via its HTTP API. Unity-specific (uses UnityWebRequest).</summary>
 	public static class ImpunityHTTPServerFinder
 	{
+		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results on the main thread.</summary>
+		/// <param name="runner">MonoBehaviour to run the coroutine on.</param>
+		/// <param name="hostname">Server hostname, optionally with port (e.g., "example.com" or "example.com:29653").</param>
 		public static void GetServerWorlds(MonoBehaviour runner, ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
 		{
 			if (hostname.IndexOf(':') < 0)
@@ -101,6 +105,7 @@ namespace Impunity.Networking
 			onCompleted();
 		}
 
+		/// <summary>Queries a standalone server for a specific game world's info by its ID. Returns an error if the world is not found.</summary>
 		public static void GetServerWorldStatus(MonoBehaviour runner, ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
 		{
 			GetServerWorlds(runner, options, hostname, (err, worlds) =>

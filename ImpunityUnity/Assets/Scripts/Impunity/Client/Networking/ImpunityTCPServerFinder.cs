@@ -12,6 +12,7 @@ namespace Impunity.Networking
 {
 
 
+	/// <summary>Discovers Impunity servers on the LAN via UDP broadcast. Sends search packets and listens for announce responses. Call <see cref="Update"/> on the main thread to receive callbacks.</summary>
 	public class ImpunityTCPServerFinder : IDisposable
 	{
 		ImpunityOptions Options;
@@ -28,6 +29,7 @@ namespace Impunity.Networking
 
 		byte[] ServerAnnounceHeader;
 
+		/// <summary>Creates a server finder. The <paramref name="onServerFound"/> callback is invoked on the main thread via <see cref="Update"/>.</summary>
 		public ImpunityTCPServerFinder(ImpunityOptions options, Action<ServerInfo> onServerFound)
 		{
 			Options = options;
@@ -41,6 +43,7 @@ namespace Impunity.Networking
 			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
 		}
 
+		/// <summary>Starts the UDP listener thread and sends the initial search broadcast.</summary>
 		public void Start()
 		{
 			Running = true;
@@ -60,6 +63,7 @@ namespace Impunity.Networking
 			}
 		}
 
+		/// <summary>Drains the notification queue and invokes the onServerFound callback for each newly discovered server. Must be called on the main thread (e.g., from Unity Update).</summary>
 		public void Update()
 		{
 			if (!Running)
@@ -159,6 +163,7 @@ namespace Impunity.Networking
 
 		}
 
+		/// <summary>Re-sends the UDP search broadcast to discover any servers that may have come online since the initial search.</summary>
 		public void Retry()
 		{
 			if (!Running)
