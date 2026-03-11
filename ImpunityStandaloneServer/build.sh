@@ -4,8 +4,8 @@ echo "Building Impunity Standalone Server"
 dotnet build -c Release
 
 mkdir -p ../bin/StandaloneServer
-cp bin/Release/net9.0/ImpunityStandaloneServer ../bin/StandaloneServer
-cp bin/Release/net9.0/ImpunityStandaloneServer.deps.json ../bin/StandaloneServer
-cp bin/Release/net9.0/ImpunityStandaloneServer.dll ../bin/StandaloneServer
-cp bin/Release/net9.0/ImpunityStandaloneServer.runtimeconfig.json ../bin/StandaloneServer
-cp bin/Release/net9.0/UltraLiteDB.dll ../bin/StandaloneServer
+cp bin/Release/net10.0/ImpunityStandaloneServer ../bin/StandaloneServer
+cp bin/Release/net10.0/ImpunityStandaloneServer.deps.json ../bin/StandaloneServer
+cp bin/Release/net10.0/ImpunityStandaloneServer.dll ../bin/StandaloneServer
+cp bin/Release/net10.0/ImpunityStandaloneServer.runtimeconfig.json ../bin/StandaloneServer
+cp bin/Release/net10.0/UltraLiteDB.dll ../bin/StandaloneServer
