@@ -174,7 +174,15 @@ namespace Impunity.Connection
 
 			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, flags, action.GetActionType(), action);
 
-			NetworkClient.SendGuaranteedMessage(encodedMessage);
+			if (action.Guaranteed)
+			{
+				NetworkClient.SendGuaranteedMessage(encodedMessage);
+			}
+			else
+			{
+				NetworkClient.SendUnguaranteedMessage(encodedMessage);
+			}
+			
 
 			action.Cleanup();
 		}
@@ -189,7 +197,7 @@ namespace Impunity.Connection
 			// Reply message
 			if (msg.MessageType == (ushort)ServerActionType.CLIENT_REPLY)
             {
-				HandleReplyMessage(msg.MessageId, new ArraySegment<byte>(messageBytes.Array, bodyOffset, messageBytes.Count - bodyOffset));
+				HandleReplyMessage(msg.MessageId, new ArraySegment<byte>(messageBytes.Array, bodyOffset, messageBytes.Array.Length - bodyOffset));
 				return;
 			}
 

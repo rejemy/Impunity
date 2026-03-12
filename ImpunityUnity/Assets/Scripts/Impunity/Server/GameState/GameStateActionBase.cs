@@ -42,6 +42,10 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public bool ResultsExpected { get; set; }
 
+		/// <summary>Whether the action should be sent via guaranteed networking.</summary>
+		[BsonIgnore]
+		public bool Guaranteed { get; set; } = true;
+
 		/// <summary>If true, the connection will be closed after the result is sent.</summary>
 		[BsonIgnore]
 		public bool CloseConnectionOnComplete { get; set; }
@@ -228,9 +232,6 @@ namespace Impunity.GameState
 	public abstract class ServerActionBase : GameStateActionBase
 	{
 		public override bool IsDBOperation() { return false; }
-
-		[BsonIgnore]
-		public bool Guaranteed { get; set; } = true;
 
 		public override void DeserializeResults(ArraySegment<byte> messageBytes)
 		{

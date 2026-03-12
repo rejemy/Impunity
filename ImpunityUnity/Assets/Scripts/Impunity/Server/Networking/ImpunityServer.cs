@@ -388,12 +388,12 @@ namespace Impunity.Networking
 			else if (action is ServerActionBase)
 			{
 				// Server originated message
-				clientInfo.SendMessage(action.GetActionType(), ((ServerActionBase)action).Guaranteed, action);
+				clientInfo.SendMessage(action.GetActionType(), action.Guaranteed, action);
 			}
 			else
 			{
 				// Reply to client action
-				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, true, action.GetResult());
+				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, action.Guaranteed, action.GetResult());
 			}
 
 			if(action.CloseConnectionOnComplete)

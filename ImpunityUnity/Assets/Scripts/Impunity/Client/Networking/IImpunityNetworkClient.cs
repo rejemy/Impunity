@@ -27,7 +27,7 @@ namespace Impunity.Networking
 
 		/// <summary>Sends a length-prefixed binary message reliably.</summary>
 		void SendGuaranteedMessage(ArraySegment<byte> messageBytes);
-		/// <summary>Sends a binary message via the unguaranteed channel if available.</summary>
+		/// <summary>Sends a binary message via the unguaranteed channel if available, other wise will send guaranteed.</summary>
 		void SendUnguaranteedMessage(ArraySegment<byte> messageBytes);
 
 	}
