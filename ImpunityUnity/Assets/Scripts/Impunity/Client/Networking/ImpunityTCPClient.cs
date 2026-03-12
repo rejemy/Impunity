@@ -109,7 +109,13 @@ namespace Impunity.Networking
 				TcpClient client = ClientTCPSocket;
 				ClientTCPSocket = null;
 				client.Close();
+			}
 
+			if (ClientUDPSocket != null)
+			{
+				UdpClient client = ClientUDPSocket;
+				ClientUDPSocket = null;
+				client.Close();
 			}
 		}
 
@@ -235,8 +241,9 @@ namespace Impunity.Networking
 			try
 			{
 				// Open Udp socket on same port/address as established TCP session
-				var localEndpoint = ClientTCPSocket.Client.LocalEndPoint;
-				ClientUDPSocket = new UdpClient(localEndpoint as IPEndPoint);
+				IPEndPoint localEndpoint = ClientTCPSocket.Client.LocalEndPoint as IPEndPoint;
+				ImpunityLogger.LogInformation("Client listening for udp on " + localEndpoint.ToString());
+				ClientUDPSocket = new UdpClient(localEndpoint);
 				
 				// See if we can reach the server and vice versa
 				SendUdpPing();
@@ -245,7 +252,7 @@ namespace Impunity.Networking
 				{
 					IPEndPoint sender = null;
 					byte[] packet = ClientUDPSocket.Receive(ref sender);
-					if (sender != ServerEndpoint)
+					if (!sender.Equals(ServerEndpoint))
 					{
 						// Some other random stray packet
 						continue;
@@ -259,10 +266,6 @@ namespace Impunity.Networking
 					else if(ImpunityUtil.StartsWith(packet, PingPacket))
 					{
 						OnPingPacket();
-					}
-					else if(ImpunityUtil.StartsWith(packet, PongPacket))
-					{
-						OnPongPacket();
 					}
 					else
 					{
@@ -303,6 +306,8 @@ namespace Impunity.Networking
 
 		private void OnPingPacket()
 		{
+			this.SupportsUnguaranteed = true;
+
 			try
 			{
 				ClientUDPSocket.Send(PongPacket, PongPacket.Length, ServerEndpoint);
@@ -313,10 +318,6 @@ namespace Impunity.Networking
 			}
 		}
 		
-		private void OnPongPacket()
-		{
-			this.SupportsUnguaranteed = true;
-		}
 
 		private void SendUdpPing()
 		{

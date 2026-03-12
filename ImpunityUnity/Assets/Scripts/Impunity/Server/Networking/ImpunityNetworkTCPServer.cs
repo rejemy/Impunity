@@ -196,6 +196,7 @@ namespace Impunity.Networking
 			{
 				ImpunityLogger.LogError("Exception closing TCP socket", e);
 			}
+			
 
 			Server.ClientDisconnected(this);
 
@@ -393,7 +394,8 @@ namespace Impunity.Networking
 
 					string connectionId = "tcp_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 					ImpunityTCPServerClientContext context = new ImpunityTCPServerClientContext(this, client, connectionId);
-					
+					ClientsByRemoteEndpoint[context.RemoteEndpoint] = context;
+
 					ImpunityLogger.LogInformation("Client connected");
 			
 					try
@@ -406,11 +408,7 @@ namespace Impunity.Networking
 						context.Disconnect();
 					}
 
-					ClientsByRemoteEndpoint[context.RemoteEndpoint] = context;
 					context.Listen();
-
-					// See if we can communicate via UDP with new session
-					SendUdpPing(context.RemoteEndpoint);
 
 					// Re-announce after new session started so connected client count gets updated
 					foreach(string gameId in PerGameData.Keys.ToList())
@@ -587,7 +585,8 @@ namespace Impunity.Networking
 			{
 				try
 				{
-					ServerUdpSocket.Send(PongPacket, PongPacket.Length, sender);
+					// Return the ping
+					ServerUdpSocket.Send(PingPacket, PingPacket.Length, sender);
 				}
 				catch (Exception e)
 				{
@@ -609,18 +608,6 @@ namespace Impunity.Networking
 			else
 			{
 				ImpunityLogger.LogDebug("Got UDP pong packet from unknown source: " + sender.ToString());
-			}
-		}
-
-		private void SendUdpPing(IPEndPoint destination)
-		{
-			try
-			{
-				ServerUdpSocket.Send(PingPacket, PingPacket.Length, destination);
-			}
-			catch (Exception e)
-			{
-				ImpunityLogger.LogError("Exception sending UDP packet", e);
 			}
 		}
 
