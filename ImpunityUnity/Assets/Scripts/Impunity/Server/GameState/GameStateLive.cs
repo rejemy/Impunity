@@ -238,7 +238,8 @@ namespace Impunity.GameState
 			return LockedWith == null || LockedWith == key;
 		}
 
-		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy, out List<LiveEntityPersistedPropertyData> persistedProps)
+		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
 		{
 			if (propData == null || propData.Count == 0)
 			{
@@ -448,11 +449,13 @@ namespace Impunity.GameState
 			}
 		}
 
-		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy, out List<LiveEntityPersistedPropertyData> persistedProps)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, out persistedProps);
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps);
 
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
+			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
 
@@ -670,9 +673,10 @@ namespace Impunity.GameState
 			return message;
 		}
 
-		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy, out List<LiveEntityPersistedPropertyData> persistedProps)
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+					bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, out persistedProps);
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps);
 
 			if(Channel == null)
 			{
@@ -680,6 +684,7 @@ namespace Impunity.GameState
 			}
 
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
+			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
 
@@ -944,7 +949,8 @@ namespace Impunity.GameState
 			return typeInfo;
 		}
 
-		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy, out List<LiveEntityPersistedPropertyData> persistedProps)
+		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
+							bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
 		{
 			if (propBytes == null || propBytes.Count == 0)
 			{
@@ -957,7 +963,7 @@ namespace Impunity.GameState
 			TempBufferReader.BaseStream.Write(propBytes);
 			TempBufferReader.BaseStream.Position = 0;
 
-			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, out persistedProps);
+			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps);
 		}
 
 		// ----- Public API below
@@ -1053,7 +1059,7 @@ namespace Impunity.GameState
 
 			GameStateChannel channel = new GameStateChannel(this, typeInfo, instanceFlags, channelName);
 			List<LiveEntityPersistedPropertyData> persistedProps;
-			UpdateEntityProps(channel, propBytes, origin, out persistedProps);
+			UpdateEntityProps(channel, propBytes, origin, true, out persistedProps);
 			RegisterEntity(channel);
 
 			if(channel.IsClientAuthoritative())
@@ -1145,7 +1151,7 @@ namespace Impunity.GameState
 			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, dbid);
 
 			List<LiveEntityPersistedPropertyData> persistedProps;
-			UpdateEntityProps(dobj, propBytes, origin, out persistedProps);
+			UpdateEntityProps(dobj, propBytes, origin, true, out persistedProps);
 			RegisterEntity(dobj);
 
 			if (dobj.IsClientAuthoritative())
@@ -1180,7 +1186,7 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1195,7 +1201,7 @@ namespace Impunity.GameState
 			}
 
 			List<LiveEntityPersistedPropertyData> persistedProps;
-			UpdateEntityProps(entity, propData, origin, out persistedProps);
+			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps);
 
 			if (entity.IsPersisted() && persistedProps != null)
 			{

@@ -49,8 +49,10 @@ namespace Impunity.Connection
 		ClientEntityManager Manager { get; set; }
 
 		ulong DirtyBits { get; }
+		bool DirtyGuaranteed { get; }
 
-		void SetDirty(byte fieldId);
+		void SetDirty(ulong fieldBitmask, bool guaranteed);
+
 		void ClearDirty();
 
 		void InitializeDistributedFields();
@@ -95,15 +97,19 @@ namespace Impunity.Connection
 		public IDistributedChannel Channel { get; set; }
 
 		public ulong DirtyBits { get; private set; }
-		public void SetDirty(byte fieldId)
+		public bool DirtyGuaranteed { get; private set; }
+
+		public void SetDirty(ulong fieldBitmask, bool guaranteed)
         {
-			DirtyBits |= 1ul << (fieldId - 1);
+			DirtyBits |= fieldBitmask;
+			DirtyGuaranteed |= guaranteed;
 			Manager?.SetDirty(this);
 		}
 
 		public void ClearDirty()
         {
 			DirtyBits = 0ul;
+			DirtyGuaranteed = false;
 		}
 
 		public virtual void InitializeDistributedFields() {}
@@ -208,6 +214,7 @@ namespace Impunity.Connection
 	public class DistributedTypeFieldInfo
 	{
 		public byte FieldId;
+		public UInt64 FieldBitmask;
 		public string FieldName;
 		public string PersistedAs;
 		public bool IsTemporal;
@@ -342,7 +349,7 @@ namespace Impunity.Connection
 			}
 
 			distObj.DistributedEntityType = entityTypeId;
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
 			byte instaceFlags = 0;
 			if (distObj.IsClientAuthoritative)
@@ -405,7 +412,7 @@ namespace Impunity.Connection
 			}
 
 			distObj.DistributedEntityType = entityTypeId;
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
 			byte instanceFlags = 0;
 			if (distObj.IsClientAuthoritative)
@@ -454,7 +461,7 @@ namespace Impunity.Connection
 			}
 
 			channel.DistributedEntityType = entityTypeId;
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel, out _);
 			byte instanceFlags = 0;
 
 			if (channel.IsClientAuthoritative)
@@ -535,7 +542,7 @@ namespace Impunity.Connection
 				}
 
 				createIfNeeded.DistributedEntityType = entityTypeId;
-				propertyBytes = GetPropertyBytes(createIfNeeded);
+				propertyBytes = GetPropertyBytes(createIfNeeded, out _);
 
 				if (createIfNeeded.IsClientAuthoritative)
 				{
@@ -683,6 +690,7 @@ namespace Impunity.Connection
 
 				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo();
 				dfield.FieldId = fieldAttr.FieldId;
+				dfield.FieldBitmask = 1ul << (dfield.FieldId - 1);
 				dfield.FieldName = fieldInfo.Name;
 				dfield.FieldType = tempFieldValue.FieldType;
 				dfield.FieldValueType = tempFieldValue.ValueType;
@@ -1080,9 +1088,11 @@ namespace Impunity.Connection
 
 		}
 
-		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, bool allProperties = false)
+		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, out bool guaranteed, bool allProperties = false)
         {
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
+
+			guaranteed = entity.DirtyGuaranteed;
 
 			ulong dirtyBits = allProperties ? ulong.MaxValue : entity.DirtyBits;
 			if (dirtyBits == 0)
@@ -1096,7 +1106,7 @@ namespace Impunity.Connection
 			{
 				if (fieldInfo == null) continue;
 
-				if ((dirtyBits & (1ul << (fieldInfo.FieldId - 1))) != 0)
+				if ((dirtyBits & fieldInfo.FieldBitmask) != 0)
 				{
 					PropertyEncodingWriter.Write((byte)fieldInfo.FieldId);
 					fieldInfo.WriteMethod.Invoke(entity, WriteMethodArgs);
@@ -1158,9 +1168,10 @@ namespace Impunity.Connection
 
 		private void SendEntityUpdates(IDistributedEntity entity)
         {
-			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity);
+			bool guaranteedSend = true;
+			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out guaranteedSend);
 
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, null);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, null);
 
 		}
 	}

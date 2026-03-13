@@ -388,9 +388,11 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Sends a property update for a live entity.</summary>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, ImpunityCallback<bool> onComplete)
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ImpunityCallback onComplete)
 		{
-			DoAction(new UpdateEntityAction(entityId, updateData, onComplete));
+			var action = new UpdateEntityAction(entityId, updateData, onComplete);
+			action.SetGuaranteed(guaranteed);
+			DoAction(action);
 		}
 
 		/// <summary>Deletes a live entity by ID.</summary>

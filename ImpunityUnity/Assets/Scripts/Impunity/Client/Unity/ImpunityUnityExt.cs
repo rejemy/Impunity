@@ -214,10 +214,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData)
+		public static ImpunityYield UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed)
 		{
-			var action = new ImpunityYield<bool>();
-			connection.UpdateEntity(entityId, updateData, action.OnComplete);
+			var action = new ImpunityYield();
+			connection.UpdateEntity(entityId, updateData, guaranteed, action.OnComplete);
 			return action;
 		}
 

@@ -767,7 +767,7 @@ namespace Impunity.GameState
 	}
 
 	/// <summary>Applies a property update to a live entity using serialized update bytes.</summary>
-	public class UpdateEntityAction : ClientActionResultBase<bool>
+	public class UpdateEntityAction : ClientActionResultlessBase
 	{
 		[BsonField("id")]
 		public uint EntityId;
@@ -780,7 +780,7 @@ namespace Impunity.GameState
 
 		public UpdateEntityAction() { }
 
-		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ImpunityCallback<bool> onComplete = null)
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ImpunityCallback onComplete = null)
 		{
 			EntityId = entityId;
 			UpdateBytes = updateBytes;
@@ -789,7 +789,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes);
+			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed);
 		}
 	}
 

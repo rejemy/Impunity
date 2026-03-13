@@ -665,6 +665,16 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Direction change callback worked");
 
 		WaitingForCount = 2;
+		c1player1.Position.SetUnguaranteed(new Vector3(50.0f, 50.0f, 50.0f));
+
+		if (!await WaitForCount("Didn't get unguaranteed position change"))
+		{
+			return;
+		}
+
+		ImpunityLogger.LogInformation("Unguaranteed position change worked");
+
+		WaitingForCount = 2;
 
 		c2player2.TriggerEvent(1, "Wooow!", null);
 

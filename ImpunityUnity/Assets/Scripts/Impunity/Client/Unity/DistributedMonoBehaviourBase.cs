@@ -29,15 +29,19 @@ namespace Impunity.Unity
 		public IDistributedChannel Channel { get; set; }
 
 		public ulong DirtyBits { get; private set; }
-		public void SetDirty(byte fieldId)
+		public bool DirtyGuaranteed { get; private set; }
+
+		public void SetDirty(ulong fieldBitmask, bool guaranteed)
 		{
-			DirtyBits |= 1ul << (fieldId - 1);
+			DirtyBits |= fieldBitmask;
+			DirtyGuaranteed |= guaranteed;
 			Manager?.SetDirty(this);
 		}
-
+		
 		public void ClearDirty()
 		{
 			DirtyBits = 0ul;
+			DirtyGuaranteed = false;
 		}
 
 		public virtual void InitializeDistributedFields() {}

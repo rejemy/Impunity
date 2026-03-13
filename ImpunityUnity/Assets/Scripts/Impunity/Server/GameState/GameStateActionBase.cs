@@ -38,13 +38,12 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		internal IServerSideConnectionProxy Origin { get; set; }
 
+		[BsonIgnore]
+		public virtual bool Guaranteed { get; protected set; } = true;
+
 		/// <summary>Whether the client expects a reply for this action.</summary>
 		[BsonIgnore]
 		public bool ResultsExpected { get; set; }
-
-		/// <summary>Whether the action should be sent via guaranteed networking.</summary>
-		[BsonIgnore]
-		public bool Guaranteed { get; set; } = true;
 
 		/// <summary>If true, the connection will be closed after the result is sent.</summary>
 		[BsonIgnore]
@@ -155,6 +154,8 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public ImpunityCallback OnCompleteCallback;
 
+		public void SetGuaranteed(bool guaranteed) { this.Guaranteed = guaranteed; }
+		
 		public override bool HasCallback()
 		{
 			return OnCompleteCallback != null;
@@ -231,6 +232,8 @@ namespace Impunity.GameState
 	/// <summary>Base class for server-originated messages pushed to clients (e.g., state updates). Not used for client request/reply.</summary>
 	public abstract class ServerActionBase : GameStateActionBase
 	{
+		public void SetGuaranteed(bool guaranteed) { this.Guaranteed = guaranteed; }
+
 		public override bool IsDBOperation() { return false; }
 
 		public override void DeserializeResults(ArraySegment<byte> messageBytes)

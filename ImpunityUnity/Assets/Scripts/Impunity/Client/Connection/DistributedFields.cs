@@ -38,7 +38,7 @@ namespace Impunity.Connection
 		private static readonly S Serializer = default;
 
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		T CurrentValue;
 		T NewValue;
@@ -46,7 +46,7 @@ namespace Impunity.Connection
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		/// <summary>Returns the current replicated value.</summary>
@@ -64,7 +64,29 @@ namespace Impunity.Connection
 				return false;
 			}
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative)
+			{
+				T oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
+				InvokeOnChanged(oldValue, CurrentValue);
+			}
+
+			return true;
+		}
+
+		/// <summary>Sets the value and marks the field dirty. Will be sent as an unguaranteed update if possible.</summary>
+		public bool SetUnguaranteed(T newValue, bool force = false)
+		{
+			NewValue = newValue;
+			if (!force && Equals(NewValue, CurrentValue))
+			{
+				return false;
+			}
+
+			Entity.SetDirty(FieldBitmask, false);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -163,7 +185,7 @@ namespace Impunity.Connection
 		private static readonly S Serializer = default;
 		
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		T CurrentValue;
 		T NewValue;
@@ -173,7 +195,7 @@ namespace Impunity.Connection
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		public readonly T Get()
@@ -189,7 +211,30 @@ namespace Impunity.Connection
 				return false;
 			}
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative)
+			{
+				LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+
+				T oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
+				InvokeOnChanged(oldValue, CurrentValue);
+			}
+
+			return true;
+		}
+
+		public bool SetUnguaranteed(T newValue, bool force = false)
+		{
+			NewValue = newValue;
+			if (!force && Equals(NewValue, CurrentValue))
+			{
+				return false;
+			}
+
+			Entity.SetDirty(FieldBitmask, false);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -310,7 +355,7 @@ namespace Impunity.Connection
 		Dictionary<int, T> Changes;
 
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		public readonly int Length => CurrentValue.Length;
 		public readonly int Count => CurrentValue.Length;
@@ -321,7 +366,7 @@ namespace Impunity.Connection
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		/// <summary>Initializes the array with default values of the given size. Marks the field dirty for full sync.</summary>
@@ -330,7 +375,7 @@ namespace Impunity.Connection
 			NewValue = new T[size];
 			Changes = new Dictionary<int, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -355,7 +400,7 @@ namespace Impunity.Connection
 
 			Changes = new Dictionary<int, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -389,7 +434,7 @@ namespace Impunity.Connection
 				T oldValue = NewValue[index];
 				NewValue[index] = newValue;
 
-				Entity.SetDirty(FieldId);
+				Entity.SetDirty(FieldBitmask, true);
 
 				if (Entity.IsClientAuthoritative)
 				{
@@ -411,7 +456,7 @@ namespace Impunity.Connection
 
 			Changes.Add(index, newValue);
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -568,14 +613,14 @@ namespace Impunity.Connection
 		Queue<T> Changes;
 
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		public readonly int Count { get => CurrentValue.Count; }
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		/// <summary>Initializes the queue with the given maximum capacity. Marks the field dirty for full sync.</summary>
@@ -585,7 +630,7 @@ namespace Impunity.Connection
 			NewValue = new Queue<T>();
 			Changes = new Queue<T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -610,7 +655,7 @@ namespace Impunity.Connection
 				AddToNew(val);
 			}
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -660,7 +705,7 @@ namespace Impunity.Connection
 			{
 				AddToNew(newValue);
 
-				Entity.SetDirty(FieldId);
+				Entity.SetDirty(FieldBitmask, true);
 
 				if (Entity.IsClientAuthoritative)
 				{
@@ -672,7 +717,7 @@ namespace Impunity.Connection
 
 			AddToChanges(newValue);
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -827,7 +872,7 @@ namespace Impunity.Connection
 		Dictionary<int, T> Changes;
 
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		public readonly int Count { get => CurrentValue.Count; }
 		public readonly IEnumerable<int> Keys => CurrentValue.Keys;
@@ -839,7 +884,7 @@ namespace Impunity.Connection
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		/// <summary>Initializes the dictionary as empty. Marks the field dirty for full sync.</summary>
@@ -848,7 +893,7 @@ namespace Impunity.Connection
 			NewValue = new Dictionary<int, T>();
 			Changes = new Dictionary<int, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -866,7 +911,7 @@ namespace Impunity.Connection
 			NewValue = new Dictionary<int, T>(initialValues);
 			Changes = new Dictionary<int, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -885,7 +930,7 @@ namespace Impunity.Connection
 				T oldValue = NewValue.GetValueOrDefault(key);
 				NewValue[key] = newValue;
 
-				Entity.SetDirty(FieldId);
+				Entity.SetDirty(FieldBitmask, true);
 
 				if (Entity.IsClientAuthoritative)
 				{
@@ -897,7 +942,7 @@ namespace Impunity.Connection
 
 			Changes[key] = newValue;
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -1076,7 +1121,7 @@ namespace Impunity.Connection
 		Dictionary<string, T> Changes;
 
 		IDistributedEntity Entity;
-		byte FieldId;
+		ulong FieldBitmask;
 
 		public readonly int Count { get => CurrentValue.Count; }
 		public readonly IEnumerable<string> Keys => CurrentValue.Keys;
@@ -1088,7 +1133,7 @@ namespace Impunity.Connection
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
 			Entity = entity;
-			FieldId = fieldId;
+			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
 		/// <summary>Initializes the dictionary as empty. Marks the field dirty for full sync.</summary>
@@ -1097,7 +1142,7 @@ namespace Impunity.Connection
 			NewValue = new Dictionary<string, T>();
 			Changes = new Dictionary<string, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -1115,7 +1160,7 @@ namespace Impunity.Connection
 			NewValue = new Dictionary<string, T>(initialValues);
 			Changes = new Dictionary<string, T>();
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
@@ -1134,7 +1179,7 @@ namespace Impunity.Connection
 				T oldValue = NewValue.GetValueOrDefault(key);
 				NewValue[key] = newValue;
 
-				Entity.SetDirty(FieldId);
+				Entity.SetDirty(FieldBitmask, true);
 
 				if (Entity.IsClientAuthoritative)
 				{
@@ -1146,7 +1191,7 @@ namespace Impunity.Connection
 
 			Changes[key] = newValue;
 
-			Entity.SetDirty(FieldId);
+			Entity.SetDirty(FieldBitmask, true);
 
 			if (Entity.IsClientAuthoritative)
 			{
