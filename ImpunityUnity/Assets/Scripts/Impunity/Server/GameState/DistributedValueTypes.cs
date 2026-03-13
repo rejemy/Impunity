@@ -4,6 +4,7 @@ using System.IO;
 
 using UltraLiteDB;
 
+
 namespace Impunity.GameState
 {
 
@@ -573,7 +574,7 @@ namespace Impunity.GameState
 
 		public void ReadFrom(BinaryReader r)
 		{
-			Value = new DateTime(r.ReadInt64());
+			Value = DateTime.FromBinary(r.ReadInt64());
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }

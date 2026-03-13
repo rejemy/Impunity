@@ -308,7 +308,7 @@ namespace Impunity.Connection
 
 		public DateTime ReadFrom(BinaryReader r)
 		{
-			return new DateTime(r.ReadInt64());
+			return DateTime.FromBinary(r.ReadInt64());
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }

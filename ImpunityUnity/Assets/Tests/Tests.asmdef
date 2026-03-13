@@ -1,0 +1,16 @@
+{
+    "name": "Tests",
+    "references": [
+        "Impunity"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "UltraLiteDB.dll"
+    ]
+}
