@@ -2,4 +2,5 @@
   <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Impunity.csproj" />
   <Project Path="Tests.csproj" />
+  <Project Path="PlayModeTests.csproj" />
 </Solution>

@@ -189,9 +189,9 @@ namespace Impunity.Connection
 			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated);
 		}
 
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
         {
-			EntityManager.HandleEntityUpdate(entityId, updateData);
+			EntityManager.HandleEntityUpdate(entityId, updateData, seq);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
@@ -388,9 +388,9 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Sends a property update for a live entity.</summary>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ImpunityCallback onComplete)
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback onComplete)
 		{
-			var action = new UpdateEntityAction(entityId, updateData, onComplete);
+			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
 			action.SetGuaranteed(guaranteed);
 			DoAction(action);
 		}

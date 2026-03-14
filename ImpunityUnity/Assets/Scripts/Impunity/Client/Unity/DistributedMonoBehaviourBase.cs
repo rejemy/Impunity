@@ -31,6 +31,9 @@ namespace Impunity.Unity
 		public ulong DirtyBits { get; private set; }
 		public bool DirtyGuaranteed { get; private set; }
 
+		public ushort SendSeq { get; set; }
+		public ushort[] FieldRecvSeq { get; set; }
+
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
 		{
 			DirtyBits |= fieldBitmask;

@@ -51,6 +51,11 @@ namespace Impunity.Connection
 		ulong DirtyBits { get; }
 		bool DirtyGuaranteed { get; }
 
+		/// <summary>Per-entity outgoing sequence counter, incremented each time this entity sends an update.</summary>
+		ushort SendSeq { get; set; }
+		/// <summary>Per-field last-received sequence numbers, indexed by field ID. Used to detect and discard stale out-of-order updates.</summary>
+		ushort[] FieldRecvSeq { get; set; }
+
 		void SetDirty(ulong fieldBitmask, bool guaranteed);
 
 		void ClearDirty();
@@ -98,6 +103,9 @@ namespace Impunity.Connection
 
 		public ulong DirtyBits { get; private set; }
 		public bool DirtyGuaranteed { get; private set; }
+
+		public ushort SendSeq { get; set; }
+		public ushort[] FieldRecvSeq { get; set; }
 
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
         {
@@ -223,6 +231,7 @@ namespace Impunity.Connection
 		public MethodInfo WriteMethod;
 		public MethodInfo InitMethod;
 		public MethodInfo UpdateMethod;
+		public MethodInfo SkipMethod;
 	}
 
 	/// <summary>Internal metadata for a distributed entity type: type ID, factory, field definitions, channel/persistence flags.</summary>
@@ -738,6 +747,12 @@ namespace Impunity.Connection
 				}
 				dfield.UpdateMethod = updateMethod;
 
+				MethodInfo skipMethod = GetTypeMethodInherited(entityType, "_imp_SkipWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (skipMethod == null)
+				{
+					throw new Exception("Cant find skip method for property " + fieldInfo.Name + " on type " + entityType.Name);
+				}
+				dfield.SkipMethod = skipMethod;
 
 				distributedFields.Add(dfield);
 			}
@@ -950,6 +965,12 @@ namespace Impunity.Connection
 			entity.DistributedEntityId = entityId;
 			entity.Manager = this;
 
+			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
+			if (typeInfo.DistributedFields != null)
+			{
+				entity.FieldRecvSeq = new ushort[typeInfo.DistributedFields.Length];
+			}
+
 			DistributedObjects[entity.DistributedEntityId] = entity;
 
 			if (entity.DirtyBits != 0)
@@ -973,7 +994,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData)
+			public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
@@ -982,7 +1003,7 @@ namespace Impunity.Connection
 				return;
             }
 
-			SetPropertyBytes(entity, updateData, false);
+			SetPropertyBytes(entity, updateData, false, seq);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
@@ -1121,7 +1142,7 @@ namespace Impunity.Connection
 			return new ArraySegment<byte>(PropertyEncodingBuffer, startPos, bufferSize);
 		}
 
-		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead)
+		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead, ushort seq = 0)
         {
 			if (propertyBytes == null || propertyBytes.Count == 0)
             {
@@ -1158,9 +1179,17 @@ namespace Impunity.Connection
 				{
 					fieldInfo.InitMethod.Invoke(entity, UpdateMethodArgs);
 				}
-				else
+				else if (seq == 0 || entity.FieldRecvSeq == null || (short)(seq - entity.FieldRecvSeq[propId]) > 0)
 				{
 					fieldInfo.UpdateMethod.Invoke(entity, UpdateMethodArgs);
+					if (entity.FieldRecvSeq != null)
+					{
+						entity.FieldRecvSeq[propId] = seq;
+					}
+				}
+				else
+				{
+					fieldInfo.SkipMethod.Invoke(entity, UpdateMethodArgs);
 				}
 
 			}
@@ -1171,7 +1200,8 @@ namespace Impunity.Connection
 			bool guaranteedSend = true;
 			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out guaranteedSend);
 
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, null);
+			entity.SendSeq++;
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null);
 
 		}
 	}

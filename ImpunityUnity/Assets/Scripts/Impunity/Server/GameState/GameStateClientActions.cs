@@ -775,21 +775,25 @@ namespace Impunity.GameState
 		[BsonField("ub")]
 		public ArraySegment<byte> UpdateBytes;
 
+		[BsonField("sq")]
+		public ushort Seq;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
 		public override bool IsDBOperation() { return false; }
 
 		public UpdateEntityAction() { }
 
-		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ImpunityCallback onComplete = null)
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ImpunityCallback onComplete = null)
 		{
 			EntityId = entityId;
 			UpdateBytes = updateBytes;
+			Seq = seq;
 			OnCompleteCallback = onComplete;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed);
+			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq);
 		}
 	}
 

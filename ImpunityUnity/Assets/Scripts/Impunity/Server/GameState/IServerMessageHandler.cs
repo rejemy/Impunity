@@ -12,7 +12,7 @@ namespace Impunity.GameState
 		/// <summary>Called when a new entity is created within a channel.</summary>
 		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated);
 		/// <summary>Called when an entity's properties are updated (dirty fields only).</summary>
-		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData);
+		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq);
 		/// <summary>Called when a custom event is fired on an entity.</summary>
 		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData);
 		/// <summary>Called when an entity becomes locked by a connection.</summary>

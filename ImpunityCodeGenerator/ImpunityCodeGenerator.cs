@@ -245,6 +245,11 @@ namespace SourceGenerator
 		{{
 			{propInfo.PropertyName}.ReadChangesFrom(r);
 		}}");
+
+			Output.AppendLine($@"		private void _imp_SkipWrapper_{propInfo.PropertyName}(BinaryReader r)
+		{{
+			{propInfo.PropertyName}.SkipFrom(r);
+		}}");
 		}
 
 

@@ -160,12 +160,15 @@ namespace Impunity.GameState
 		[BsonField("ub")]
 		public ArraySegment<byte> UpdateBytes;
 
+		[BsonField("sq")]
+		public ushort Seq;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleEntityUpdate(EntityId, UpdateBytes);
+			handler.HandleEntityUpdate(EntityId, UpdateBytes, Seq);
 		}
 	}
 

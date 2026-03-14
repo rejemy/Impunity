@@ -13,6 +13,8 @@ namespace Impunity.Connection
 		void WriteChangesTo(BinaryWriter w);
 		void ReadInitialFrom(BinaryReader r);
 		void ReadChangesFrom(BinaryReader r);
+		/// <summary>Reads and discards field data from the stream, advancing the reader position without applying changes. Used to skip stale out-of-order updates.</summary>
+		void SkipFrom(BinaryReader r);
 
 		GameStateEntityFieldType FieldType { get; }
 		GameStateEntityPropertyValueType ValueType { get; }
@@ -137,6 +139,12 @@ namespace Impunity.Connection
 			InvokeOnChanged(oldValue, CurrentValue);
 		}
 
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			Serializer.ReadFrom(r);
+		}
+
 		private readonly void InvokeOnChanged(T oldValue, T newValue)
 		{
 			try
@@ -168,7 +176,7 @@ namespace Impunity.Connection
 
 		public static implicit operator T(DistributedValue<T, S> d) => d.CurrentValue;
 	}
-	
+
 	/// <summary>
 	/// Client-side distributed value that also tracks the server-time of the last modification.
 	/// On initial load, provides the age of the value so clients can interpolate or compensate for staleness.
@@ -290,6 +298,12 @@ namespace Impunity.Connection
 			CurrentValue = Serializer.ReadFrom(r);
 
 			InvokeOnChanged(oldValue, CurrentValue);
+		}
+
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			Serializer.ReadFrom(r);
 		}
 
 		private readonly void InvokeOnInitialized(T newValue, TimeSpan age)
@@ -542,6 +556,29 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadUInt16(); // index
+					Serializer.ReadFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int arraySize = r.ReadUInt16();
+				for (int index = 0; index < arraySize; index++)
+				{
+					Serializer.ReadFrom(r);
+				}
+			}
+		}
+
 		private readonly void InvokeOnChanged(int index, T oldValue, T newValue)
 		{
 			try
@@ -779,7 +816,6 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
-				NewValue = new Queue<T>();
 				Changes = new Queue<T>();
 
 				CurrentCapacity = r.ReadUInt16();
@@ -800,6 +836,29 @@ namespace Impunity.Connection
 				}
 
 				InvokeOnReplaced(oldValue, CurrentValue);
+			}
+		}
+
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					Serializer.ReadFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				r.ReadUInt16(); // capacity
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					Serializer.ReadFrom(r);
+				}
 			}
 		}
 
@@ -1022,7 +1081,6 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
-				NewValue = new Dictionary<int, T>();
 				Changes = new Dictionary<int, T>();
 
 				int numValues = r.ReadUInt16();
@@ -1041,6 +1099,30 @@ namespace Impunity.Connection
 				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 
+		}
+
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadInt32(); // key
+					Serializer.ReadFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					r.ReadInt32(); // key
+					Serializer.ReadFrom(r);
+				}
+			}
 		}
 
 		private readonly void InvokeOnChanged(int key, T oldValue, T newValue)
@@ -1270,7 +1352,6 @@ namespace Impunity.Connection
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
 			{
-				NewValue = new Dictionary<string, T>();
 				Changes = new Dictionary<string, T>();
 
 				int numValues = r.ReadUInt16();
@@ -1289,6 +1370,30 @@ namespace Impunity.Connection
 				InvokeOnReplaced(oldValue, CurrentValue);
 			}
 
+		}
+
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadString(); // key
+					Serializer.ReadFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					r.ReadString(); // key
+					Serializer.ReadFrom(r);
+				}
+			}
 		}
 
 		private readonly void InvokeOnChanged(string key, T oldValue, T newValue)

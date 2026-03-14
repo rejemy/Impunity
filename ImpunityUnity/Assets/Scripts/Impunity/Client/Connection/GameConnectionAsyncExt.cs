@@ -202,10 +202,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed)
+		public static Task UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq = 0)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.UpdateEntity(entityId, updateData, guaranteed, t.OnComplete);
+			connection.UpdateEntity(entityId, updateData, guaranteed, seq, t.OnComplete);
 			return t.Task;
 		}
 

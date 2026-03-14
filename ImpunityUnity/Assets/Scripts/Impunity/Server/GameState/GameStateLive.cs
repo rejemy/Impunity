@@ -139,6 +139,11 @@ namespace Impunity.GameState
 
 		private IStandardDistributableValueType[] Properties;
 
+		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.</summary>
+		private ushort[] RecvSeq;
+		/// <summary>Outgoing sequence counter for broadcasting updates to clients.</summary>
+		public ushort OutSeq;
+
 		public GameStateEntity(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string name = null)
 		{
 			LiveData = liveData;
@@ -152,6 +157,7 @@ namespace Impunity.GameState
 				{
 					int maxPropIndex = typeInfo.PackedProperties[typeInfo.PackedProperties.Length - 1].Index;
 					Properties = new IStandardDistributableValueType[maxPropIndex + 1];
+					RecvSeq = new ushort[maxPropIndex + 1];
 
 					foreach (GameStateEntityPropertyDef propDef in typeInfo.PackedProperties)
 					{
@@ -239,7 +245,7 @@ namespace Impunity.GameState
 		}
 
 		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
 		{
 			if (propData == null || propData.Count == 0)
 			{
@@ -265,9 +271,23 @@ namespace Impunity.GameState
 					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
 				}
 
+				// Check per-field sequence number to discard stale out-of-order updates
+				if (seq != 0 && RecvSeq != null && !((short)(seq - RecvSeq[propId]) > 0))
+				{
+					// Stale update for this field — skip its data without applying
+					var skipInstance = (IDistributableValueType)System.Activator.CreateInstance(Properties[propId].GetType());
+					skipInstance.ReadFrom(propReader);
+					continue;
+				}
+
 				Properties[propId].ReadFrom(propReader);
 				Properties[propId].LastModifiedTime = currTime;
-				
+
+				if (RecvSeq != null && seq != 0)
+				{
+					RecvSeq[propId] = seq;
+				}
+
 				var propInfo = propLookup[propId];
 				if (propInfo.PersistedAs != null)
 				{
@@ -450,14 +470,16 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps);
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
 
+			OutSeq++;
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
 			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
+			updateMessage.Seq = OutSeq;
 
 			GameStateReplicant except = IsClientAuthoritative() ? updatedBy : null;
 
@@ -674,19 +696,21 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-					bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
+					bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps);
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
 
 			if(Channel == null)
 			{
 				return;
 			}
 
+			OutSeq++;
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
 			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
 			updateMessage.UpdateBytes = propData;
+			updateMessage.Seq = OutSeq;
 
 			GameStateReplicant except = IsClientAuthoritative() ? updatedBy : null;
 
@@ -950,7 +974,7 @@ namespace Impunity.GameState
 		}
 
 		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
-							bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps)
+							bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
 		{
 			if (propBytes == null || propBytes.Count == 0)
 			{
@@ -963,7 +987,7 @@ namespace Impunity.GameState
 			TempBufferReader.BaseStream.Write(propBytes);
 			TempBufferReader.BaseStream.Position = 0;
 
-			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps);
+			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps, seq);
 		}
 
 		// ----- Public API below
@@ -1186,7 +1210,7 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1201,7 +1225,7 @@ namespace Impunity.GameState
 			}
 
 			List<LiveEntityPersistedPropertyData> persistedProps;
-			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps);
+			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq);
 
 			if (entity.IsPersisted() && persistedProps != null)
 			{
