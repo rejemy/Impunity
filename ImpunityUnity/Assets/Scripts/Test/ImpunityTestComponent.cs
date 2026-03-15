@@ -92,8 +92,9 @@ public class ImpunityTestComponent : MonoBehaviour
 
 	IEnumerator StandaloneServerTest()
 	{
-		yield return StandaloneServerTCPConnectionTest(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 29654), "world1");
-
+		//yield return StandaloneServerTCPConnectionTest(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 29654), "world1");
+		yield return StandaloneServerWebsocketConnectionTest("localhost", 29653, "world1");
+		
 		TestsDone = true;
 		ImpunityLogger.LogInformation("Tests complete");
 	}
@@ -290,6 +291,22 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("Done with standalone server TCP connection test");
 	}
 
+	IEnumerator StandaloneServerWebsocketConnectionTest(string hostname, int port, string gameId)
+	{
+		ImpunityLogger.LogInformation("Running standalone server websocket connection test to " + hostname + "/" + gameId);
+
+
+		RemoteGame = RemoteGameConnection.MakeWebsocketRemoteConnection(hostname, port, gameId, "fuzzy-wuzzy", CurrFormat, Options);
+		RemoteGame.OnNetworkError = OnNetworkError;
+
+		yield return GenericConnectionTest(RemoteGame);
+
+		RemoteGame.Dispose();
+		RemoteGame = null;
+
+		ImpunityLogger.LogInformation("Done with standalone server TCP connection test");
+	}
+
 	IEnumerator GenericConnectionTest(BaseGameConnection connection)
     {
 		connection.OnBroadcastMessage = (messageType, message, sentBy) =>
@@ -305,7 +322,7 @@ public class ImpunityTestComponent : MonoBehaviour
 			yield break;
 		}
 
-		ImpunityLogger.LogInformation("TCP Connected");
+		ImpunityLogger.LogInformation("Session Connected");
 
 		BsonDocument char1 = new BsonDocument();
 		char1["_id"] = "char1";

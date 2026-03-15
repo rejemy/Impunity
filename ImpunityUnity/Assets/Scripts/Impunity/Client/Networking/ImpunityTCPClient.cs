@@ -1,3 +1,5 @@
+#if !UNITY_WEBGL
+
 using System;
 using System.Net;
 using System.Net.Sockets;
@@ -363,7 +365,77 @@ namespace Impunity.Networking
 			Disconnect();
 		}
 
-
 	}
-
 }
+
+#else
+
+using System;
+using System.Net;
+
+
+namespace Impunity.Networking
+{
+	/// <summary>Client-side TCP (and optional UDP) network transport. Connects to an Impunity server, reads framed messages on a background thread, and supports both guaranteed (TCP) and unguaranteed (UDP) sends.</summary>
+	public class ImpunityTCPClient : IImpunityNetworkClient
+	{
+		/// <inheritdoc/>
+		public string ConnectionId { get; private set; }
+
+		/// <inheritdoc/>
+		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		/// <inheritdoc/>
+		public ImpunityCallback OnNetworkError { get; set; }
+		/// <inheritdoc/>
+		public Action<int> OnDisconnectedByServer { get; set; }
+
+		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
+		public bool SupportsUnguaranteed { get; private set; } = false;
+
+
+		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>
+		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		{
+			throw new NotSupportedException("TCP Client not supported in WebGL");
+		}
+
+		/// <summary>Creates a TCP client that connects to a server at the given hostname and port.</summary>
+		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
+		{
+			throw new NotSupportedException("TCP Client not supported in WebGL");
+		}
+
+
+		/// <summary>Initiates connection on a background thread. Calls <paramref name="onComplete"/> with null on success or an error response on failure.</summary>
+		public void Connect(ImpunityCallback onComplete)
+		{
+			
+		}
+
+
+		/// <summary>Closes the TCP connection. The background reader thread will exit and fire <see cref="OnDisconnectedByServer"/>.</summary>
+		public void Disconnect()
+		{
+			
+		}
+
+		/// <summary>Sends a length-prefixed message over the TCP stream. Silently returns if not connected.</summary>
+		public void SendGuaranteedMessage(ArraySegment<byte> messageBytes)
+		{
+			
+		}
+
+		/// <summary>Sends a message via UDP if available, otherwise falls back to TCP.</summary>
+		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
+		{
+			
+		}
+
+		public void Dispose()
+		{
+			
+		}
+	}
+}
+
+#endif

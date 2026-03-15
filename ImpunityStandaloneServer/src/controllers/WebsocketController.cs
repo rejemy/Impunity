@@ -148,19 +148,27 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 					ImpunityLogger.LogError("Exception in websocket error handler", e);
 				}
 
-				await Socket.CloseAsync(
-					WebSocketCloseStatus.EndpointUnavailable,
-					"Closed",
-					CancellationToken.None);
+				if (Socket.State != WebSocketState.Closed && Socket.State != WebSocketState.Aborted)
+				{
+					await Socket.CloseAsync(
+						WebSocketCloseStatus.EndpointUnavailable,
+						"Closed",
+						CancellationToken.None);
+				}
+
 				OnDisconnected();
 				return;
 			}
 		}
 
-		await Socket.CloseAsync(
-			WebSocketCloseStatus.NormalClosure,
-			"Closed",
-			CancellationToken.None);
+		if (Socket.State != WebSocketState.Closed && Socket.State != WebSocketState.Aborted)
+		{
+			await Socket.CloseAsync(
+				WebSocketCloseStatus.NormalClosure,
+				"Closed",
+				CancellationToken.None);
+		}
+
 		OnDisconnected();
 	}
 

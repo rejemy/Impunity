@@ -1,3 +1,5 @@
+#if !UNITY_WEBGL
+
 using System;
 using System.Collections.Concurrent;
 using System.Net;
@@ -5,12 +7,10 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-
 using UltraLiteDB;
 
 namespace Impunity.Networking
 {
-
 
 	/// <summary>Discovers Impunity servers on the LAN via UDP broadcast. Sends search packets and listens for announce responses. Call <see cref="Update"/> on the main thread to receive callbacks.</summary>
 	public class ImpunityTCPServerFinder : IDisposable
@@ -182,5 +182,44 @@ namespace Impunity.Networking
 			FinderUdpSocket.Send(SearchPacket, SearchPacket.Length, broadcastEp);
 		}
 	}
-
 }
+
+#else
+
+using System;
+
+namespace Impunity.Networking
+{
+
+	public class ImpunityTCPServerFinder : IDisposable
+	{
+		public ImpunityTCPServerFinder(ImpunityOptions options, Action<ServerInfo> onServerFound)
+		{
+
+		}
+
+		/// <summary>Starts the UDP listener thread and sends the initial search broadcast.</summary>
+		public void Start()
+		{
+
+		}
+
+		public void Dispose()
+		{
+
+		}
+
+		/// <summary>Drains the notification queue and invokes the onServerFound callback for each newly discovered server. Must be called on the main thread (e.g., from Unity Update).</summary>
+		public void Update()
+		{
+
+		}
+		
+		/// <summary>Re-sends the UDP search broadcast to discover any servers that may have come online since the initial search.</summary>
+		public void Retry()
+		{
+
+		}
+	}
+}
+#endif

@@ -80,6 +80,17 @@ namespace Impunity.Connection
 			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(hostname, port, options), gameId, gamePassword, format, options, em);
 		}
 
+				/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
+		public static RemoteGameConnection MakeWebsocketRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
+		{
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
+			return new RemoteGameConnection(ImpunityWebSocketClient.MakeWebSocketClient(hostname, port, options), gameId, gamePassword, format, options, em);
+		}
+
 		public override void Connect(ImpunityCallback onComplete)
 		{
 			NetworkClient.Connect((ImpunityErrorResponse err) =>
