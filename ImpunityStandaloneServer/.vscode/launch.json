@@ -9,9 +9,20 @@
 			"type": "coreclr",
 			"request": "launch",
 			"preLaunchTask": "Build Debug",
-			"program": "${workspaceFolder}/bin/Debug/net8.0/ImpunityStandaloneServer",
+			"program": "${workspaceFolder}/bin/Debug/net10.0/ImpunityStandaloneServer",
 			"args": [],
 			"cwd": "/Users/Shared/Work/Games/Brambleville/server",
+			"stopAtEntry": false,
+			"console": "internalConsole"
+		},
+		{
+			"name": "Standalone Impunity Server (Tests)",
+			"type": "coreclr",
+			"request": "launch",
+			"preLaunchTask": "Build Debug",
+			"program": "${workspaceFolder}/bin/Debug/net10.0/ImpunityStandaloneServer",
+			"args": [],
+			"cwd": "/Users/Shared/Work/OpenSource/Impunity/ImpunityStandaloneServer",
 			"stopAtEntry": false,
 			"console": "internalConsole"
 		}

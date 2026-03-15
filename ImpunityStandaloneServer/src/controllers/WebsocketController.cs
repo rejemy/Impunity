@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net.WebSockets;
@@ -21,6 +22,10 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	private readonly ConnectionService Connections = connectionService;
 	private IPAddress RemoteIPAddress = IPAddress.Any;
 
+	private const int ConnectEstablishTimeout = 1000;
+
+	private readonly byte[] ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
+
 	public bool SupportsUnguaranteed { get => false; }
 	public string RemoteAddress { get => RemoteIPAddress.ToString(); }
 
@@ -29,7 +34,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
     public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 	public ImpunityServerErrorCallback? OnNetworkError { get; set; }
 	public ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
-	
+
 
 
     [Route("/ws")]
@@ -45,7 +50,8 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
         if (HttpContext.WebSockets.IsWebSocketRequest)
         {
             Socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
-			
+
+			this.ConnectionId = "ws_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 			Connections.NetworkServer.ClientConnected(this);
 
 			await Listen();
@@ -69,44 +75,79 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	{
 		if (Socket == null)
 		{
-			// Will never happen but makes nullable checking happy
 			return;
 		}
 
-		var buffer = new byte[ImpunityConstants.MaxMessageSize];
-		
+		int bytesBuffered = 0;
+		bool firstMessage = true;
+
 		while (!ReadCancelSource.IsCancellationRequested)
 		{
 			try
 			{
-				var receiveResult = await Socket.ReceiveAsync(new ArraySegment<byte>(buffer), ReadCancelSource.Token);
+				CancellationToken token;
+				if (firstMessage)
+				{
+					var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ReadCancelSource.Token);
+					timeoutSource.CancelAfter(ConnectEstablishTimeout);
+					token = timeoutSource.Token;
+				}
+				else
+				{
+					token = ReadCancelSource.Token;
+				}
+
+				var receiveResult = await Socket.ReceiveAsync(
+					new ArraySegment<byte>(ReceiveBuffer, bytesBuffered, ReceiveBuffer.Length - bytesBuffered),
+					token);
 
 				if (receiveResult.CloseStatus.HasValue)
 				{
 					break;
 				}
-				
-				if(!receiveResult.EndOfMessage)
+
+				bytesBuffered += receiveResult.Count;
+
+				if (!receiveResult.EndOfMessage)
 				{
-					Logger.LogInformation("Got message fragment");
+					// Fragment received — continue accumulating
+					continue;
 				}
+
+				firstMessage = false;
 
 				try
 				{
-					OnMessageRecieved?.Invoke(this, new ArraySegment<byte>(buffer, 0, receiveResult.Count));
+					OnMessageRecieved?.Invoke(this, new ArraySegment<byte>(ReceiveBuffer, 0, bytesBuffered));
 				}
 				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in websocket message handler", e);
 				}
+
+				bytesBuffered = 0;
 			}
 			catch(OperationCanceledException)
 			{
+				if (firstMessage)
+				{
+					ImpunityLogger.LogWarning("Closed connection because it took too long to send establish");
+				}
 				break;
 			}
 			catch(Exception ex)
 			{
 				Logger.LogError("Exception in websocket read: {ex}", ex.ToString());
+
+				try
+				{
+					OnNetworkError?.Invoke(this, new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, ex));
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in websocket error handler", e);
+				}
+
 				await Socket.CloseAsync(
 					WebSocketCloseStatus.EndpointUnavailable,
 					"Closed",
@@ -125,12 +166,13 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
     public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
     {
-		if (Socket == null)
+		var socket = Socket;
+		if (socket == null)
 		{
 			return Task.CompletedTask;
 		}
 
-        return Socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
+        return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
     }
 
     public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
@@ -162,5 +204,6 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 			Socket.Dispose();
 			Socket = null;
 		}
+		ReadCancelSource.Dispose();
     }
 }

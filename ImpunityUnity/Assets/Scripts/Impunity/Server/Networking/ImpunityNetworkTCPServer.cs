@@ -60,11 +60,18 @@ namespace Impunity.Networking
 			CancellationTokenSource timeoutSource = new CancellationTokenSource();
 			timeoutSource.CancelAfter(ConnectEstablishTimeout);
 
-			ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize, timeoutSource.Token)
-				.ContinueWith( t => {
-					timeoutSource.Dispose();
-					OnDataRead(t);
-				});
+			try
+			{
+				ClientStream.ReadAsync(ReceiveBuffer, 0, ImpunityConstants.MaxMessageSize, timeoutSource.Token)
+					.ContinueWith( t => {
+						timeoutSource.Dispose();
+						OnDataRead(t);
+					});
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception reading client socket: ", e);
+			}
 		}
 
 
@@ -86,17 +93,8 @@ namespace Impunity.Networking
 					return;
 				}
 
-				ImpunityLogger.LogError("Error reading socket", readTask.Exception);
-
-				try
-				{
-					OnNetworkError?.Invoke(this, new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, readTask.Exception));
-				}
-				catch(Exception e)
-				{
-					ImpunityLogger.LogError("Exception in TCP socket error handler", e);
-				}
-
+				// Else socket was disconencted by peer
+				Disconnect();
 				return;
 			}
 
@@ -118,9 +116,18 @@ namespace Impunity.Networking
 				return;
 			}
 
-			// And finish by going back to reading
-			ClientStream.ReadAsync(ReceiveBuffer, BytesReceived, ReceiveBuffer.Length - BytesReceived)
-				.ContinueWith(OnDataRead);
+			try
+			{
+				// And finish by going back to reading
+				ClientStream.ReadAsync(ReceiveBuffer, BytesReceived, ReceiveBuffer.Length - BytesReceived)
+					.ContinueWith(OnDataRead);
+			}
+			catch (Exception)
+			{
+				// Socket closed on us
+				Disconnect();
+				return;
+			}
 
 		}
 
@@ -197,7 +204,6 @@ namespace Impunity.Networking
 				ImpunityLogger.LogError("Exception closing TCP socket", e);
 			}
 			
-
 			Server.ClientDisconnected(this);
 
 			try
@@ -469,8 +475,12 @@ namespace Impunity.Networking
 
 			UdpClient socket = ServerUdpSocket;
 			ServerUdpSocket = null;
-			socket.Close();
 
+			// Send a ping to ourselves to the Udp receive will hang forever
+			socket.Send(PingPacket, PingPacket.Length, new IPEndPoint(IPAddress.Loopback, Options.ServerPort));
+			
+			socket.Close();
+			
 			UDPListenerThread.Join();
 			UDPListenerThread = null;
 		}
@@ -479,21 +489,21 @@ namespace Impunity.Networking
 		{
 			ServerUdpSocket = null;
 
-			try
+			ServerUdpSocket = new UdpClient(Options.ServerPort);
+			ServerUdpSocket.EnableBroadcast = true;
+			//ServerUdpSocket.AllowNatTraversal(true); // Breaks things, not sure why
+
+			ImpunityLogger.LogInformation("Server UDP Socket listener started");
+
+			SendServerAnnounce();
+
+			while (ServerUdpSocket != null)
 			{
-				ServerUdpSocket = new UdpClient(Options.ServerPort);
-				ServerUdpSocket.EnableBroadcast = true;
-				//ServerUdpSocket.AllowNatTraversal(true); // Breaks things, not sure why
-
-				ImpunityLogger.LogInformation("Server UDP Socket listener started");
-
-				SendServerAnnounce();
-
-				while (ServerUdpSocket != null)
+				try
 				{
 					IPEndPoint senderEndpoint = null;
 					byte[] packet = ServerUdpSocket.Receive(ref senderEndpoint);
-					//ImpunityLogger.LogInformation("Got bytes");
+					
 					if (ImpunityUtil.StartsWith(packet, SessionDataPacket))
 					{
 						var packetBody = new ArraySegment<byte>(packet, SessionDataPacket.Length, packet.Length - SessionDataPacket.Length);
@@ -516,21 +526,16 @@ namespace Impunity.Networking
 						ImpunityLogger.LogDebug("Got unknown UDP packet");
 					}
 				}
-			}
-			catch (SocketException e)
-			{
-				if (ServerUdpSocket != null)
+				catch (SocketException e)
 				{
-					ImpunityLogger.LogError("UDP Socket error:", e);
+					if (ServerUdpSocket != null)
+					{
+						ImpunityLogger.LogError("UDP Socket error:", e);
+					}
 				}
-			}
-			finally
-			{
-				if (ServerUdpSocket != null)
+				catch (Exception e)
 				{
-					ImpunityLogger.LogInformation("Server UDP Socket listener closed");
-					ServerUdpSocket.Close();
-					ServerUdpSocket = null;
+					ImpunityLogger.LogError("Got some other exception in UDP loop:", e);
 				}
 			}
 
@@ -593,7 +598,7 @@ namespace Impunity.Networking
 					ImpunityLogger.LogError("Exception sending UDP packet", e);
 				}
 			}
-			else
+			else if(sender.Address != IPAddress.Loopback)
 			{
 				ImpunityLogger.LogDebug("Got UDP ping packet from unknown source: " + sender.ToString());
 			}

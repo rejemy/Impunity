@@ -86,13 +86,16 @@ public class ImpunityTestComponent : MonoBehaviour
 			}
 		);
 
-		StartCoroutine(ComboTest());
-		//StartCoroutine(StandaloneServerTest());
+		//StartCoroutine(ComboTest());
+		StartCoroutine(StandaloneServerTest());
 	}
 
 	IEnumerator StandaloneServerTest()
 	{
 		yield return StandaloneServerTCPConnectionTest(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 29654), "world1");
+
+		TestsDone = true;
+		ImpunityLogger.LogInformation("Tests complete");
 	}
 
 	IEnumerator ComboTest()
@@ -308,6 +311,24 @@ public class ImpunityTestComponent : MonoBehaviour
 		char1["_id"] = "char1";
 		char1["name"] = "Hogstorm";
 		char1["level"] = 1;
+
+		ImpunityLogger.LogInformation("Calling DeletetDocument");
+		ImpunityYield<bool> deleteAction = connection.DeleteDocumentYield(TestCollectionTypes.CHARACTERS, "char1");
+		yield return deleteAction;
+		if (deleteAction.Error != null)
+		{
+			ImpunityLogger.LogError(deleteAction.Error.Message);
+			yield break;
+		}
+
+		ImpunityLogger.LogInformation("Calling DeletetDocument");
+		deleteAction = connection.DeleteDocumentYield(TestCollectionTypes.CHARACTERS, "char2");
+		yield return deleteAction;
+		if (deleteAction.Error != null)
+		{
+			ImpunityLogger.LogError(deleteAction.Error.Message);
+			yield break;
+		}
 
 		ImpunityLogger.LogInformation("Calling InsertDocument");
 		ImpunityYield<BsonValue> insertAction = connection.InsertDocumentYield(TestCollectionTypes.CHARACTERS, char1);

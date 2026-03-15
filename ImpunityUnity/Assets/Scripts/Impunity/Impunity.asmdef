@@ -1,11 +1,13 @@
 {
     "name": "Impunity",
     "rootNamespace": "",
-    "references": [],
+    "references": [
+        "MikeSchweitzer.WebSocket"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
-    "overrideReferences": true,
+    "overrideReferences": false,
     "precompiledReferences": [
         "UltraLiteDB.dll"
     ],

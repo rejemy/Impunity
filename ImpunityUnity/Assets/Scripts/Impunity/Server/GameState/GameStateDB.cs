@@ -260,8 +260,14 @@ namespace Impunity.GameState
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
-
-			return Collections[collectionId].Collection.Insert(doc);
+			try
+			{
+				return Collections[collectionId].Collection.Insert(doc);
+			}
+			catch(UltraLiteException e)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Insert error: " + e.Message);
+			}
 		}
 
 		/// <summary>Updates an existing document in the specified collection. Returns true if the document was found and updated.</summary>
