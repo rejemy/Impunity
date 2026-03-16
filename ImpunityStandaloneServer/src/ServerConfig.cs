@@ -29,6 +29,8 @@ public class ServerConfig
 
 	public string? logging_level { get; set; }
 
+	public string? server_hostname { get; set; }
+
 	public List<WorldConfig>? worlds { get; set; }
 
 

@@ -28,7 +28,9 @@ namespace Impunity.Connection
 		private string GamePassword;
 		private ImpunityOptions Options;
 		private IImpunityNetworkClient NetworkClient;
+#if !UNITY_WEBGL
 		private Thread NetworkWriterThread;
+#endif
 		private bool Running;
 
 		private byte[] SendBuffer;
@@ -104,11 +106,13 @@ namespace Impunity.Connection
 				}
 
 				Running = true;
+
+#if !UNITY_WEBGL
 				NetworkWriterThread = new Thread(new ThreadStart(NetworkWriterThreadMain));
 				NetworkWriterThread.IsBackground = true;
 				NetworkWriterThread.Name = "Network writer";
 				NetworkWriterThread.Start();
-
+#endif
 				EstablishConnection(GameId, GamePassword, LocalFormat, onComplete);
 			});
 		}
@@ -122,7 +126,7 @@ namespace Impunity.Connection
 		}
 
 		
-
+#if !UNITY_WEBGL
 		private void NetworkWriterThreadMain()
 		{
 
@@ -150,9 +154,35 @@ namespace Impunity.Connection
 				}
 			}
 		}
+#else
+		private void SendPendingMessages()
+		{
+			if (!Running)
+			{
+				return;
+			}
+
+			while(PendingSend.Count > 0)
+			{
+				GameStateActionBase action = PendingSend.Take();
+				try
+				{
+					SendMessage(action);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in remote connection send attempt", e);
+				}
+			}
+
+		}
+#endif
 
 		public override void Update()
 		{
+#if UNITY_WEBGL
+			SendPendingMessages();
+#endif
 			var tooOld = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(this.Options.ActionTimeoutMillis);
 
 			while (AwaitingReceive.TryPeek(out var pendingAction))
@@ -226,7 +256,9 @@ namespace Impunity.Connection
 		// On dotnet internal socket thread
 		private void OnNetworkErrorReceived(ImpunityErrorResponse error)
 		{
-			CompletedActions.Enqueue(new NoOpAction(OnNetworkError));
+			var errorAction = new NoOpAction(OnNetworkError);
+			errorAction.Error = error;
+			CompletedActions.Enqueue(errorAction);
 		}
 
 		private void OnDisconnectedByServer(int reason)

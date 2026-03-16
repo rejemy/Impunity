@@ -22,7 +22,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	private readonly ConnectionService Connections = connectionService;
 	private IPAddress RemoteIPAddress = IPAddress.Any;
 
-	private const int ConnectEstablishTimeout = 1000;
+	private const int ConnectEstablishTimeout = 2500;
 
 	private readonly byte[] ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 

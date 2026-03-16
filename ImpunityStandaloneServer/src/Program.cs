@@ -116,6 +116,19 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 
 builder.Environment.ApplicationName = "ImpunityStandaloneServer";
 
+if (config.server_hostname != null)
+{
+	builder.Services.AddCors(options =>
+	{
+		options.AddDefaultPolicy(
+			policy =>
+			{
+				policy.WithOrigins("http://"+config.server_hostname,
+									"https://"+config.server_hostname);
+			});
+	});
+}
+
 WebApplication app = builder.Build();
 app.UseWebSockets();
 
@@ -125,6 +138,11 @@ WebSocketOptions webSocketOptions = new()
 };
 
 app.Urls.Add("http://*:" + config.http_port);
+
+if (config.server_hostname != null)
+{
+	app.UseCors();
+}
 
 app.UseWebSockets(webSocketOptions);
 

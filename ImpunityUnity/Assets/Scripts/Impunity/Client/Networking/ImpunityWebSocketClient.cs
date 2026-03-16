@@ -1,13 +1,11 @@
 #if UNITY_WEBGL && !UNITY_EDITOR
 using System;
-
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using AOT;
 
 namespace Impunity.Networking
 {
-
-	using System.Collections.Generic;
-	using System.Runtime.InteropServices;
-	using AOT;
 
 	/// <summary>Client-side WebSocket network transport for WebGL platform.
 	/// Uses JavaScript WebSocket via jslib interop. All callbacks fire on the main thread.</summary>
@@ -37,8 +35,9 @@ namespace Impunity.Networking
 
 
 		/// <summary>Creates a WebSocket client that connects to a server at the given URL (e.g. ws://host:port/ws).</summary>
-		public static IImpunityNetworkClient MakeWebSocketClient(string url, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions options = null)
 		{
+			string url = $"ws://{host}:{port}/ws";
 			return new ImpunityWebSocketClient(url, options);
 		}
 
@@ -260,6 +259,8 @@ namespace Impunity.Networking
 using System;
 using System.Net.WebSockets;
 using System.Threading;
+using System.Threading.Tasks;
+using JetBrains.Annotations;
 
 namespace Impunity.Networking
 {
@@ -313,21 +314,35 @@ namespace Impunity.Networking
 			OnConnectCallback = onComplete;
 			CancelSource = new CancellationTokenSource();
 
-			SocketThread = new Thread(new ThreadStart(WebSocketListenerThread));
+			SocketThread = new Thread(new ThreadStart(WebSocketListenerThreadMain));
 			SocketThread.IsBackground = true;
 			SocketThread.Name = "WebSocketClient reader";
 			SocketThread.Start();
 		}
 
-		private void WebSocketListenerThread()
+		private void WebSocketListenerThreadMain()
 		{
+			try
+			{
+				WebSocketListener().Wait();
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Error in websocket listener thread: ", e);
+			}
+		}
+
+		private async Task WebSocketListener()
+		{
+			ImpunityLogger.LogInformation("Started websock listener thread");
+
 			byte[] receiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			bool connected = false;
 
 			try
 			{
 				Socket = new ClientWebSocket();
-				Socket.ConnectAsync(new Uri(Url), CancelSource.Token).Wait();
+				await Socket.ConnectAsync(new Uri(Url), CancelSource.Token);
 
 				connected = true;
 				OnConnectCallback?.Invoke(null);
@@ -338,7 +353,7 @@ namespace Impunity.Networking
 				while (Socket.State == WebSocketState.Open)
 				{
 					var segment = new ArraySegment<byte>(receiveBuffer, bytesReceived, receiveBuffer.Length - bytesReceived);
-					var result = Socket.ReceiveAsync(segment, CancelSource.Token).Result;
+					var result = await Socket.ReceiveAsync(segment, CancelSource.Token);
 
 					if (result.CloseStatus.HasValue)
 					{

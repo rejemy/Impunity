@@ -9,8 +9,10 @@ mkdir -p ../bin/Runtime/Release
 cp bin/Release/netstandard2.1/Impunity.dll ../bin/Runtime/Release
 cp bin/Release/netstandard2.1/Impunity.pdb ../bin/Runtime/Release
 cp bin/Release/netstandard2.1/Impunity.xml ../bin/Runtime/Release
+cp ImpunityUnity/Assets/Plugins/ImpunityWebSocket.jslib ../bin/Runtime/Release
 
 mkdir -p ../bin/Runtime/Debug
 cp bin/Debug/netstandard2.1/Impunity.dll ../bin/Runtime/Debug
 cp bin/Debug/netstandard2.1/Impunity.pdb ../bin/Runtime/Debug
 cp bin/Debug/netstandard2.1/Impunity.xml ../bin/Runtime/Debug
+cp ImpunityUnity/Assets/Plugins/ImpunityWebSocket.jslib ../bin/Runtime/Debug
