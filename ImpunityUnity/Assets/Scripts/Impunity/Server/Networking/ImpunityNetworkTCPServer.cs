@@ -394,8 +394,14 @@ namespace Impunity.Networking
 			{
 				ImpunityLogger.LogInformation("Server TCP Socket listener started");
 
-				while (TCPSocket != null)
+				while (TCPSocket != null && !ImpunityLifecycle.ShuttingDown)
 				{
+					if (!TCPSocket.Pending())
+					{
+						Thread.Sleep(100);
+						continue;
+					}
+
 					TcpClient client = TCPSocket.AcceptTcpClient();
 
 					string connectionId = "tcp_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
@@ -497,10 +503,15 @@ namespace Impunity.Networking
 
 			SendServerAnnounce();
 
-			while (ServerUdpSocket != null)
+			while (ServerUdpSocket != null && !ImpunityLifecycle.ShuttingDown)
 			{
 				try
 				{
+					if (!ServerUdpSocket.Client.Poll(1_000_000, SelectMode.SelectRead))
+					{
+						continue;
+					}
+
 					IPEndPoint senderEndpoint = null;
 					byte[] packet = ServerUdpSocket.Receive(ref senderEndpoint);
 					

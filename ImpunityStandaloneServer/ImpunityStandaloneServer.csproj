@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/Server/**/*.cs" />
+    <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/ImpunityLifecycle.cs" />
   </ItemGroup>
 
 </Project>

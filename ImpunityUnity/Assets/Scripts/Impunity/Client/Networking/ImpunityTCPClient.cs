@@ -139,6 +139,7 @@ namespace Impunity.Networking
 				}
 
 				ServerEndpoint = ClientTCPSocket.Client.RemoteEndPoint as IPEndPoint;
+				ClientTCPSocket.Client.ReceiveTimeout = 1000;
 				TCPSocketStream = ClientTCPSocket.GetStream();
 
 				// Open Udp socket on the same port as the TCP connection
@@ -150,9 +151,18 @@ namespace Impunity.Networking
 
 				int bytesReceived = 0;
 
-				while (ClientTCPSocket != null)
+				while (ClientTCPSocket != null && !ImpunityLifecycle.ShuttingDown)
 				{
-					int bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, receiveBuffer.Length - bytesReceived);
+					int bytesRead;
+					try
+					{
+						bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, receiveBuffer.Length - bytesReceived);
+					}
+					catch (System.IO.IOException ex) when (ex.InnerException is SocketException se && se.SocketErrorCode == SocketError.TimedOut)
+					{
+						continue;
+					}
+
 					if (bytesRead == 0)
 					{
 						// Socket closed
@@ -250,8 +260,13 @@ namespace Impunity.Networking
 				// See if we can reach the server and vice versa
 				SendUdpPing();
 
-				while (ClientUDPSocket != null)
+				while (ClientUDPSocket != null && !ImpunityLifecycle.ShuttingDown)
 				{
+					if (!ClientUDPSocket.Client.Poll(1_000_000, SelectMode.SelectRead))
+					{
+						continue;
+					}
+
 					IPEndPoint sender = null;
 					byte[] packet = ClientUDPSocket.Receive(ref sender);
 					if (!sender.Equals(ServerEndpoint))

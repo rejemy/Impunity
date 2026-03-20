@@ -15,6 +15,8 @@ namespace Impunity.Networking
 	/// <summary>Discovers Impunity servers on the LAN via UDP broadcast. Sends search packets and listens for announce responses. Call <see cref="Update"/> on the main thread to receive callbacks.</summary>
 	public class ImpunityTCPServerFinder : IDisposable
 	{
+		private static ImpunityTCPServerFinder Instance;
+
 		ImpunityOptions Options;
 		Thread UDPListenerThread;
 		UdpClient FinderUdpSocket;
@@ -32,6 +34,12 @@ namespace Impunity.Networking
 		/// <summary>Creates a server finder. The <paramref name="onServerFound"/> callback is invoked on the main thread via <see cref="Update"/>.</summary>
 		public ImpunityTCPServerFinder(ImpunityOptions options, Action<ServerInfo> onServerFound)
 		{
+			if (Instance != null)
+			{
+				Instance.Dispose();
+				Instance = null;
+			}
+
 			Options = options;
 			OnServerFoundCallback = onServerFound;
 
@@ -41,6 +49,8 @@ namespace Impunity.Networking
 			NotificationQueue = new ConcurrentQueue<ServerInfo>();
 
 			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
+
+			Instance = this;
 		}
 
 		/// <summary>Starts the UDP listener thread and sends the initial search broadcast.</summary>
@@ -51,6 +61,15 @@ namespace Impunity.Networking
 			UDPListenerThread.IsBackground = true;
 			UDPListenerThread.Name = "Server Finder UDP";
 			UDPListenerThread.Start();
+		}
+
+		public static void Cleanup()
+		{
+			if (Instance != null)
+			{
+				Instance.Dispose();
+				Instance = null;
+			}
 		}
 
 		public void Dispose()
@@ -96,8 +115,13 @@ namespace Impunity.Networking
 				
 				SendServerSearch();
 
-				while (Running)
+				while (Running && !ImpunityLifecycle.ShuttingDown)
 				{
+					if (!FinderUdpSocket.Client.Poll(1_000_000, SelectMode.SelectRead))
+					{
+						continue;
+					}
+
 					IPEndPoint groupEP = null;
 					byte[] packet = FinderUdpSocket.Receive(ref groupEP);
 					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))
@@ -200,6 +224,11 @@ namespace Impunity.Networking
 
 		/// <summary>Starts the UDP listener thread and sends the initial search broadcast.</summary>
 		public void Start()
+		{
+
+		}
+
+		public static void Cleanup()
 		{
 
 		}
