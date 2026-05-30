@@ -122,6 +122,11 @@ namespace Impunity.Networking
 						continue;
 					}
 
+					if (FinderUdpSocket == null)
+					{
+						break;
+					}
+
 					IPEndPoint groupEP = null;
 					byte[] packet = FinderUdpSocket.Receive(ref groupEP);
 					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))

@@ -1,10 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.IO;
+
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System.IO;
-using System;
 
 namespace SourceGenerator
 {
@@ -30,10 +31,10 @@ namespace SourceGenerator
 	public class DistributedClassInfo
 	{
 		public string ClassName { get; set; }
-		public string Namespace { get; set; }
+		public string? Namespace { get; set; }
 		public List<DistributedPropertyInfo> Properties { get; set; }
 
-		public DistributedClassInfo(string name, string nspace)
+		public DistributedClassInfo(string name, string? nspace)
 		{
 			ClassName = name;
 			Namespace = nspace;
@@ -55,8 +56,8 @@ namespace SourceGenerator
 		public static StringBuilder Output = new StringBuilder();
 		public static StringBuilder Info = new StringBuilder();
 		
-		public List<DistributedClassInfo> DistributedClasses;
-		public string SourceBasePath;
+		public List<DistributedClassInfo> DistributedClasses = new List<DistributedClassInfo>();
+		public string? SourceBasePath;
 
 		public void Initialize(GeneratorInitializationContext context)
 		{
@@ -65,7 +66,7 @@ namespace SourceGenerator
 
 		private void LogNode(SyntaxNode node, string indent)
 		{
-			string summary="";
+			string summary = "";
 			if (node is ClassDeclarationSyntax cds)
 			{
 				summary = cds.Identifier.Text;
@@ -101,12 +102,16 @@ namespace SourceGenerator
 
 		public void Execute(GeneratorExecutionContext context)
 		{
+			if (context.Compilation.AssemblyName == null)
+			{
+				throw new Exception("Must have an assembly name or this can't work");
+			}
+
 			if (IgnoreAssemblies.Contains(context.Compilation.AssemblyName))
 			{
 				return;
 			}
 
-			DistributedClasses = new List<DistributedClassInfo>();
 			SourceBasePath = null;
 			Output.Clear();
 			Info.Clear();
@@ -178,7 +183,7 @@ namespace SourceGenerator
 			Output.AppendLine("using System.Collections.Generic;");
 			Output.AppendLine("using System.IO;");
 			
-			string currentNamespace = null;
+			string? currentNamespace = null;
 			foreach(DistributedClassInfo classInfo in DistributedClasses)
 			{
 				if (classInfo.Namespace != currentNamespace)
@@ -297,7 +302,7 @@ namespace SourceGenerator
 
 		private void AnalyseDistributedClass(GeneratorExecutionContext context, ClassDeclarationSyntax cd)
 		{
-			string classNamespace = GetNamespace(cd);
+			string? classNamespace = GetNamespace(cd);
 
 			DistributedClassInfo classInfo = new DistributedClassInfo(cd.Identifier.Text, classNamespace);
 
@@ -319,12 +324,12 @@ namespace SourceGenerator
 
 		private void AnalyseDistributedField(GeneratorExecutionContext context, FieldDeclarationSyntax fd, AttributeSyntax attr, DistributedClassInfo classInfo)
 		{
-			string distributedPropertyId = null;
+			string? distributedPropertyId = null;
 
 			var distributeArguments = attr.DescendantNodes().OfType<AttributeArgumentSyntax>();
 			foreach (AttributeArgumentSyntax argSyntax in distributeArguments)
 			{
-				string argName = null;
+				string? argName = null;
 				if (argSyntax.NameEquals != null)
 				{
 					IdentifierNameSyntax argIdentifier = argSyntax.NameEquals.ChildNodes().OfType<IdentifierNameSyntax>().FirstOrDefault();
@@ -334,13 +339,20 @@ namespace SourceGenerator
 					}
 				}
 
-				string argValue = argSyntax.Expression?.ToString();
+				string? argValue = argSyntax.Expression?.ToString();
 
 				if (argName == null)
 				{
 					// propertyId
 					distributedPropertyId = argValue;
 				}
+			}
+
+			if (distributedPropertyId == null)
+			{
+				var msg = new DiagnosticDescriptor("IMP2", "Missing distributed property id", "Distributed property must have an id", "Mismatch", DiagnosticSeverity.Error, true);
+				context.ReportDiagnostic(Diagnostic.Create(msg, distributeArguments.First().GetLocation()));
+				return;
 			}
 
 			VariableDeclarationSyntax vd = fd.ChildNodes().OfType<VariableDeclarationSyntax>().First();
@@ -391,15 +403,15 @@ namespace SourceGenerator
 		}
 
 		// determine the namespace the class/enum/struct is declared in, if any
-		static string GetNamespace(BaseTypeDeclarationSyntax syntax)
+		static string? GetNamespace(BaseTypeDeclarationSyntax syntax)
 		{
 			// If we don't have a namespace at all we'll return an empty string
 			// This accounts for the "default namespace" case
-			string nameSpace = null;
+			string? nameSpace = null;
 
 			// Get the containing syntax node for the type declaration
 			// (could be a nested type, for example)
-			SyntaxNode potentialNamespaceParent = syntax.Parent;
+			SyntaxNode? potentialNamespaceParent = syntax.Parent;
 
 			// Keep moving "out" of nested classes etc until we get to a namespace
 			// or until we run out of parents

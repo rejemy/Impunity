@@ -512,6 +512,11 @@ namespace Impunity.Networking
 						continue;
 					}
 
+					if (ServerUdpSocket == null)
+					{
+						break;
+					}
+
 					IPEndPoint senderEndpoint = null;
 					byte[] packet = ServerUdpSocket.Receive(ref senderEndpoint);
 					

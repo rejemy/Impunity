@@ -637,7 +637,8 @@
         </member>
         <member name="M:UltraLiteDB.BsonFields.#ctor(System.String)">
             <summary>
-            Creates a field extractor for the specified field name.
+            Creates a field extractor for the specified field name. A null field matches nothing
+            (used by degenerate queries such as <see cref="T:UltraLiteDB.QueryEmpty"/>).
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonFields.Execute(UltraLiteDB.BsonDocument,System.Boolean)">
@@ -681,6 +682,8 @@
         <member name="P:UltraLiteDB.BsonValue.RawValue">
             <summary>
             Gets the underlying .NET value (e.g. int, string, Dictionary, List).
+            Null only for the <see cref="F:UltraLiteDB.BsonType.Null"/>/sentinel types; always accessed
+            through the type-guarded As* accessors, so it is treated as non-nullable.
             </summary>
         </member>
         <member name="M:UltraLiteDB.BsonValue.FromObject(System.Object)">
@@ -1462,15 +1465,32 @@
             <param name="addIfNotExits">If <c>true</c>, creates the collection when it does not exist.</param>
             <returns>The <see cref="T:UltraLiteDB.CollectionPage"/>, or <c>null</c> if not found and <paramref name="addIfNotExits"/> is <c>false</c>.</returns>
         </member>
-        <member name="M:UltraLiteDB.UltraLiteEngine.Transaction``1(System.String,System.Boolean,System.Func{UltraLiteDB.CollectionPage,``0})">
+        <member name="M:UltraLiteDB.UltraLiteEngine.GetOrAddCollectionPage(System.String)">
+            <summary>
+            Retrieves the <see cref="T:UltraLiteDB.CollectionPage"/> for the given collection name, creating the collection if it
+            does not yet exist. Never returns <c>null</c>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.Transaction``1(System.Func{``0})">
             <summary>
             Executes an operation within a write transaction. Persists dirty pages on success or discards them on failure.
             </summary>
             <typeparam name="T">The return type of the operation.</typeparam>
-            <param name="collection">The collection name to operate on.</param>
-            <param name="addIfNotExists">If <c>true</c>, creates the collection when it does not exist.</param>
-            <param name="action">The action to execute, receiving the <see cref="T:UltraLiteDB.CollectionPage"/> (may be <c>null</c>).</param>
+            <param name="action">The operation to execute.</param>
             <returns>The result of the <paramref name="action"/>.</returns>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.Transaction``1(System.String,System.Func{UltraLiteDB.CollectionPage,``0})">
+            <summary>
+            Executes an operation against an existing collection (read/optional path). The <see cref="T:UltraLiteDB.CollectionPage"/>
+            passed to <paramref name="action"/> is <c>null</c> when the collection does not exist, or for
+            database-level operations where <paramref name="collection"/> is <c>null</c>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.UltraLiteEngine.WriteTransaction``1(System.String,System.Func{UltraLiteDB.CollectionPage,``0})">
+            <summary>
+            Executes a write operation against a collection, creating it if it does not exist. The
+            <see cref="T:UltraLiteDB.CollectionPage"/> passed to <paramref name="action"/> is always non-null.
+            </summary>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.Dispose">
             <summary>
@@ -2312,6 +2332,13 @@
         <member name="M:UltraLiteDB.IndexService.GetNode(UltraLiteDB.PageAddress)">
             <summary>
             Retrieves an <see cref="T:UltraLiteDB.IndexNode"/> by its <see cref="T:UltraLiteDB.PageAddress"/>. Returns null if the address is empty.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IndexService.GetExistingNode(UltraLiteDB.PageAddress)">
+            <summary>
+            Retrieves an <see cref="T:UltraLiteDB.IndexNode"/> that is required to exist: a skip-list sentinel, or an
+            address already verified non-empty by the caller. Throws if the node is missing, surfacing
+            index corruption as a diagnosable error rather than a <see cref="T:System.NullReferenceException"/>.
             </summary>
         </member>
         <member name="M:UltraLiteDB.IndexService.FlipCoin">
@@ -3483,9 +3510,14 @@
             Get free index based on dictionary count number (if is in use, move to next number)
             </summary>
         </member>
+        <member name="M:UltraLiteDB.DictionaryExtensions.GetOrDefault``2(System.Collections.Generic.IDictionary{``0,``1},``0)">
+            <summary>
+            Returns the value for the given key, or <c>null</c>/<c>default</c> if the key is not present.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.DictionaryExtensions.GetOrDefault``2(System.Collections.Generic.IDictionary{``0,``1},``0,``1)">
             <summary>
-            Returns the value for the given key, or a default value if the key is not present.
+            Returns the value for the given key, or the supplied default if the key is not present.
             </summary>
         </member>
         <member name="M:UltraLiteDB.DictionaryExtensions.ParseKeyValue(System.Collections.Generic.IDictionary{System.String,System.String},System.String)">

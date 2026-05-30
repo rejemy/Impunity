@@ -86,8 +86,8 @@ public class ImpunityTestComponent : MonoBehaviour
 			}
 		);
 
-		//StartCoroutine(ComboTest());
-		StartCoroutine(StandaloneServerTest());
+		StartCoroutine(ComboTest());
+		//StartCoroutine(StandaloneServerTest());
 	}
 
 	IEnumerator StandaloneServerTest()

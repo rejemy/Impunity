@@ -1,9 +1,7 @@
 {
     "name": "Impunity",
     "rootNamespace": "",
-    "references": [
-        "MikeSchweitzer.WebSocket"
-    ],
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
