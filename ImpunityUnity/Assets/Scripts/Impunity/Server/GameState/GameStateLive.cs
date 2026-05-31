@@ -50,6 +50,7 @@ namespace Impunity.GameState
 		public void Cleanup()
 		{
 			Dictionary<uint, GameStateEntity> locked = LocksHeld;
+			LocksHeld = null!;
 			foreach (GameStateEntity entity in locked.Values)
 			{
 				entity.TryUnlock(this);
@@ -57,6 +58,7 @@ namespace Impunity.GameState
 			locked.Clear();
 
 			Dictionary<uint, GameStateEntity> ephemerals = EphemeralEntities;
+			EphemeralEntities = null!;
 			foreach (GameStateEntity entity in ephemerals.Values)
 			{
 				entity.Destroy(null);
