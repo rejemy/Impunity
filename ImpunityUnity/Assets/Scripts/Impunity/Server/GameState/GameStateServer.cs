@@ -85,7 +85,7 @@ namespace Impunity.GameState
 		{
 			GameStateReplicant replicant = Origin.ConnectionReplicant;
 			game.Live.RemoveGameStateReplicant(replicant);
-			Origin.ConnectionReplicant = null;
+			Origin.ConnectionReplicant = null!;
 		}
 	}
 

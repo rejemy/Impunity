@@ -159,7 +159,7 @@ namespace Impunity.GameState
 	public class EstablishConnectionAction : ClientActionResultBase<EstablishConnectResult>
 	{
 		[BsonField("gid")]
-		public string? GameId;
+		public string? GameId = null!;
 
 		[BsonField("pw")]
 		public string? PasswordHash;
@@ -678,7 +678,7 @@ namespace Impunity.GameState
 			SubscribeToChannelAction(game);
 		}
 
-		public void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse error, GameStateChannel loadedChannel)
+		public void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse? error, GameStateChannel loadedChannel)
 		{
 			AwaitingTask = false;
 

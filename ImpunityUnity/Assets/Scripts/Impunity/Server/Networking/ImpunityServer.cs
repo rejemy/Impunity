@@ -29,7 +29,7 @@ namespace Impunity.Networking
 	{
 		IImpunityNetworkServerClientContext ClientContext;
 		ImpunityServer NetworkServer;
-		GameStateServer GameServer;
+		GameStateServer? GameServer;
 
 		byte[] SendBuffer;
 		ByteWriter SendBufferWriter;
@@ -38,9 +38,9 @@ namespace Impunity.Networking
 		/// <summary>Server-assigned unique ID for this connection.</summary>
 		public string ConnectionId { get => ClientContext.ConnectionId; }
 		/// <summary>Client-provided or auto-generated key for reconnection.</summary>
-		public string ConnectionKey { get; set; }
+		public string ConnectionKey { get; set; } = null!;
 		/// <summary>The replicant state tracker for this connection's subscribed entities.</summary>
-		public GameStateReplicant ConnectionReplicant { get; set; }
+		public GameStateReplicant ConnectionReplicant { get; set; } = null!;
 
 		/// <summary>Always true for network connections.</summary>
 		public bool IsRemote { get { return true; } }
@@ -236,7 +236,6 @@ namespace Impunity.Networking
 			if (SendLock != null)
 			{
 				SendLock.Dispose();
-				SendLock = null;
 			}
 
 			if (ClientContext != null)
@@ -260,11 +259,11 @@ namespace Impunity.Networking
 
 		BlockingCollection<GameStateActionBase> PendingWrite;
 
-		Thread NetworkWriterThread;
+		Thread? NetworkWriterThread;
 		bool Running;
 
 		/// <summary>The local TCP endpoint the server is listening on.</summary>
-		public IPEndPoint TCPEndpoint { get; private set; }
+		public IPEndPoint TCPEndpoint { get; private set; } = null!;
 
 		/// <summary>Number of currently connected clients.</summary>
 		public int NumConnections { get {return ClientsByConnectionId.Count; }}
@@ -275,17 +274,12 @@ namespace Impunity.Networking
 
 		public ImpunityServer(IEnumerable<GameStateServer> gameStates, ImpunityOptions options)
 		{
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
-
 			ClientsByConnectionId = new ConcurrentDictionary<string, ServerSideNetworkConnectionProxy>();
 			GameServers = new Dictionary<string, GameStateServer>();
 
-			Options = options;
+			Options = options ?? new ImpunityOptions();
 
-			TCPServer =  new ImpunityTCPServer(options);
+			TCPServer =  new ImpunityTCPServer(Options);
 			TCPServer.OnClientConnected = ClientConnected;
 			
 			PendingWrite = new BlockingCollection<GameStateActionBase>();
@@ -318,15 +312,23 @@ namespace Impunity.Networking
 		}
 
 		/// <summary>Returns the game state server for the given game ID. If gameId is null and there's only one game, returns that one.</summary>
-		public GameStateServer GetGameStateServer(string gameId)
+		public GameStateServer? GetGameStateServer(string? gameId)
 		{
-			if (gameId == null && GameServers.Count == 1)
+			if (gameId == null)
 			{
-				// if there's only a single game, return it
-				using (var enumerator = GameServers.Values.GetEnumerator())
+				if (GameServers.Count == 1)
 				{
-					enumerator.MoveNext();
-					return enumerator.Current;
+					// if there's only a single game, return it
+					using (var enumerator = GameServers.Values.GetEnumerator())
+					{
+						enumerator.MoveNext();
+						return enumerator.Current;
+					}
+				}
+				else
+				{
+					// Don't know which one to pick
+					return null;
 				}
 			}
 
@@ -374,7 +376,6 @@ namespace Impunity.Networking
 			}
 
 			PendingWrite.Dispose();
-			PendingWrite = null;
 		}
 
 		private void SendActionResults(GameStateActionBase action)
@@ -431,12 +432,10 @@ namespace Impunity.Networking
 		public void Dispose()
 		{
 			TCPServer.Dispose();
-			TCPServer = null;
 
 			Running = false;
 			PendingWrite?.CompleteAdding();
 			NetworkWriterThread?.Join();
-			NetworkWriterThread = null;
 
 			foreach(GameStateServer game in GameServers.Values)
 			{

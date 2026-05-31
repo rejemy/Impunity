@@ -380,7 +380,7 @@ namespace Impunity.GameState
 			return collection.Collection.Exists(Query.EQ("_id", entityId));
 		}
 
-		public void CreateLiveEntity(string entityId, string channelName, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
+		public void CreateLiveEntity(string entityId, string channelName, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
@@ -444,8 +444,10 @@ namespace Impunity.GameState
 				return null;
 			}
 
-			LiveChannelData channelData = null;
-			Dictionary<string, LiveEntityData> loadedEntities = null;
+			// Can't tell if an enumerable is empty without enumerating it, so we lazy init
+			// if it turns out to be non-empty
+			LiveChannelData channelData = null!;
+			Dictionary<string, LiveEntityData> loadedEntities = null!;
 
 			foreach(BsonDocument entDoc in propertyRows)
 			{
@@ -461,7 +463,7 @@ namespace Impunity.GameState
 				{
 					// Entity metdata record
 
-					LiveEntityData entData = null;
+					LiveEntityData? entData = null;
 					if (rowId == channelName)
 					{
 						entData = channelData;

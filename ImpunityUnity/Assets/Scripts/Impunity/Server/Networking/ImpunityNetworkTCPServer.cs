@@ -319,7 +319,7 @@ namespace Impunity.Networking
 		}
 
 		/// <summary>Updates the game summary for a world and rebuilds its announce packet. Called on the live thread.</summary>
-		public void SetGameSummary(string gameId, BsonDocument summary)
+		public void SetGameSummary(string gameId, BsonDocument? summary)
 		{
 			// Make copy so we can edit it without it being accessed by another thread
 			PerGameTCPServerData tcpGameData = PerGameData[gameId].Clone();

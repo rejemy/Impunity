@@ -397,7 +397,7 @@ namespace Impunity.Connection
 			}
 			else
 			{
-				return null;
+				return null!; // null is a valid value for this type
 			}
 		}
 
@@ -436,7 +436,7 @@ namespace Impunity.Connection
 			}
 			else
 			{
-				return null;
+				return null!; // null is a valid value for this type
 			}
 		}
 

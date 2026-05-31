@@ -14,7 +14,7 @@ namespace Impunity.GameState
 
 		public string Name = null!;
 
-		public string PersistedAs = null!;
+		public string? PersistedAs = null!;
 
 		public GameStateEntityPropertyDef[] PackedProperties = null!;
 		public GameStateEntityPropertyDef[] PropertyIndexLookup = null!;
@@ -27,7 +27,7 @@ namespace Impunity.GameState
 		/// <summary>The connection this replicant belongs to.</summary>
 		public IServerSideConnectionProxy ConnectionProxy;
 		/// <summary>Entities currently locked by this connection, keyed by entity ID.</summary>
-		public Dictionary<uint, GameStateEntity>? LocksHeld;
+		public Dictionary<uint, GameStateEntity> LocksHeld;
 		/// <summary>Ephemeral entities owned by this connection (destroyed on disconnect).</summary>
 		public Dictionary<uint, GameStateEntity> EphemeralEntities;
 		/// <summary>Channels this connection is subscribed to, keyed by channel entity ID.</summary>
@@ -50,7 +50,6 @@ namespace Impunity.GameState
 		public void Cleanup()
 		{
 			Dictionary<uint, GameStateEntity> locked = LocksHeld;
-			LocksHeld = null;
 			foreach (GameStateEntity entity in locked.Values)
 			{
 				entity.TryUnlock(this);
@@ -58,7 +57,6 @@ namespace Impunity.GameState
 			locked.Clear();
 
 			Dictionary<uint, GameStateEntity> ephemerals = EphemeralEntities;
-			EphemeralEntities = null;
 			foreach (GameStateEntity entity in ephemerals.Values)
 			{
 				entity.Destroy(null);
@@ -126,7 +124,7 @@ namespace Impunity.GameState
 		public string? Name { get; private set; }
 		protected ImpunityInstanceFlags Flags;
 		public byte FlagByte { get { return (byte)Flags; } }
-		public abstract string ChannelName { get; }
+		public abstract string? ChannelName { get; }
 		public bool InLoadingState { get; protected set; } = false;
 
 		protected GameStateLive LiveData;
@@ -247,13 +245,13 @@ namespace Impunity.GameState
 		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
 						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
-			if (propData == null || propData.Count == 0)
+			if (propData == null || propData.Count == 0 || TypeInfo == null)
 			{
 				persistedProps = null;
 				return;
 			}
 
-			List<LiveEntityPersistedPropertyData> persistedPropsSoFar = null;
+			List<LiveEntityPersistedPropertyData>? persistedPropsSoFar = null;
 			var propLookup = TypeInfo.PropertyIndexLookup;
 
 			long currTime = GameStateServer.GetServerTime();
@@ -296,7 +294,7 @@ namespace Impunity.GameState
 						persistedPropsSoFar = new List<LiveEntityPersistedPropertyData>();
 					}
 
-					persistedPropsSoFar.Add(new LiveEntityPersistedPropertyData(propInfo.PersistedAs, Properties[propId].AsBsonValue()));
+					persistedPropsSoFar.Add(new LiveEntityPersistedPropertyData(propInfo.PersistedAs, Properties[propId].AsBsonValue()!));
 				}
 			}
 
@@ -305,7 +303,7 @@ namespace Impunity.GameState
 
 		public void SetPersistedProps(List<LiveEntityPersistedPropertyData> props)
 		{
-			if (props == null)
+			if (props == null || TypeInfo == null)
 			{
 				return;
 			}
@@ -390,7 +388,7 @@ namespace Impunity.GameState
 		public override string ChannelName { get { return Name!; } }
 		Dictionary<string, GameStateObject> UniqueNames;
 
-		public GameStateChannel(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string name)
+		public GameStateChannel(GameStateLive liveData, GameStateEntityType? typeInfo, byte instanceFlags, string name)
 			: base(liveData, typeInfo, instanceFlags, name)
 		{
 			Members = new Dictionary<uint, GameStateObject>();
@@ -415,7 +413,7 @@ namespace Impunity.GameState
 
 			ChannelCreateMessageAction channelCreate = new ChannelCreateMessageAction();
 			channelCreate.ChannelId = Id;
-			channelCreate.ChannelName = Name;
+			channelCreate.ChannelName = ChannelName;
 			channelCreate.ChannelType = TypeInfo != null ? TypeInfo.Index : 0;
 			channelCreate.IsLocked = IsLocked();
 			channelCreate.InstanceFlags = (byte)Flags;
@@ -556,7 +554,7 @@ namespace Impunity.GameState
 
 	public interface GameStateChannelLoadListener
 	{
-		void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse error, GameStateChannel loadedChannel);
+		void OnChannelLoaded(GameStateServer game, ImpunityErrorResponse? error, GameStateChannel loadedChannel);
 	}
 
 	public class GameStateChannelLoadProxy : GameStateEntity
@@ -601,7 +599,7 @@ namespace Impunity.GameState
 			CreateObjects = objects;
 		}
 
-		public void OnDataLoaded(ImpunityErrorResponse error, LiveChannelData channelData)
+		public void OnDataLoaded(ImpunityErrorResponse? error, LiveChannelData channelData)
 		{
 			if (error == null && channelData == null && !CreateIfMissing)
 			{
@@ -615,7 +613,7 @@ namespace Impunity.GameState
 				{
 					try
 					{
-						listener.OnChannelLoaded(LiveData.Server, error, null);
+						listener.OnChannelLoaded(LiveData.Server, error, null!);
 					}
 					catch(Exception e)
 					{
@@ -630,8 +628,8 @@ namespace Impunity.GameState
 				return;
 			}
 
-			GameStateChannel channel = null;
-			ImpunityErrorResponse createError = null;
+			GameStateChannel? channel = null;
+			ImpunityErrorResponse? createError = null;
 			try
 			{
 				if (channelData != null)
@@ -656,7 +654,7 @@ namespace Impunity.GameState
 			{
 				try
 				{
-					listener.OnChannelLoaded(LiveData.Server, createError, channel);
+					listener.OnChannelLoaded(LiveData.Server, createError, channel!);
 				}
 				catch (Exception e)
 				{
@@ -668,10 +666,10 @@ namespace Impunity.GameState
 
 	public class GameStateObject : GameStateEntity
 	{
-		public GameStateChannel Channel { get; private set; }
-		public override string ChannelName { get { return Channel.Name; } }
+		public GameStateChannel? Channel { get; private set; }
+		public override string? ChannelName { get { return Channel?.ChannelName; } }
 
-		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string dbid)
+		public GameStateObject(GameStateLive liveData, GameStateEntityType typeInfo, byte instanceFlags, string? dbid)
 			: base(liveData, typeInfo, instanceFlags, dbid)
 		{
 			Channel = null;
@@ -686,8 +684,8 @@ namespace Impunity.GameState
 		{
 			ObjectCreateMessageAction message = new ObjectCreateMessageAction();
 			message.ObjectId = Id;
-			message.ChannelId = Channel.Id;
-			message.ObjectType = TypeInfo.Index;
+			message.ChannelId = Channel!.Id;
+			message.ObjectType = TypeInfo!.Index;
 			message.IsLocked = IsLocked();
 			message.InstanceFlags = (byte)Flags;
 			message.PropBytes = GetPropBytes();
@@ -696,7 +694,7 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-					bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
+					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
 			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
 
@@ -712,7 +710,7 @@ namespace Impunity.GameState
 			updateMessage.UpdateBytes = propData;
 			updateMessage.Seq = OutSeq;
 
-			GameStateReplicant except = IsClientAuthoritative() ? updatedBy : null;
+			GameStateReplicant? except = IsClientAuthoritative() ? updatedBy : null;
 
 			Channel.SendToListeners(updateMessage, except);
 		}
@@ -749,7 +747,7 @@ namespace Impunity.GameState
 			return false;
 		}
 
-		protected override void Unlock(GameStateReplicant unlockedBy)
+		protected override void Unlock(GameStateReplicant? unlockedBy)
 		{
 			base.Unlock(unlockedBy);
 
@@ -783,7 +781,7 @@ namespace Impunity.GameState
 	// Entity that exists only to be a lock, will be deleted when lock is released
 	public class GameStateNamedLock : GameStateEntity
 	{
-		public override string ChannelName { get { return Name; } }
+		public override string ChannelName { get { return Name!; } }
 
 		public List<GameStateReplicant>? LockAwaitedBy;
 
@@ -808,14 +806,14 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		protected override void Unlock(GameStateReplicant unlockedBy)
+		protected override void Unlock(GameStateReplicant? unlockedBy)
 		{
 			base.Unlock(unlockedBy);
 			
 			if (LockAwaitedBy != null)
 			{
 				NamedLockUnlockedMessageAction unlockedAction = new NamedLockUnlockedMessageAction();
-				unlockedAction.Name = Name;
+				unlockedAction.Name = Name!;
 
 				foreach(var replica in LockAwaitedBy)
 				{
@@ -974,7 +972,7 @@ namespace Impunity.GameState
 		}
 
 		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
-							bool guaranteed, out List<LiveEntityPersistedPropertyData> persistedProps, ushort seq = 0)
+							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
 			if (propBytes == null || propBytes.Count == 0)
 			{
@@ -1023,7 +1021,7 @@ namespace Impunity.GameState
 		// Create channel from DB info
 		public GameStateChannel CreateChannel(GameStateChannelLoadProxy proxy, LiveChannelData channelData)
 		{
-			GameStateEntityType typeInfo = null;
+			GameStateEntityType? typeInfo = null;
 			if (channelData.EntityType != 0)
 			{
 				typeInfo = GetEntityType(channelData.EntityType);
@@ -1048,7 +1046,7 @@ namespace Impunity.GameState
 		// Create channel from client input
 		public bool CreateChannel(GameStateReplicant origin, string channelName, bool replace, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData>? objects)
 		{
-			GameStateChannel existing = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
+			GameStateChannel? existing = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
 			
 			if (replace && existing != null)
 			{
@@ -1075,14 +1073,14 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Entity with name " + channelName + " already exists");
 			}
 
-			GameStateEntityType typeInfo = null;
+			GameStateEntityType? typeInfo = null;
 			if (typeId != 0)
 			{
 				typeInfo = GetEntityType(typeId);
 			}
 
 			GameStateChannel channel = new GameStateChannel(this, typeInfo, instanceFlags, channelName);
-			List<LiveEntityPersistedPropertyData> persistedProps;
+			List<LiveEntityPersistedPropertyData>? persistedProps;
 			UpdateEntityProps(channel, propBytes, origin, true, out persistedProps);
 			RegisterEntity(channel);
 
@@ -1091,10 +1089,10 @@ namespace Impunity.GameState
 				channel.Lock(origin, false);
 			}
 
-			if (channel.IsPersisted() && typeInfo.PersistedAs != null)
+			if (channel.IsPersisted() && typeInfo?.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name, channel.ChannelName, typeId, channel.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name!, channel.ChannelName, typeId, channel.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1111,7 +1109,7 @@ namespace Impunity.GameState
 
 		public uint SubscribeToChannel(GameStateReplicant origin, string channelName)
 		{
-			GameStateChannel channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
+			GameStateChannel? channel = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
 			if (channel == null)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with name " + channelName);
@@ -1125,7 +1123,7 @@ namespace Impunity.GameState
 
 		public void UnsubscribeFromChannel(GameStateReplicant origin, uint channelId)
 		{
-			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
+			GameStateChannel? channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with id " + channelId);
@@ -1138,7 +1136,7 @@ namespace Impunity.GameState
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
-			GameStateChannel channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
+			GameStateChannel? channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
 			if (channel == null || channel.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with ID " + channelId);
@@ -1174,7 +1172,7 @@ namespace Impunity.GameState
 
 			GameStateObject dobj = new GameStateObject(this, typeInfo, instanceFlags, dbid);
 
-			List<LiveEntityPersistedPropertyData> persistedProps;
+			List<LiveEntityPersistedPropertyData>? persistedProps;
 			UpdateEntityProps(dobj, propBytes, origin, true, out persistedProps);
 			RegisterEntity(dobj);
 
@@ -1189,7 +1187,7 @@ namespace Impunity.GameState
 			if (dobj.IsPersisted() && typeInfo.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name, dobj.ChannelName, typeId, channel.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name!, dobj.ChannelName!, typeId, channel.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1224,12 +1222,12 @@ namespace Impunity.GameState
 				return false;
 			}
 
-			List<LiveEntityPersistedPropertyData> persistedProps;
+			List<LiveEntityPersistedPropertyData>? persistedProps;
 			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq);
 
 			if (entity.IsPersisted() && persistedProps != null)
 			{
-				UpdatePersistedEntityPropertiesAction action = new UpdatePersistedEntityPropertiesAction(entity.Name, entity.ChannelName, persistedProps);
+				UpdatePersistedEntityPropertiesAction action = new UpdatePersistedEntityPropertiesAction(entity.Name!, entity.ChannelName!, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1249,7 +1247,7 @@ namespace Impunity.GameState
 			entity.SendEvent(eventType, eventData);
 		}
 
-		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue deleteData)
+		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData)
 		{
 			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)

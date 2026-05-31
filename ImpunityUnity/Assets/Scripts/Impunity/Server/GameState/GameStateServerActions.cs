@@ -324,14 +324,14 @@ namespace Impunity.GameState
 		public string ChannelId;
 		public int EntityType;
 		public byte InstanceFlags;
-		public List<LiveEntityPersistedPropertyData> Properties;
+		public List<LiveEntityPersistedPropertyData>? Properties;
 		
 
 
 		public override ushort GetActionType() { throw new Exception("Not supported"); }
 		public override bool IsDBOperation() { return true; }
 
-		public CreatePersistedEntityAction(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData> properties)
+		public CreatePersistedEntityAction(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
 		{
 			EntityId = entityId;
 			ChannelId = channelId;
