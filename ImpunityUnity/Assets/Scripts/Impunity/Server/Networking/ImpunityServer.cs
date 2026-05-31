@@ -8,7 +8,7 @@ using UltraLiteDB;
 
 using Impunity.GameState;
 using System.Net;
-using System.Runtime.Serialization;
+
 
 namespace Impunity.Networking
 {

@@ -10,7 +10,7 @@ namespace Impunity.GameState
 		/// <summary>Called when a new channel (subscription group) is created.</summary>
 		void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData);
 		/// <summary>Called when a new entity is created within a channel.</summary>
-		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated);
+		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated);
 		/// <summary>Called when an entity's properties are updated (dirty fields only).</summary>
 		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq);
 		/// <summary>Called when a custom event is fired on an entity.</summary>
@@ -20,7 +20,7 @@ namespace Impunity.GameState
 		/// <summary>Called when an entity lock is released.</summary>
 		void HandleEntityUnlocked(uint entityId);
 		/// <summary>Called when an entity is deleted.</summary>
-		void HandleEntityDelete(uint entityId, BsonValue deleteData);
+		void HandleEntityDelete(uint entityId, BsonValue? deleteData);
 
 		/// <summary>Called when a broadcast message is sent to all connections.</summary>
 		void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy);

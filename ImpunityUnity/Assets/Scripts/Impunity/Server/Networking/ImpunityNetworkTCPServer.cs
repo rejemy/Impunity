@@ -35,7 +35,7 @@ namespace Impunity.Networking
 		private const int ConnectEstablishTimeout = 1000;
 
 		ImpunityTCPServer Server;
-		TcpClient Client;
+		TcpClient? Client;
 		NetworkStream ClientStream;
 
 		byte[] ReceiveBuffer;
@@ -50,7 +50,7 @@ namespace Impunity.Networking
 			Client = client;
 			ClientStream = client.GetStream();
 			ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
-			RemoteEndpoint = Client.Client.RemoteEndPoint as IPEndPoint;
+			RemoteEndpoint = (IPEndPoint)Client.Client.RemoteEndPoint;
 			ConnectionId = connectionId;
 		}
 
@@ -194,7 +194,7 @@ namespace Impunity.Networking
 		{
 			try
 			{
-				TcpClient client = Client;
+				TcpClient? client = Client;
 				Client = null;
 				client?.Close();
 				client?.Dispose();
@@ -229,7 +229,7 @@ namespace Impunity.Networking
 		public string GameId;
 		public int GameStateFormatVersion;
 		public string GameStateFormatChecksum;
-		public BsonDocument CurrGameSummary = null;
+		public BsonDocument? CurrGameSummary = null;
 		public bool PasswordProtected;
 
 		public ArraySegment<byte> AnnouncePacket;
@@ -257,11 +257,11 @@ namespace Impunity.Networking
 
 		ImpunityOptions Options;
 
-		Thread TCPListenerThread;
-		TcpListener TCPSocket;
+		Thread? TCPListenerThread;
+		TcpListener? TCPSocket;
 
-		Thread UDPListenerThread;
-		UdpClient ServerUdpSocket;
+		Thread? UDPListenerThread;
+		UdpClient? ServerUdpSocket;
 		CancellationTokenSource ShutdownToken;
 
 		bool Running;
@@ -276,7 +276,7 @@ namespace Impunity.Networking
 		Dictionary<string, PerGameTCPServerData> PerGameData;
 
 		/// <summary>The local endpoint the TCP server is listening on, or null if not started.</summary>
-		public IPEndPoint ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
+		public IPEndPoint? ServerEndpoint { get { return TCPSocket?.LocalEndpoint as IPEndPoint; } }
 
 		public ImpunityTCPServer(ImpunityOptions options)
 		{
@@ -654,7 +654,7 @@ namespace Impunity.Networking
 			}
 			ClientsByRemoteEndpoint = null;
 
-			TcpListener listener = TCPSocket;
+			TcpListener? listener = TCPSocket;
 			TCPSocket = null;
 			listener?.Stop();
 		}

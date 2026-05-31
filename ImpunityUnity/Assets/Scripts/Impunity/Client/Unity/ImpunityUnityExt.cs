@@ -32,7 +32,7 @@ namespace Impunity.Unity
 			}
 		}
 
-		public void OnComplete(ImpunityErrorResponse err)
+		public void OnComplete(ImpunityErrorResponse? err)
 		{
 			Error = err;
 			Complete = true;
@@ -60,7 +60,7 @@ namespace Impunity.Unity
 			}
 		}
 
-		public void OnComplete(ImpunityErrorResponse err, TReturn returnValue)
+		public void OnComplete(ImpunityErrorResponse? err, TReturn returnValue)
 		{
 			Value = returnValue;
 			Error = err;

@@ -140,7 +140,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		[BsonField("n")]
-		public string UniqueName;
+		public string? UniqueName;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
@@ -200,7 +200,7 @@ namespace Impunity.GameState
 		public uint EntityId;
 
 		[BsonField("dd")]
-		public BsonValue DeleteData;
+		public BsonValue? DeleteData;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_DELETE_MESSAGE; }
 

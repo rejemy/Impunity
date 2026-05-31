@@ -9,13 +9,13 @@ namespace Impunity.Networking
 	public interface IImpunityNetworkClient : IDisposable
 	{
 		/// <summary>Server-assigned connection identifier, available after successful connection.</summary>
-		public string ConnectionId { get; }
+		public string? ConnectionId { get; }
 		/// <summary>Called when a complete framed message is received from the server.</summary>
-		ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <summary>Called on network errors (connection lost, timeout, etc.).</summary>
-		ImpunityCallback OnNetworkError { get; set; }
+		ImpunityCallback? OnNetworkError { get; set; }
 		/// <summary>Called when the server closes the connection. The int parameter is a reason code.</summary>
-		Action<int> OnDisconnectedByServer { get; set; }
+		Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <summary>Initiates an async connection to the server. Calls <paramref name="onComplete"/> with null error on success.</summary>
 		void Connect(ImpunityCallback onComplete);

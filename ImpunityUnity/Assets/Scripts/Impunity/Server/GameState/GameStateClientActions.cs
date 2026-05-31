@@ -152,7 +152,7 @@ namespace Impunity.GameState
 	public class EstablishConnectResult
 	{
 		[BsonField("cid")]
-		public string ConnectionId;
+		public string ConnectionId = null!;
 	}
 
 	/// <summary>Handshake action: validates game ID, password, and format version, then registers the connection. Returns the assigned connection ID.</summary>

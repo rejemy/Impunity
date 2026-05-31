@@ -200,7 +200,7 @@ namespace Impunity.GameState
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
-		private T[] Value;
+		private T[]? Value;
 
 		public long LastModifiedTime { get; set; }
 
@@ -213,7 +213,7 @@ namespace Impunity.GameState
 				for (int i = 0; i < numChanges; i++)
 				{
 					int index = r.ReadUInt16();
-					T oldValue = Value[index];
+					T oldValue = Value![index];
 					Value[index].ReadFrom(r);
 					T newValue = Value[index];
 				}
@@ -254,7 +254,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public BsonValue AsBsonValue()
+		public BsonValue? AsBsonValue()
 		{
 			if (Value == null)
 			{
@@ -271,7 +271,7 @@ namespace Impunity.GameState
 
 		public void FromBsonValue(BsonValue value)
 		{
-			BsonArray array = value.AsArray;
+			BsonArray? array = value.AsArray;
 			if (array == null)
 			{
 				Value = null;
@@ -293,13 +293,13 @@ namespace Impunity.GameState
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
 		private int Capacity;
-		private Queue<T> Value;
+		private Queue<T>? Value;
 
 		public long LastModifiedTime { get; set; }
 
 		private void AddValue(T value)
 		{
-			if (Value.Count == Capacity)
+			if (Value!.Count == Capacity)
 			{
 				Value.Dequeue();
 			}
@@ -365,7 +365,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public BsonValue AsBsonValue()
+		public BsonValue? AsBsonValue()
 		{
 			if (Value == null)
 			{
@@ -382,7 +382,7 @@ namespace Impunity.GameState
 
 		public void FromBsonValue(BsonValue value)
 		{
-			BsonArray array = value.AsArray;
+			BsonArray? array = value.AsArray;
 			if (array == null)
 			{
 				Value = null;
@@ -405,7 +405,7 @@ namespace Impunity.GameState
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
-		private Dictionary<int,T> Value;
+		private Dictionary<int,T>? Value;
 
 		public long LastModifiedTime { get; set; }
 
@@ -421,7 +421,7 @@ namespace Impunity.GameState
 					T val = default(T);
 					val.ReadFrom(r);
 
-					Value[key] = val;
+					Value![key] = val;
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -469,7 +469,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public BsonValue AsBsonValue()
+		public BsonValue? AsBsonValue()
 		{
 			if (Value == null)
 			{
@@ -486,7 +486,7 @@ namespace Impunity.GameState
 
 		public void FromBsonValue(BsonValue value)
 		{
-			BsonDocument dict = value.AsDocument;
+			BsonDocument? dict = value.AsDocument;
 
 			if (dict == null)
 			{
@@ -511,7 +511,7 @@ namespace Impunity.GameState
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
-		private Dictionary<string, T> Value;
+		private Dictionary<string, T>? Value;
 
 		public long LastModifiedTime { get; set; }
 
@@ -527,7 +527,7 @@ namespace Impunity.GameState
 					T val = default(T);
 					val.ReadFrom(r);
 
-					Value[key] = val;
+					Value![key] = val;
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -569,7 +569,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public BsonValue AsBsonValue()
+		public BsonValue? AsBsonValue()
 		{
 			if (Value == null)
 			{
@@ -586,7 +586,7 @@ namespace Impunity.GameState
 
 		public void FromBsonValue(BsonValue value)
 		{
-			BsonDocument dict = value.AsDocument;
+			BsonDocument? dict = value.AsDocument;
 
 			if (dict == null)
 			{

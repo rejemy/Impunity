@@ -12,23 +12,23 @@ namespace Impunity.Networking
 	public class ImpunityTCPClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; } = "Unconnected";
+		public string? ConnectionId { get; private set; }
 
 		/// <inheritdoc/>
-		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
-		public ImpunityCallback OnNetworkError { get; set; }
+		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
-		public Action<int> OnDisconnectedByServer { get; set; }
+		public Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
 		public bool SupportsUnguaranteed { get; private set; } = false;
 
-		private string ServerHost;
+		private string? ServerHost;
 		private int ServerPort;
 
-		private IPEndPoint ServerEndpoint;
-		private ImpunityOptions Options;
+		private IPEndPoint ServerEndpoint = default!;
+		private ImpunityOptions Options = default!;
 
 		private TcpClient? ClientTCPSocket;
 		private Thread? ClientTCPSocketThread;
@@ -40,9 +40,9 @@ namespace Impunity.Networking
 		private ImpunityCallback? OnConnectCallback;
 
 
-		byte[] SessionDataPacket;
-		byte[] PingPacket;
-		byte[] PongPacket;
+		byte[] SessionDataPacket = default!;
+		byte[] PingPacket = default!;
+		byte[] PongPacket = default!;
 
 		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>
 		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
@@ -61,13 +61,8 @@ namespace Impunity.Networking
 		private ImpunityTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
 		{
 			ServerEndpoint = serverEndpoint;
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
-			Options = options;
-
-			ClientTCPSocket = new TcpClient();
+			
+			InternalInit(options);
 		}
 
 		private ImpunityTCPClient(string hostname, int port, ImpunityOptions? options = null)
@@ -75,11 +70,16 @@ namespace Impunity.Networking
 			ServerHost = hostname;
 			ServerPort = port;
 
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
-			Options = options;
+			InternalInit(options);
+		}
+
+		private void InternalInit(ImpunityOptions? options)
+		{
+			Options = options ?? new ImpunityOptions();
+
+			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
+			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
+			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
 
 			ClientTCPSocket = new TcpClient();
 		}
@@ -191,7 +191,7 @@ namespace Impunity.Networking
 
 					try
 					{
-						OnMessageRecieved.Invoke(new ArraySegment<byte>(receiveBuffer, 0, messageLength));
+						OnMessageRecieved?.Invoke(new ArraySegment<byte>(receiveBuffer, 0, messageLength));
 					}
 					catch (Exception e)
 					{
@@ -323,7 +323,7 @@ namespace Impunity.Networking
 		{
 			try
 			{
-				OnMessageRecieved.Invoke(data);
+				OnMessageRecieved?.Invoke(data);
 			}
 			catch (Exception e)
 			{
@@ -405,14 +405,14 @@ namespace Impunity.Networking
 	public class ImpunityTCPClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; }
+		public string? ConnectionId { get; private set; }
 
 		/// <inheritdoc/>
-		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
-		public ImpunityCallback OnNetworkError { get; set; }
+		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
-		public Action<int> OnDisconnectedByServer { get; set; }
+		public Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
 		public bool SupportsUnguaranteed { get; private set; } = false;

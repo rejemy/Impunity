@@ -24,7 +24,7 @@ namespace Impunity.GameState
 	public interface IStandardDistributableValueType : IDistributableValueType
 	{
 		/// <summary>Converts this value to a BSON value for database storage.</summary>
-		BsonValue AsBsonValue();
+		BsonValue? AsBsonValue();
 		/// <summary>Populates this value from a BSON value loaded from database.</summary>
 		void FromBsonValue(BsonValue value);
 		/// <summary>Server timestamp (ms since epoch) of the last modification. Used for temporal conflict resolution.</summary>
@@ -457,7 +457,7 @@ namespace Impunity.GameState
 
 	public struct DString : IStandardDistributableValueType, IEquatable<DString>
 	{
-		private string Value;
+		private string? Value;
 
 		public long LastModifiedTime { get; set; }
 
@@ -495,7 +495,7 @@ namespace Impunity.GameState
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.String; }
 
-		public static implicit operator string(DString d) => d.Value;
+		public static implicit operator string?(DString d) => d.Value;
 		public static implicit operator DString(string d) => new DString(d);
 		public bool Equals(DString v) => String.Equals(Value, v.Value);
 
@@ -628,7 +628,7 @@ namespace Impunity.GameState
 
 		public void FromBsonValue(BsonValue value)
 		{
-			BsonDocument doc = value.AsDocument;
+			BsonDocument doc = value.AsDocument!;
 			long ticks = doc.GetInt64OrDefault("t", 0);
 			TimeSpan offset = TimeSpan.FromMinutes(doc.GetInt32OrDefault("o", 0));
 			Value = new DateTimeOffset(ticks, offset);

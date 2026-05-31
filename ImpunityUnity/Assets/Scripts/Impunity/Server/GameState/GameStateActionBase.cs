@@ -24,7 +24,7 @@ namespace Impunity.GameState
 	{
 		/// <summary>The result payload.</summary>
 		[BsonField("r")]
-		public TResult? Result;
+		public TResult Result = default!;
 	}
 
 	/// <summary>Base class for all client-to-server and server-to-client actions. Actions are serialized via BSON, routed through the network layer, and executed on the game server thread.</summary>
@@ -36,7 +36,7 @@ namespace Impunity.GameState
 
 		/// <summary>The connection that sent this action (server-side only).</summary>
 		[BsonIgnore]
-		internal IServerSideConnectionProxy Origin { get; set; }
+		internal IServerSideConnectionProxy Origin { get; set; } = null!;
 
 		[BsonIgnore]
 		public virtual bool Guaranteed { get; protected set; } = true;
@@ -205,7 +205,7 @@ namespace Impunity.GameState
 		{
 			ActionResult<TResult> reply = new ActionResult<TResult>();
 			reply.Error = Error;
-			reply.Result = Result;
+			reply.Result = Result!;
 			return reply;
 		}
 
@@ -224,7 +224,7 @@ namespace Impunity.GameState
 
 		public override void InvokeOnCompleteCallback()
 		{
-			OnCompleteCallback?.Invoke(Error, Result);
+			OnCompleteCallback?.Invoke(Error, Result!);
 		}
 	}
 

@@ -117,7 +117,7 @@ namespace Impunity
 		public GameStateCollection[] Collections;
 
 		[BsonField("EntityTypes")]
-		public GameStateEntityTypeDef[] EntityTypes;
+		public GameStateEntityTypeDef[]? EntityTypes;
 	}
 
 	/// <summary>Exception with an associated <see cref="ImpunityErrorCode"/>, used for server-side errors that should be reported to the client.</summary>
@@ -154,11 +154,11 @@ namespace Impunity
 
 		/// <summary>Human-readable error message.</summary>
 		[BsonField("msg")]
-		public string Message { get; private set; }
+		public string Message { get; private set; } = default!;
 
 		/// <summary>Server-side stack trace for debugging. May be null.</summary>
 		[BsonField("stk")]
-		public string Stacktrace { get; private set; }
+		public string? Stacktrace { get; private set; }
 
 		public ImpunityErrorResponse() {}
 
@@ -212,7 +212,7 @@ namespace Impunity
 		/// <summary>The error code from the server response.</summary>
 		public ImpunityErrorCode ErrorId { get; private set; }
 		/// <summary>The stack trace from the server, for debugging.</summary>
-		public string ServerStacktrace { get; private set; }
+		public string? ServerStacktrace { get; private set; }
 
 		public ImpuntyErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
 		{

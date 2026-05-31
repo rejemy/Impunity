@@ -43,7 +43,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing game database at the given directory path. Returns null if the database file doesn't exist.</summary>
-		public static GameStateDB Open(string path, ImpunityOptions? options = null)
+		public static GameStateDB? Open(string path, ImpunityOptions? options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -61,7 +61,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Creates a new game database at the given path with an initial summary. Returns null if a database already exists there.</summary>
-		public static GameStateDB Create(string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateDB? Create(string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -95,7 +95,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		private void OpenDatabase(ImpunityOptions options)
+		private void OpenDatabase(ImpunityOptions? options)
 		{
 			if (GameDB != null)
 				return;
@@ -139,7 +139,7 @@ namespace Impunity.GameState
 
 
 		/// <summary>Loads a game summary from disk. Returns null if no summary file exists.</summary>
-		public static BsonDocument LoadGameSummary(string path)
+		public static BsonDocument? LoadGameSummary(string path)
 		{
 			string summaryFile = Path.Combine(path, GameSummaryFile);
 			if (!File.Exists(summaryFile))
@@ -159,7 +159,7 @@ namespace Impunity.GameState
 			}
 		}
 
-		public BsonDocument LoadGameSummary()
+		public BsonDocument? LoadGameSummary()
         {
 			return LoadGameSummary(RootDirectory);
         }
@@ -434,7 +434,7 @@ namespace Impunity.GameState
 			collection.Collection.Delete(Query.StartsWith("_id", entityId));
 		}
 
-		public LiveChannelData LoadChannelData(string channelName)
+		public LiveChannelData? LoadChannelData(string channelName)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 

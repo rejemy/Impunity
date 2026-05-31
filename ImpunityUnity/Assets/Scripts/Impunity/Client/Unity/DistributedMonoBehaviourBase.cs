@@ -24,14 +24,14 @@ namespace Impunity.Unity
 		public bool IsLocked { get; set; }
 		private event ImpunityCallback<LockWaitResult>? LockWaiter;
 
-		public ClientEntityManager Manager { get; set; }
-		public IDistributedChannel Channel { get; set; }
+		public ClientEntityManager Manager { get; set; } = null!;
+		public IDistributedChannel Channel { get; set; } = null!;
 
 		public ulong DirtyBits { get; private set; }
 		public bool DirtyGuaranteed { get; private set; }
 
 		public ushort SendSeq { get; set; }
-		public ushort[] FieldRecvSeq { get; set; }
+		public ushort[]? FieldRecvSeq { get; set; }
 
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
 		{
@@ -126,7 +126,7 @@ namespace Impunity.Unity
 	/// </summary>
 	public abstract class DistributedMonoBehvaiourChannelBase : DistributedMonoBehvaiourEntityBase, IDistributedChannel
 	{
-		public string Name { get; set; }
+		public string Name { get; set; } = null!;
 		public Dictionary<uint, IDistributedObject> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedObject>();
 
 		public void Unsubscribe(ImpunityCallback onComplete)

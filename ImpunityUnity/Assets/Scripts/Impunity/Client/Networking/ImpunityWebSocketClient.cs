@@ -12,14 +12,14 @@ namespace Impunity.Networking
 	public class ImpunityWebSocketClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; }
+		public string? ConnectionId { get; private set; }
 
 		/// <inheritdoc/>
-		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
-		public ImpunityCallback OnNetworkError { get; set; }
+		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
-		public Action<int> OnDisconnectedByServer { get; set; }
+		public Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <inheritdoc/>
 		public bool SupportsUnguaranteed { get; private set; } = false;
@@ -268,14 +268,14 @@ namespace Impunity.Networking
 	public class ImpunityWebSocketClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; } = "Unconnected";
+		public string? ConnectionId { get; private set; }
 
 		/// <inheritdoc/>
-		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
-		public ImpunityCallback OnNetworkError { get; set; }
+		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
-		public Action<int> OnDisconnectedByServer { get; set; }
+		public Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <inheritdoc/>
 		public bool SupportsUnguaranteed { get; private set; } = false;
@@ -300,18 +300,14 @@ namespace Impunity.Networking
 		private ImpunityWebSocketClient(string url, ImpunityOptions? options)
 		{
 			Url = url;
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
-			Options = options;
+			Options = options ?? new ImpunityOptions();
+			CancelSource = new CancellationTokenSource();
 		}
 
 		/// <inheritdoc/>
 		public void Connect(ImpunityCallback onComplete)
 		{
 			OnConnectCallback = onComplete;
-			CancelSource = new CancellationTokenSource();
 
 			SocketThread = new Thread(new ThreadStart(WebSocketListenerThreadMain));
 			SocketThread.IsBackground = true;

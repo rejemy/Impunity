@@ -103,7 +103,7 @@ namespace Impunity.GameState
 		public GameStateDB DB;
 		internal GameStateLive Live;
 
-		BsonDocument Summary;
+		BsonDocument? Summary;
 		GameMetadata Metadata;
 
 		/// <summary>When true, new connections are rejected (e.g., during shutdown or maintenance).</summary>
@@ -290,7 +290,7 @@ namespace Impunity.GameState
 		}
 
 		// Called from various threads
-		public BsonDocument GetGameSummary()
+		public BsonDocument? GetGameSummary()
         {
 			return Summary;
         }
