@@ -95,7 +95,7 @@ namespace Impunity.GameState
 		/// <summary>Unique identifier for this game world.</summary>
 		public string GameId { get; private set; }
 		/// <summary>SHA-256 hash of the game password, or null if no password.</summary>
-		public string GamePasswordHash { get; private set; }
+		public string? GamePasswordHash { get; private set; }
 		/// <summary>Server configuration options.</summary>
 		public ImpunityOptions Options { get; private set; }
 
@@ -119,7 +119,7 @@ namespace Impunity.GameState
 
 		ConcurrentDictionary<int, IGameStateListener> Listeners;
 
-		private GameStateServer(string gameId, string gamePassword, GameStateDB gameDatabase, ImpunityOptions options)
+		private GameStateServer(string gameId, string? gamePassword, GameStateDB gameDatabase, ImpunityOptions options)
 		{
 			if (options == null)
 			{
@@ -158,19 +158,19 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing game world from the database at the given path.</summary>
-		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions options = null)
+		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions? options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.Open(path, options), options);
 		}
 
 		/// <summary>Creates a new game world with the given summary.</summary>
-		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
+		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.Create(path, summary, options), options);
 		}
 
 		/// <summary>Opens an existing game world or creates a new one.</summary>
-		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions options = null)
+		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
 		}
@@ -345,7 +345,7 @@ namespace Impunity.GameState
 		{
 			while (Running)
 			{
-				GameStateActionBase action = null;
+				GameStateActionBase action;
 
 				try
 				{
@@ -390,7 +390,7 @@ namespace Impunity.GameState
 		{
 			while (Running)
 			{
-				GameStateActionBase action = null;
+				GameStateActionBase action;
 
 				try
 				{

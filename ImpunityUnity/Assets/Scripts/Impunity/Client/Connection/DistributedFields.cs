@@ -1,8 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using System.Threading;
+
 
 namespace Impunity.Connection
 {
@@ -37,7 +38,7 @@ namespace Impunity.Connection
 	{
 		/// <summary>Raised when the value changes, providing old and new values.</summary>
 		public event Action<T, T> OnChanged;
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
@@ -190,7 +191,7 @@ namespace Impunity.Connection
 		/// <summary>Raised when the value changes, providing old and new values.</summary>
 		public event Action<T,T> OnChanged;
 
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 		
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
@@ -362,10 +363,10 @@ namespace Impunity.Connection
 		public event Action<T[], T[]> OnReplaced;
 		/// <summary>Raised when a single element changes, providing the index, old value, and new value.</summary>
 		public event Action<int, T, T> OnChanged;
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 
 		T[] CurrentValue;
-		T[] NewValue;
+		T[]? NewValue;
 		Dictionary<int, T> Changes;
 
 		IDistributedEntity Entity;
@@ -640,13 +641,13 @@ namespace Impunity.Connection
 		/// <summary>Raised when the entire queue is replaced, providing old and new queues.</summary>
 		public event Action<Queue<T>, Queue<T>> OnReplaced;
 
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 
 		int CurrentCapacity;
 		Queue<T> CurrentValue;
 
 		int NewCapacity;
-		Queue<T> NewValue;
+		Queue<T>? NewValue;
 		Queue<T> Changes;
 
 		IDistributedEntity Entity;
@@ -716,7 +717,7 @@ namespace Impunity.Connection
 
 		private void AddToNew(T value)
 		{
-			if (NewValue.Count == NewCapacity)
+			if (NewValue!.Count == NewCapacity)
 			{
 				NewValue.Dequeue();
 			}
@@ -916,18 +917,18 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedIntDictionary<T,S> : IDistributedField, IReadOnlyDictionary<int,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedIntDictionary<T,S> : IDistributedField, IReadOnlyDictionary<int,T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<int,T,T> OnChanged;
 		/// <summary>Raised when the entire dictionary is replaced.</summary>
 		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
 
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 
 		Dictionary<int,T> CurrentValue;
 
-		Dictionary<int, T> NewValue;
+		Dictionary<int, T>? NewValue;
 		Dictionary<int, T> Changes;
 
 		IDistributedEntity Entity;
@@ -938,7 +939,7 @@ namespace Impunity.Connection
 
 		public readonly IEnumerable<T> Values => CurrentValue.Values;
 
-		public readonly T this[int key] => Get(key);
+		public readonly T? this[int key] => Get(key);
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -1014,7 +1015,7 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
-		public readonly T Get(int key)
+		public readonly T? Get(int key)
 		{
 			if (CurrentValue == null)
 			{
@@ -1159,7 +1160,7 @@ namespace Impunity.Connection
 			return CurrentValue.TryGetValue(key, out value);
 		}
 
-		public readonly IEnumerator<KeyValuePair<int, T>> GetEnumerator()
+		public readonly IEnumerator<KeyValuePair<int, T?>> GetEnumerator()
 		{
 			return CurrentValue.GetEnumerator();
 		}
@@ -1188,18 +1189,18 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedStringDictionary<T,S> : IDistributedField, IReadOnlyDictionary<string,T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedStringDictionary<T,S> : IDistributedField, IReadOnlyDictionary<string,T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<string,T,T> OnChanged;
 		/// <summary>Raised when the entire dictionary is replaced.</summary>
 		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
 
-		private static readonly S Serializer = default;
+		private static readonly S Serializer = default!;
 
 		Dictionary<string, T> CurrentValue;
 
-		Dictionary<string, T> NewValue;
+		Dictionary<string, T>? NewValue;
 		Dictionary<string, T> Changes;
 
 		IDistributedEntity Entity;
@@ -1210,7 +1211,7 @@ namespace Impunity.Connection
 
 		public readonly IEnumerable<T> Values => CurrentValue.Values;
 
-		public readonly T this[string key] => Get(key);
+		public readonly T? this[string key] => Get(key);
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -1286,7 +1287,7 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
-		public readonly T Get(string key)
+		public readonly T? Get(string key)
 		{
 			if (CurrentValue == null)
 			{
@@ -1430,7 +1431,7 @@ namespace Impunity.Connection
 			return CurrentValue.TryGetValue(key, out value);
 		}
 
-		public readonly IEnumerator<KeyValuePair<string, T>> GetEnumerator()
+		public readonly IEnumerator<KeyValuePair<string, T?>> GetEnumerator()
 		{
 			return CurrentValue.GetEnumerator();
 		}

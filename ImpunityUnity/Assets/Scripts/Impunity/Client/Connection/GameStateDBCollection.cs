@@ -20,15 +20,11 @@ namespace Impunity.Connection
         int CollectionId;
 
 		/// <summary>Creates a typed collection wrapper for the given collection ID on the specified connection.</summary>
-        public GameStateDBCollection(BaseGameConnection connection, int collectionId, BsonMapper mapper = null)
+        public GameStateDBCollection(BaseGameConnection connection, int collectionId, BsonMapper? mapper = null)
         {
             Connection = connection;
             CollectionId = collectionId;
-			Mapper = mapper;
-			if (Mapper == null)
-            {
-				Mapper = BsonMapper.Global;
-            }
+			Mapper = mapper ?? BsonMapper.Global;
 		}
 
 		/// <summary>Inserts a new document. Returns the assigned ID via callback.</summary>
@@ -66,11 +62,11 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Lists all documents in this collection, deserialized to <typeparamref name="DTYPE"/>.</summary>
-		public void ListDocuments(ImpunityCallback<List<DTYPE>> onComplete)
+		public void ListDocuments(ImpunityCallback<List<DTYPE>?> onComplete)
 		{
-			Connection.ListDocuments(CollectionId, (err, bsonlist)=>
+			Connection.ListDocuments(CollectionId, (err, bsonlist) =>
 			{
-				List<DTYPE> doclist = null;
+				List<DTYPE>? doclist = null;
 				if (bsonlist != null)
 				{
 					doclist = new List<DTYPE>(bsonlist.Count);

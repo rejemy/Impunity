@@ -131,7 +131,7 @@ namespace Impunity.GameState
 
 		public NoOpAction() { }
 		
-		public NoOpAction(ImpunityCallback onComplete)
+		public NoOpAction(ImpunityCallback? onComplete)
 		{
 			OnCompleteCallback = onComplete;
 		}
@@ -159,10 +159,10 @@ namespace Impunity.GameState
 	public class EstablishConnectionAction : ClientActionResultBase<EstablishConnectResult>
 	{
 		[BsonField("gid")]
-		public string GameId;
+		public string? GameId;
 
 		[BsonField("pw")]
-		public string PasswordHash;
+		public string? PasswordHash;
 
 		[BsonField("f")]
 		public GameStateFormatData Format;
@@ -175,7 +175,7 @@ namespace Impunity.GameState
 
 		public EstablishConnectionAction() { }
 
-		public EstablishConnectionAction(string gameId, string passwordHash, GameStateFormatData format, string connectionKey, ImpunityCallback<EstablishConnectResult> onComplete = null)
+		public EstablishConnectionAction(string? gameId, string? passwordHash, GameStateFormatData format, string connectionKey, ImpunityCallback<EstablishConnectResult>? onComplete = null)
 		{
 			GameId = gameId;
 			PasswordHash = passwordHash;
@@ -201,7 +201,7 @@ namespace Impunity.GameState
 
 		public SetGameSummaryAction() { }
 
-		public SetGameSummaryAction(BsonDocument summary, ImpunityCallback onComplete = null)
+		public SetGameSummaryAction(BsonDocument summary, ImpunityCallback? onComplete = null)
 		{
 			Summary = summary;
 			OnCompleteCallback = onComplete;
@@ -221,7 +221,7 @@ namespace Impunity.GameState
 
 		public GetGameSummaryAction() { }
 
-		public GetGameSummaryAction(ImpunityCallback<BsonDocument> onComplete = null)
+		public GetGameSummaryAction(ImpunityCallback<BsonDocument>? onComplete = null)
 		{
 			OnCompleteCallback = onComplete;
 		}
@@ -265,7 +265,7 @@ namespace Impunity.GameState
 
 		public CompoundDatabaseAction() { }
 
-		public CompoundDatabaseAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>> onComplete = null)
+		public CompoundDatabaseAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>>? onComplete = null)
 		{
 			Actions = new List<GameStateActionBase>(actions);
 			OnCompleteCallback = onComplete;
@@ -343,7 +343,7 @@ namespace Impunity.GameState
 
 		public InsertDocumentAction() { }
 
-		public InsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue> onComplete = null)
+		public InsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
@@ -369,7 +369,7 @@ namespace Impunity.GameState
 
 		public UpdateDocumentAction() { }
 
-		public UpdateDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		public UpdateDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
@@ -395,7 +395,7 @@ namespace Impunity.GameState
 
 		public UpsertDocumentAction() { }
 
-		public UpsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		public UpsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
@@ -421,7 +421,7 @@ namespace Impunity.GameState
 
 		public MergeIntoDocumentAction() { }
 
-		public MergeIntoDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		public MergeIntoDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
@@ -447,7 +447,7 @@ namespace Impunity.GameState
 
 		public MergeInsertDocumentAction() { }
 
-		public MergeInsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool> onComplete = null)
+		public MergeInsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
@@ -473,7 +473,7 @@ namespace Impunity.GameState
 
 		public FindDocumentByIdAction() { }
 
-		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument> onComplete = null)
+		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Id = id;
@@ -499,7 +499,7 @@ namespace Impunity.GameState
 
 		public DeleteDocumentAction() { }
 
-		public DeleteDocumentAction(int collectionId, BsonValue id, ImpunityCallback<bool> onComplete = null)
+		public DeleteDocumentAction(int collectionId, BsonValue id, ImpunityCallback<bool>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Id = id;
@@ -523,7 +523,7 @@ namespace Impunity.GameState
 
 		public ListDocumentsAction() { }
 
-		public ListDocumentsAction(int collectionId, ImpunityCallback<List<BsonDocument>> onComplete = null)
+		public ListDocumentsAction(int collectionId, ImpunityCallback<List<BsonDocument>>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			OnCompleteCallback = onComplete;
@@ -551,11 +551,11 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		[BsonField("n")]
-		public string UniqueName;
+		public string? UniqueName;
 
 		public ObjectCreateData() { }
 
-		public ObjectCreateData(int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, string uniqueName)
+		public ObjectCreateData(int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, string? uniqueName)
 		{
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
@@ -592,7 +592,7 @@ namespace Impunity.GameState
 
 		public CreateChannelAction() { }
 
-		public CreateChannelAction(string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, ImpunityCallback<bool> onComplete = null)
+		public CreateChannelAction(string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, ImpunityCallback<bool>? onComplete = null)
 		{
 			Name = channelName;
 			ReplaceIfPresent = replace;
@@ -635,7 +635,7 @@ namespace Impunity.GameState
 
 		public SubscribeChannelAction() { }
 
-		public SubscribeChannelAction(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint> onComplete = null)
+		public SubscribeChannelAction(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, ImpunityCallback<uint>? onComplete = null)
 		{
 			Name = channelName;
 			CreateIfMissing = createIfMissing;
@@ -711,7 +711,7 @@ namespace Impunity.GameState
 
 		public UnsubscribeChannelAction() { }
 
-		public UnsubscribeChannelAction(uint channelId, ImpunityCallback onComplete = null)
+		public UnsubscribeChannelAction(uint channelId, ImpunityCallback? onComplete = null)
 		{
 			ID = channelId;
 			OnCompleteCallback = onComplete;
@@ -739,7 +739,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		[BsonField("n")]
-		public string UniqueName;
+		public string? UniqueName;
 
 		[BsonField("r")]
 		public bool ReplaceExisting;
@@ -749,7 +749,7 @@ namespace Impunity.GameState
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, ImpunityCallback<uint> onComplete = null)
+		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete = null)
 		{
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
@@ -783,7 +783,7 @@ namespace Impunity.GameState
 
 		public UpdateEntityAction() { }
 
-		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ImpunityCallback onComplete = null)
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ImpunityCallback? onComplete = null)
 		{
 			EntityId = entityId;
 			UpdateBytes = updateBytes;
@@ -811,7 +811,7 @@ namespace Impunity.GameState
 
 		public DeleteEntityAction() { }
 
-		public DeleteEntityAction(uint entityId, BsonValue deleteData, ImpunityCallback<bool> onComplete = null)
+		public DeleteEntityAction(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete = null)
 		{
 			EntityId = entityId;
 			DeleteData = deleteData;
@@ -841,7 +841,7 @@ namespace Impunity.GameState
 
 		public EventEntityAction() { }
 
-		public EventEntityAction(uint entityId, int eventType, BsonValue eventData, ImpunityCallback onComplete = null)
+		public EventEntityAction(uint entityId, int eventType, BsonValue eventData, ImpunityCallback? onComplete = null)
 		{
 			EntityId = entityId;
 			EventType = eventType;
@@ -866,7 +866,7 @@ namespace Impunity.GameState
 
 		public LockEntityAction() { }
 
-		public LockEntityAction(uint entityId, ImpunityCallback<bool> onComplete = null)
+		public LockEntityAction(uint entityId, ImpunityCallback<bool>? onComplete = null)
 		{
 			EntityId = entityId;
 			OnCompleteCallback = onComplete;
@@ -889,7 +889,7 @@ namespace Impunity.GameState
 
 		public UnlockEntityAction() { }
 
-		public UnlockEntityAction(uint entityId, ImpunityCallback<bool> onComplete = null)
+		public UnlockEntityAction(uint entityId, ImpunityCallback<bool>? onComplete = null)
 		{
 			EntityId = entityId;
 			OnCompleteCallback = onComplete;
@@ -915,7 +915,7 @@ namespace Impunity.GameState
 
 		public LockNamedLockAction() { }
 
-		public LockNamedLockAction(string lockName, bool wait, ImpunityCallback<bool> onComplete = null)
+		public LockNamedLockAction(string lockName, bool wait, ImpunityCallback<bool>? onComplete = null)
 		{
 			Name = lockName;
 			WaitForUnlock = wait;
@@ -939,7 +939,7 @@ namespace Impunity.GameState
 
 		public UnlockNamedLockAction() { }
 
-		public UnlockNamedLockAction(string lockName, ImpunityCallback<bool> onComplete = null)
+		public UnlockNamedLockAction(string lockName, ImpunityCallback<bool>? onComplete = null)
 		{
 			Name = lockName;
 			OnCompleteCallback = onComplete;
@@ -965,7 +965,7 @@ namespace Impunity.GameState
 
 		public SendBroadcastMessageAction() { }
 
-		public SendBroadcastMessageAction(int messageType, BsonValue message, ImpunityCallback onComplete = null)
+		public SendBroadcastMessageAction(int messageType, BsonValue message, ImpunityCallback? onComplete = null)
 		{
 			MessageType = messageType;
 			MessageBody = message;

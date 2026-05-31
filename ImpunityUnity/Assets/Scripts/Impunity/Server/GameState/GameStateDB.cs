@@ -43,7 +43,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing game database at the given directory path. Returns null if the database file doesn't exist.</summary>
-		public static GameStateDB Open(string path, ImpunityOptions options = null)
+		public static GameStateDB Open(string path, ImpunityOptions? options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -61,7 +61,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Creates a new game database at the given path with an initial summary. Returns null if a database already exists there.</summary>
-		public static GameStateDB Create(string path, BsonDocument summary, ImpunityOptions options = null)
+		public static GameStateDB Create(string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -83,7 +83,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing database or creates a new one if none exists at the given path.</summary>
-		public static GameStateDB OpenOrCreate(string path, BsonDocument summary, ImpunityOptions options = null)
+		public static GameStateDB OpenOrCreate(string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			if (File.Exists(GetDBFilename(path)))
 			{

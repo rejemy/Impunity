@@ -23,7 +23,7 @@ namespace Impunity
 		/// <summary>BinaryReader for reading from the buffer.</summary>
 		public readonly BinaryReader Reader;
 
-		internal TemporaryBuffer NextBuffer;
+		internal TemporaryBuffer? NextBuffer;
 
 		/// <param name="small">True for a small buffer, false for a large buffer.</param>
 		public TemporaryBuffer(bool small)
@@ -55,18 +55,18 @@ namespace Impunity
 	public static class ImpunityUtil
 	{
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
-		private static BsonMapper Mapper = null;
+		private static BsonMapper? Mapper = null;
 		
-		private static TemporaryBuffer SmallBufferPool;
+		private static TemporaryBuffer? SmallBufferPool;
 		private static object SmallBufferLock = new object();
 
-		private static TemporaryBuffer LargeBufferPool;
+		private static TemporaryBuffer? LargeBufferPool;
 		private static object LargeBufferLock = new object();
 
 		/// <summary>Gets a small buffer from the pool, or allocates a new one if the pool is empty.</summary>
 		public static TemporaryBuffer GetSmallBuffer()
 		{
-			TemporaryBuffer buff = null;
+			TemporaryBuffer? buff = null;
 
 			lock (SmallBufferLock)
 			{
@@ -92,7 +92,7 @@ namespace Impunity
 		/// <summary>Gets a large buffer from the pool, or allocates a new one if the pool is empty.</summary>
 		public static TemporaryBuffer GetLargeBuffer()
 		{
-			TemporaryBuffer buff = null;
+			TemporaryBuffer? buff = null;
 
 			lock (LargeBufferLock)
 			{
@@ -209,7 +209,7 @@ namespace Impunity
 		}
 
 		/// <summary>SHA-256 hashes a password string and returns it as base64. Returns null if input is null.</summary>
-		public static string HashPassword(string pass)
+		public static string? HashPassword(string? pass)
 		{
 			if (pass == null)
 			{

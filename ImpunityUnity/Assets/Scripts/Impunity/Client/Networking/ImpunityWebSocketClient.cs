@@ -260,7 +260,6 @@ using System;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
 
 namespace Impunity.Networking
 {
@@ -269,7 +268,7 @@ namespace Impunity.Networking
 	public class ImpunityWebSocketClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; }
+		public string ConnectionId { get; private set; } = "Unconnected";
 
 		/// <inheritdoc/>
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
@@ -284,21 +283,21 @@ namespace Impunity.Networking
 		private string Url;
 		private ImpunityOptions Options;
 
-		private ClientWebSocket Socket;
-		private Thread SocketThread;
+		private ClientWebSocket? Socket;
+		private Thread? SocketThread;
 		private CancellationTokenSource CancelSource;
 
-		private ImpunityCallback OnConnectCallback;
+		private ImpunityCallback? OnConnectCallback;
 
 
 		/// <summary>Creates a WebSocket client that connects to a server at the given URL (e.g. ws://host:port/ws).</summary>
-		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions? options = null)
 		{
 			string url = $"ws://{host}:{port}/ws";
 			return new ImpunityWebSocketClient(url, options);
 		}
 
-		private ImpunityWebSocketClient(string url, ImpunityOptions options)
+		private ImpunityWebSocketClient(string url, ImpunityOptions? options)
 		{
 			Url = url;
 			if (options == null)
@@ -425,7 +424,7 @@ namespace Impunity.Networking
 		/// <inheritdoc/>
 		public void SendGuaranteedMessage(ArraySegment<byte> messageBytes)
 		{
-			ClientWebSocket socket = Socket;
+			ClientWebSocket? socket = Socket;
 			if (socket == null || socket.State != WebSocketState.Open)
 			{
 				return;

@@ -29,7 +29,7 @@ namespace Impunity.Networking
 	public class ServerAnnounceMessage
 	{
 		[BsonField("gn")]
-		public string GameName;
+		public string GameName = null!;
 	}
 
 	/// <summary>Parsed binary message header. See <see cref="ImpunityNetworkingUtil"/> for wire format.</summary>

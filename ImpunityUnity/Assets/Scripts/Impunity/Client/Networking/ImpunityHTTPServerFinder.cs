@@ -15,7 +15,9 @@ namespace Impunity.Networking
 	{
 		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results on the main thread.</summary>
 		/// <param name="runner">MonoBehaviour to run the coroutine on.</param>
+		/// <param name="options"></param>
 		/// <param name="hostname">Server hostname, optionally with port (e.g., "example.com" or "example.com:29653").</param>
+		/// <param name="onComplete"></param>
 		public static void GetServerWorlds(MonoBehaviour runner, ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
 		{
 			if (hostname.IndexOf(':') < 0)
@@ -29,30 +31,37 @@ namespace Impunity.Networking
 			{
 				if(request.error != null)
 				{
-					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, request.error), null);
+					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, request.error), null!);
 					return;
 				}
 
 				if (string.IsNullOrEmpty(request.downloadHandler.text))
 				{
-					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, "Server didn't return a response"), null);
+					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, "Server didn't return a response"), null!);
 					return;
 				}
 				
 				try
 				{
 					BsonValue bsonReply = JsonSerializer.Deserialize(request.downloadHandler.text);
-					StandaloneServerWorldsInfo reply = BsonMapper.Global.ToObject<StandaloneServerWorldsInfo>(bsonReply as BsonDocument);
+					BsonDocument? docReply = bsonReply as BsonDocument;
+					if (docReply == null)
+					{
+						onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ServerVersionIncompatible, "Unknown server response"), null!);
+						return;
+					}
+
+					StandaloneServerWorldsInfo reply = BsonMapper.Global.ToObject<StandaloneServerWorldsInfo>(docReply);
 
 					if (reply.ImpunityVersion != ImpunityConstants.ImpunityVersion)
 					{
-						onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ServerVersionIncompatible, "Incompatible Impunity version"), null);
+						onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ServerVersionIncompatible, "Incompatible Impunity version"), null!);
 						return;
 					}
 
 					if (reply.GameType != options.GameTypeCode)
 					{
-						onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ServerVersionIncompatible, "Server is for a different Impunity game"), null);
+						onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ServerVersionIncompatible, "Server is for a different Impunity game"), null!);
 						return;
 					}
 
@@ -93,7 +102,7 @@ namespace Impunity.Networking
 				}
 				catch (Exception e)
 				{
-					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, e.Message), null);
+					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, e.Message), null!);
 					return;
 				}
 			}));
@@ -112,7 +121,7 @@ namespace Impunity.Networking
 			{
 				if (err != null)
 				{
-					onComplete(err, null);
+					onComplete(err, null!);
 					return;
 				}
 
@@ -125,7 +134,7 @@ namespace Impunity.Networking
 					}
 				}
 
-				onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ActionNotFound, "Game not found on server"), null);
+				onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ActionNotFound, "Game not found on server"), null!);
 			});
 		}
 	}

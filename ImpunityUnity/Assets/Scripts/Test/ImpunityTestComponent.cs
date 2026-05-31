@@ -640,7 +640,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("C1 Made channel " + c1channel.DistributedEntityId);
 
 		TestPlayer c1player1 = new TestPlayer();
-		c1player1.Name = "player1";
+		c1player1.UniqueName = "player1";
 		c1player1.MovementState.Set(new CustomMovementStateData
 		{
 			StartPos = new Vector3(1, 2, 3),
@@ -656,7 +656,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		ImpunityLogger.LogInformation("C2 subscribed to channel " + c2channel.DistributedEntityId);
 
 		TestPlayer c2player2 = new TestPlayer();
-		c2player2.Name = "player2";
+		c2player2.UniqueName = "player2";
 		c2player2 = await c2.EntityManager.CreateObjectAsync(c2player2, c2channel, false);
 		ImpunityLogger.LogInformation("C2 Made player: " + c2player2.DistributedEntityId);
 
@@ -666,7 +666,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		try
 		{
 			TestPlayer c2player1 = new TestPlayer();
-			c2player1.Name = "player1";
+			c2player1.UniqueName = "player1";
 			c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c2channel, false);
 			ImpunityLogger.LogError("C2 Made player1: " + c2player1.DistributedEntityId);
 		}
@@ -771,12 +771,12 @@ public class ImpunityTestComponent : MonoBehaviour
 		TestZone c1channelCreate = new TestZone();
 		c1channelCreate.Status.Set("Stuff");
 
-		List<IDistributedEntity> zoneObjects = new List<IDistributedEntity>();
+		List<IDistributedObject> zoneObjects = new List<IDistributedObject>();
 
 		for(int i=1; i<=5; i++)
 		{
 			var zonePlayer = new TestPlayer();
-			zonePlayer.Name = "player_"+i;
+			zonePlayer.UniqueName = "player_"+i;
 			zonePlayer.Direction.Set(new Vector3(1,1,i));
 			zoneObjects.Add(zonePlayer);
 		}

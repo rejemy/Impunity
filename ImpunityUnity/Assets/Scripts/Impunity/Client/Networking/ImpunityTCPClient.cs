@@ -12,7 +12,7 @@ namespace Impunity.Networking
 	public class ImpunityTCPClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
-		public string ConnectionId { get; private set; }
+		public string ConnectionId { get; private set; } = "Unconnected";
 
 		/// <inheritdoc/>
 		public ImpunityClientMessageHandler OnMessageRecieved { get; set; }
@@ -30,14 +30,14 @@ namespace Impunity.Networking
 		private IPEndPoint ServerEndpoint;
 		private ImpunityOptions Options;
 
-		private TcpClient ClientTCPSocket;
-		private Thread ClientTCPSocketThread;
-		private NetworkStream TCPSocketStream;
+		private TcpClient? ClientTCPSocket;
+		private Thread? ClientTCPSocketThread;
+		private NetworkStream ?TCPSocketStream;
 
-		private UdpClient ClientUDPSocket;
-		private Thread ClientUDPSocketThread;
+		private UdpClient? ClientUDPSocket;
+		private Thread? ClientUDPSocketThread;
 	
-		private ImpunityCallback OnConnectCallback;
+		private ImpunityCallback? OnConnectCallback;
 
 
 		byte[] SessionDataPacket;
@@ -45,20 +45,20 @@ namespace Impunity.Networking
 		byte[] PongPacket;
 
 		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>
-		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(serverEndpoint, options);
 			return client;
 		}
 
 		/// <summary>Creates a TCP client that connects to a server at the given hostname and port.</summary>
-		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions? options = null)
 		{
 			ImpunityTCPClient client = new ImpunityTCPClient(hostname, port, options);
 			return client;
 		}
 
-		private ImpunityTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		private ImpunityTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
 		{
 			ServerEndpoint = serverEndpoint;
 			if (options == null)
@@ -70,7 +70,7 @@ namespace Impunity.Networking
 			ClientTCPSocket = new TcpClient();
 		}
 
-		private ImpunityTCPClient(string hostname, int port, ImpunityOptions options = null)
+		private ImpunityTCPClient(string hostname, int port, ImpunityOptions? options = null)
 		{
 			ServerHost = hostname;
 			ServerPort = port;
@@ -127,6 +127,11 @@ namespace Impunity.Networking
 			byte[] receiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			bool connected = false;
 
+			if (ClientTCPSocket == null)
+			{
+				return;
+			}
+
 			try
 			{
 				if (ServerHost != null)
@@ -138,7 +143,7 @@ namespace Impunity.Networking
 					ClientTCPSocket.Connect(ServerEndpoint);
 				}
 
-				ServerEndpoint = ClientTCPSocket.Client.RemoteEndPoint as IPEndPoint;
+				ServerEndpoint = (IPEndPoint)ClientTCPSocket.Client.RemoteEndPoint;
 				ClientTCPSocket.Client.ReceiveTimeout = 1000;
 				TCPSocketStream = ClientTCPSocket.GetStream();
 
@@ -250,10 +255,15 @@ namespace Impunity.Networking
 			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
 			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
 
+			if(ClientTCPSocket == null)
+			{
+				return;
+			}
+
 			try
 			{
 				// Open Udp socket on same port/address as established TCP session
-				IPEndPoint localEndpoint = ClientTCPSocket.Client.LocalEndPoint as IPEndPoint;
+				IPEndPoint localEndpoint = (IPEndPoint)ClientTCPSocket.Client.LocalEndPoint;
 				ImpunityLogger.LogInformation("Client listening for udp on " + localEndpoint.ToString());
 				ClientUDPSocket = new UdpClient(localEndpoint);
 				
@@ -267,7 +277,7 @@ namespace Impunity.Networking
 						continue;
 					}
 
-					IPEndPoint sender = null;
+					IPEndPoint sender = default!;
 					byte[] packet = ClientUDPSocket.Receive(ref sender);
 					if (!sender.Equals(ServerEndpoint))
 					{
@@ -327,7 +337,7 @@ namespace Impunity.Networking
 
 			try
 			{
-				ClientUDPSocket.Send(PongPacket, PongPacket.Length, ServerEndpoint);
+				ClientUDPSocket?.Send(PongPacket, PongPacket.Length, ServerEndpoint);
 			}
 			catch (Exception e)
 			{
@@ -340,7 +350,7 @@ namespace Impunity.Networking
 		{
 			try
 			{
-				ClientUDPSocket.Send(PingPacket, PingPacket.Length, this.ServerEndpoint);
+				ClientUDPSocket?.Send(PingPacket, PingPacket.Length, this.ServerEndpoint);
 			}
 			catch (Exception e)
 			{
@@ -356,7 +366,7 @@ namespace Impunity.Networking
 				return;
 			}
 
-			TCPSocketStream.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			TCPSocketStream?.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
 		/// <summary>Sends a message via UDP if available, otherwise falls back to TCP.</summary>

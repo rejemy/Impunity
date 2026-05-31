@@ -19,7 +19,7 @@ using UltraLiteDB;
 // ───────── Test Entity Types ─────────
 
 [DistributedEntity(IntegrationTestTypes.ENTITY)]
-public partial class IntegrationTestEntity : DistributedEntityBase
+public partial class IntegrationTestEntity : DistributedObjectBase
 {
 	public enum Props : byte { HEALTH = 1, NAME = 2 }
 

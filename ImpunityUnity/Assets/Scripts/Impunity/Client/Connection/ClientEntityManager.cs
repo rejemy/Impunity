@@ -13,8 +13,8 @@ namespace Impunity.Connection
 	public class DistributedEntity : Attribute
 	{
 		internal int EntityId;
-		public string FactoryMethod { get; set; }
-		public string PersistAs { get; set; }
+		public string? FactoryMethod { get; set; }
+		public string? PersistAs { get; set; }
 
 		public DistributedEntity(int entityId)
 		{
@@ -27,7 +27,7 @@ namespace Impunity.Connection
 	public class Distributed : Attribute
 	{
 		internal byte FieldId;
-		public string PersistAs { get; set; }
+		public string? PersistAs { get; set; }
 
 		public Distributed(byte fieldId)
 		{
@@ -39,7 +39,6 @@ namespace Impunity.Connection
 	/// <summary>Client-side interface for a distributed entity. Provides identity, dirty tracking, lock/event/delete operations, and lifecycle callbacks.</summary>
 	public interface IDistributedEntity
 	{
-		string Name { get; set; }
 		uint DistributedEntityId { get; set; }
 		int DistributedEntityType { get; set; }
 		bool IsClientAuthoritative { get; set; }
@@ -54,7 +53,7 @@ namespace Impunity.Connection
 		/// <summary>Per-entity outgoing sequence counter, incremented each time this entity sends an update.</summary>
 		ushort SendSeq { get; set; }
 		/// <summary>Per-field last-received sequence numbers, indexed by field ID. Used to detect and discard stale out-of-order updates.</summary>
-		ushort[] FieldRecvSeq { get; set; }
+		ushort[]? FieldRecvSeq { get; set; }
 
 		void SetDirty(ulong fieldBitmask, bool guaranteed);
 
@@ -76,36 +75,41 @@ namespace Impunity.Connection
 		void OnUndistributed();
 	}
 
+	/// <summary>Client-side interface for a distributed object entity.</summary>
+	public interface IDistributedObject : IDistributedEntity
+	{
+		string? UniqueName { get; set; }
+	}
+
 	/// <summary>Client-side interface for a distributed channel entity. Channels contain child objects and support subscription.</summary>
 	public interface IDistributedChannel : IDistributedEntity
 	{
-		Dictionary<uint, IDistributedEntity> DistributedObjects { get; }
+		string Name { get; set; }
+		Dictionary<uint, IDistributedObject> DistributedObjects { get; }
 
 		void Unsubscribe(ImpunityCallback onComplete);
 
-		void OnObjectAdded(IDistributedEntity entity, bool newlyCreated);
+		void OnObjectAdded(IDistributedObject entity, bool newlyCreated);
 		void OnObjectRemoved(uint entityId, bool destroyed);
 	}
 
 	/// <summary>Base implementation of <see cref="IDistributedEntity"/> with dirty-bit tracking, lock waiting, and lifecycle callback stubs.</summary>
 	public abstract class DistributedEntityBase : IDistributedEntity
 	{
-		public string Name { get; set; }
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
 		public bool IsPersisted { get; set; }
 		public bool IsLocked { get; set; }
-		private event ImpunityCallback<LockWaitResult> LockWaiter;
+		private event ImpunityCallback<LockWaitResult>? LockWaiter;
 
-		public ClientEntityManager Manager { get; set; }
-		public IDistributedChannel Channel { get; set; }
+		public ClientEntityManager Manager { get; set; } = default!;
 
 		public ulong DirtyBits { get; private set; }
 		public bool DirtyGuaranteed { get; private set; }
 
 		public ushort SendSeq { get; set; }
-		public ushort[] FieldRecvSeq { get; set; }
+		public ushort[]? FieldRecvSeq { get; set; }
 
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
         {
@@ -185,17 +189,25 @@ namespace Impunity.Connection
 		public virtual void OnUndistributed() { }
 	}
 
+	/// <summary>Base implementation of <see cref="IDistributedObject"/>.</summary>
+	public abstract class DistributedObjectBase : DistributedEntityBase, IDistributedObject
+	{
+		public string? UniqueName { get; set; }
+	}
+
 	/// <summary>Base implementation of <see cref="IDistributedChannel"/>. Maintains a dictionary of child objects and supports unsubscription.</summary>
 	public abstract class DistributedChannelBase : DistributedEntityBase, IDistributedChannel
 	{
-		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedEntity>();
+		public string Name { get; set; } = default!;
+
+		public Dictionary<uint, IDistributedObject> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedObject>();
 
 		public void Unsubscribe(ImpunityCallback onComplete)
 		{
 			Manager.UnsubscribeFromChannel(this, onComplete);
 		}
 
-		public virtual void OnObjectAdded(IDistributedEntity entity, bool newlyCreated)
+		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)
 		{
 			DistributedObjects.Add(entity.DistributedEntityId, entity);
 		}
@@ -224,7 +236,7 @@ namespace Impunity.Connection
 		public byte FieldId;
 		public UInt64 FieldBitmask;
 		public string FieldName;
-		public string PersistedAs;
+		public string? PersistedAs;
 		public bool IsTemporal;
 		public GameStateEntityFieldType FieldType;
 		public GameStateEntityPropertyValueType FieldValueType;
@@ -232,6 +244,23 @@ namespace Impunity.Connection
 		public MethodInfo InitMethod;
 		public MethodInfo UpdateMethod;
 		public MethodInfo SkipMethod;
+
+		public DistributedTypeFieldInfo(byte fieldId, UInt64 fieldBitmask, string fieldName, string? persistedAs, bool isTemporal,
+			GameStateEntityFieldType fieldType, GameStateEntityPropertyValueType fieldValueType,
+			MethodInfo writeMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod)
+		{
+			this.FieldId = fieldId;
+			this.FieldBitmask = fieldBitmask;
+			this.FieldName = fieldName;
+			this.PersistedAs = persistedAs;
+			this.IsTemporal = isTemporal;
+			this.FieldType = fieldType;
+			this.FieldValueType = fieldValueType;
+			this.WriteMethod = writeMethod;
+			this.InitMethod = initMethod;
+			this.UpdateMethod = updateMethod;
+			this.SkipMethod = skipMethod;
+		}
 	}
 
 	/// <summary>Internal metadata for a distributed entity type: type ID, factory, field definitions, channel/persistence flags.</summary>
@@ -241,8 +270,15 @@ namespace Impunity.Connection
 		public bool IsChannel;
 		public bool Persisted;
 		public Type ObjectType;
-		public Func<IDistributedEntity> Factory;
-		public DistributedTypeFieldInfo[] DistributedFields;
+		public Func<IDistributedEntity>? Factory;
+		public DistributedTypeFieldInfo[] DistributedFields = null!;
+
+		public DistributedTypeInfo(int distributedTypeId, Type objectType, bool persisted)
+		{
+			DistributedTypeId = distributedTypeId;
+			ObjectType = objectType;
+			Persisted = persisted;
+		}
 	}
 
 
@@ -253,9 +289,9 @@ namespace Impunity.Connection
 	public class ClientEntityManager
 	{
 		/// <summary>The connection this manager sends actions through.</summary>
-		public BaseGameConnection Connection;
+		public BaseGameConnection Connection = default!;
 
-		private DistributedTypeInfo[] DistributedTypes;
+		private DistributedTypeInfo[] DistributedTypes = default!;
 
 		private Dictionary<string, IDistributedChannel> SubscribedChannels;
 		private Dictionary<uint, IDistributedEntity> DistributedObjects;
@@ -270,11 +306,10 @@ namespace Impunity.Connection
 		private object[] UpdateMethodArgs;
 
 		/// <summary>Called when a distributed object is created in any subscribed channel. Parameters: entity, parent channel, newly created flag.</summary>
-		public Action<IDistributedEntity, IDistributedChannel, bool> OnDistributedObjectCreated;
+		public Action<IDistributedObject, IDistributedChannel, bool>? OnDistributedObjectCreated;
 
 		public ClientEntityManager()
         {
-			DistributedTypes = null;
 			SubscribedChannels = new Dictionary<string, IDistributedChannel>();
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
 			DirtyObjects = new HashSet<IDistributedEntity>();
@@ -291,7 +326,7 @@ namespace Impunity.Connection
 		// -------------- Public API
 
 		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns format definitions for the server handshake.</summary>
-		public GameStateEntityTypeDef[] RegisterEntityTypes(Type[] entityTypes)
+		public GameStateEntityTypeDef[]? RegisterEntityTypes(Type[] entityTypes)
         {
 			if (entityTypes == null || entityTypes.Length == 0)
             {
@@ -337,9 +372,9 @@ namespace Impunity.Connection
 
 
 		/// <summary>Creates a distributed object in a channel. Serializes initial properties and sends to the server. Returns the entity via callback after server confirmation.</summary>
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedEntity
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedObject
 		{
-			if(distObj.Name != null && distObj.Name.Contains("/"))
+			if(distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
 			{
 				throw new Exception("Object name cannot contain forward slash");
 			}
@@ -385,11 +420,11 @@ namespace Impunity.Connection
 				instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.Name, replace, (ImpunityErrorResponse err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName, replace, (ImpunityErrorResponse? err, uint objectId) =>
 			{
 				if (err != null)
 				{
-					onComplete?.Invoke(err, null);
+					onComplete?.Invoke(err, null!);
 					return;
 				}
 
@@ -398,11 +433,11 @@ namespace Impunity.Connection
 			});
 		}
 
-		private ObjectCreateData MakeObjectCreateData(IDistributedEntity distObj, IDistributedChannel channel)
+		private ObjectCreateData MakeObjectCreateData(IDistributedObject distObj, IDistributedChannel channel)
 		{
 			ObjectCreateData data = new ObjectCreateData();
 
-			if(distObj.Name != null && distObj.Name.Contains("/"))
+			if(distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
 			{
 				throw new Exception("Object name cannot contain forward slash");
 			}
@@ -448,11 +483,11 @@ namespace Impunity.Connection
 				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
-			return new ObjectCreateData(entityTypeId, instanceFlags, propertyBytes, distObj.Name);
+			return new ObjectCreateData(entityTypeId, instanceFlags, propertyBytes, distObj.UniqueName);
 		}
 
 		/// <summary>Creates a distributed channel with optional initial child objects.</summary>
-		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
+		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
 		{
 			channel.Name = channelName;
 
@@ -492,12 +527,12 @@ namespace Impunity.Connection
 				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
-			List<ObjectCreateData> objectCreateList = null;
+			List<ObjectCreateData>? objectCreateList = null;
 			if (channelObjects != null)
 			{
 				objectCreateList = new List<ObjectCreateData>();
 
-				foreach(IDistributedEntity distObj in channelObjects)
+				foreach(IDistributedObject distObj in channelObjects)
 				{
 					objectCreateList.Add(MakeObjectCreateData(distObj, channel));
 				}
@@ -529,8 +564,7 @@ namespace Impunity.Connection
 			byte instaceFlags = 0;
 			ArraySegment<byte> propertyBytes = null;
 
-			List<ObjectCreateData> channelObjects = null;
-			
+
 			if (createIfNeeded != null)
 			{
 				createIfMising = true;
@@ -573,11 +607,11 @@ namespace Impunity.Connection
 				}
 			}
 
-			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, channelObjects, (ImpunityErrorResponse err, uint channelId) =>
+			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, null, (ImpunityErrorResponse? err, uint channelId) =>
 			{
 				if (err != null)
 				{
-					onComplete?.Invoke(err, null);
+					onComplete?.Invoke(err, null!);
 					return;
 				}
 
@@ -595,7 +629,7 @@ namespace Impunity.Connection
 		/// <summary>Unsubscribes from a channel and removes it from the local subscription list.</summary>
 		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete)
 		{
-			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityErrorResponse err) =>
+			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityErrorResponse? err) =>
 			{
 				if (err != null)
                 {
@@ -603,7 +637,7 @@ namespace Impunity.Connection
 					return;
                 }
 
-				SubscribedChannels.Remove(channel.Name);
+				SubscribedChannels.Remove(channel.Name!);
 
 				onComplete?.Invoke(null);
 			});
@@ -646,10 +680,8 @@ namespace Impunity.Connection
 				}
 			}
 
-			DistributedTypeInfo internalTypeInfo = new DistributedTypeInfo();
-			internalTypeInfo.DistributedTypeId = entityData.Index;
-			internalTypeInfo.ObjectType = entityType;
-			internalTypeInfo.Persisted = entityData.PersistedAs != null;
+			DistributedTypeInfo internalTypeInfo = new DistributedTypeInfo(entityData.Index, entityType, entityData.PersistedAs != null);
+
 			if (distAttr.FactoryMethod != null)
 			{
 				MethodInfo factoryMethod = entityType.GetMethod(distAttr.FactoryMethod, BindingFlags.Public | BindingFlags.Static);
@@ -697,22 +729,16 @@ namespace Impunity.Connection
 				// Create a throw-away instance so we can get its type info
 				IDistributedField tempFieldValue = (IDistributedField)Activator.CreateInstance(fieldType);
 
-				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo();
-				dfield.FieldId = fieldAttr.FieldId;
-				dfield.FieldBitmask = 1ul << (dfield.FieldId - 1);
-				dfield.FieldName = fieldInfo.Name;
-				dfield.FieldType = tempFieldValue.FieldType;
-				dfield.FieldValueType = tempFieldValue.ValueType;
-				dfield.PersistedAs = fieldAttr.PersistAs?.Trim();
-				dfield.IsTemporal = isTemporalValue;
+				var fieldBitmask = 1ul << (fieldAttr.FieldId - 1);
+				var fieldPersistedAs = fieldAttr.PersistAs?.Trim();
 
-				if (dfield.PersistedAs != null)
+				if (fieldPersistedAs != null)
 				{
-					if (dfield.PersistedAs.Length == 0)
+					if (fieldPersistedAs.Length == 0)
 					{
 						throw new Exception("Can't use empty string as PersistedAs value");
 					}
-					else if (dfield.PersistedAs.StartsWith("_"))
+					else if (fieldPersistedAs.StartsWith("_"))
 					{
 						throw new Exception("Can't start PersistedAs with underscore");
 					}
@@ -725,34 +751,35 @@ namespace Impunity.Connection
 					hasPersistedField = true;
 				}
 
-
-				MethodInfo writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo? writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
 				{
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
-				dfield.WriteMethod = writeMethod;
 
-				MethodInfo initMethod = GetTypeMethodInherited(entityType, "_imp_ReadInitialWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo? initMethod = GetTypeMethodInherited(entityType, "_imp_ReadInitialWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (initMethod == null)
 				{
 					throw new Exception("Cant find init method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
-				dfield.InitMethod = initMethod;
 
-				MethodInfo updateMethod = GetTypeMethodInherited(entityType, "_imp_ReadChangeWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo? updateMethod = GetTypeMethodInherited(entityType, "_imp_ReadChangeWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (updateMethod == null)
 				{
 					throw new Exception("Cant find update method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
-				dfield.UpdateMethod = updateMethod;
 
-				MethodInfo skipMethod = GetTypeMethodInherited(entityType, "_imp_SkipWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo? skipMethod = GetTypeMethodInherited(entityType, "_imp_SkipWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (skipMethod == null)
 				{
 					throw new Exception("Cant find skip method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
-				dfield.SkipMethod = skipMethod;
+
+
+				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldAttr.PersistAs?.Trim(), 
+																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType, 
+																				writeMethod, initMethod, updateMethod, skipMethod);
+
 
 				distributedFields.Add(dfield);
 			}
@@ -773,13 +800,14 @@ namespace Impunity.Connection
 			int p = 0;
 			foreach (DistributedTypeFieldInfo dfield in distributedFields)
             {
-				GameStateEntityPropertyDef propDef = new GameStateEntityPropertyDef();
-				propDef.Index = dfield.FieldId;
-				propDef.Name = dfield.FieldName;
-				propDef.FieldType = (byte)dfield.FieldType;
-				propDef.PropValueType = (byte)dfield.FieldValueType;
-				propDef.PersistedAs = dfield.PersistedAs;
-				propDef.IsTemporal = dfield.IsTemporal;
+				GameStateEntityPropertyDef propDef = new GameStateEntityPropertyDef(
+					dfield.FieldId,
+					dfield.FieldName,
+					(byte)dfield.FieldType,
+					(byte)dfield.FieldValueType,
+					dfield.PersistedAs,
+					dfield.IsTemporal
+				);
 
 				entityData.Properties[p++] = propDef;
 			}
@@ -827,7 +855,7 @@ namespace Impunity.Connection
 			return fields;
 		}
 
-		private static MethodInfo GetTypeMethodInherited(Type typeInfo, string methodName, BindingFlags flags)
+		private static MethodInfo? GetTypeMethodInherited(Type typeInfo, string methodName, BindingFlags flags)
 		{
 			MethodInfo methodInfo = typeInfo.GetMethod(methodName, flags);
 			if (methodInfo != null)
@@ -861,7 +889,7 @@ namespace Impunity.Connection
 
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
 		{
-			IDistributedChannel channel = null;
+			IDistributedChannel channel;
 			if (channelType != 0)
             {
 				DistributedTypeInfo typeInfo = GetDistributedTypeInfo(channelType);
@@ -902,28 +930,28 @@ namespace Impunity.Connection
 			}			
 		}
 
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string uniqueName, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
 		{
-			IDistributedEntity entity = null;
+			IDistributedObject entity;
 
 			DistributedTypeInfo typeInfo = DistributedTypes[objectType];
 			if (typeInfo.Factory != null)
 			{
-				entity = typeInfo.Factory();
+				entity = (IDistributedObject)typeInfo.Factory();
 			}
 			else
 			{
-				entity = (IDistributedEntity)Activator.CreateInstance(typeInfo.ObjectType);
+				entity = (IDistributedObject)Activator.CreateInstance(typeInfo.ObjectType);
 			}
 
 			entity.DistributedEntityType = objectType;
-			entity.Name = uniqueName;
+			entity.UniqueName = uniqueName;
 			entity.IsLocked = isLocked;
 			entity.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 
 			RegisterEntity(entity, objectId);
 
-			IDistributedChannel channel = DistributedObjects[channelId] as IDistributedChannel;
+			IDistributedChannel? channel = DistributedObjects[channelId] as IDistributedChannel;
 
 			if (channel == null)
 			{
@@ -980,7 +1008,7 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				SubscribedChannels.Add(channel.Name, channel);
+				SubscribedChannels.Add(channel.Name!, channel);
 			}
 		}
 
@@ -990,7 +1018,7 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				SubscribedChannels.Remove(channel.Name);
+				SubscribedChannels.Remove(channel.Name!);
 			}
 		}
 

@@ -15,11 +15,11 @@ namespace Impunity.Networking
 	/// <summary>Discovers Impunity servers on the LAN via UDP broadcast. Sends search packets and listens for announce responses. Call <see cref="Update"/> on the main thread to receive callbacks.</summary>
 	public class ImpunityTCPServerFinder : IDisposable
 	{
-		private static ImpunityTCPServerFinder Instance;
+		private static ImpunityTCPServerFinder? Instance;
 
 		ImpunityOptions Options;
-		Thread UDPListenerThread;
-		UdpClient FinderUdpSocket;
+		Thread? UDPListenerThread;
+		UdpClient? FinderUdpSocket;
 		bool Running;
 
 		byte[] SearchPacket;
@@ -127,7 +127,7 @@ namespace Impunity.Networking
 						break;
 					}
 
-					IPEndPoint groupEP = null;
+					IPEndPoint groupEP = null!;
 					byte[] packet = FinderUdpSocket.Receive(ref groupEP);
 					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))
 					{
@@ -158,7 +158,7 @@ namespace Impunity.Networking
 		private void OnServerAnnounce(byte[] packet, ref IPEndPoint from)
 		{
 
-			BsonDocument doc = null;
+			BsonDocument doc = null!;
 
 			if (packet.Length - ServerAnnounceHeader.Length > 0)
 			{
@@ -208,7 +208,7 @@ namespace Impunity.Networking
 			ImpunityLogger.LogDebug("Sending server search");
 
 			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, Options.ServerPort);
-			FinderUdpSocket.Send(SearchPacket, SearchPacket.Length, broadcastEp);
+			FinderUdpSocket?.Send(SearchPacket, SearchPacket.Length, broadcastEp);
 		}
 	}
 }

@@ -107,13 +107,13 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 }
 
 [DistributedEntity(TestEntityTypes.EMPTY_OBJ)]
-public partial class TestEmptyObj : DistributedEntityBase
+public partial class TestEmptyObj : DistributedObjectBase
 {
 
 }
 
 [DistributedEntity(TestEntityTypes.OBJ, FactoryMethod = "DistributedObjFactory")]
-public partial class TestDistObj : DistributedEntityBase
+public partial class TestDistObj : DistributedObjectBase
 {
 	enum DistributedPropIds : byte
 	{
@@ -157,7 +157,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 	public TestPlayer()
 	{
 		InitializeDistributedFields();
-		base.InitializeDistributedFields();
 
 		TestBool.OnChanged += OnTestBoolChanged;
 		Direction.OnChanged += OnDirectionChanged;
@@ -368,7 +367,7 @@ public partial class PersistedTestZone : DistributedChannelBase
 }
 
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE_OBJECT, PersistAs = "zobj")]
-public partial class ZonePersistedObject : DistributedEntityBase
+public partial class ZonePersistedObject : DistributedObjectBase
 {
 	enum DistributedPropIds : byte
 	{

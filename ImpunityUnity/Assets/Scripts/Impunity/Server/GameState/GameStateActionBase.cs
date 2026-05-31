@@ -16,7 +16,7 @@ namespace Impunity.GameState
 	{
 		/// <summary>Error info, or null on success.</summary>
 		[BsonField("e")]
-		public ImpunityErrorResponse Error;
+		public ImpunityErrorResponse? Error;
 	}
 
 	/// <summary>Action result with a typed return value.</summary>
@@ -24,7 +24,7 @@ namespace Impunity.GameState
 	{
 		/// <summary>The result payload.</summary>
 		[BsonField("r")]
-		public TResult Result;
+		public TResult? Result;
 	}
 
 	/// <summary>Base class for all client-to-server and server-to-client actions. Actions are serialized via BSON, routed through the network layer, and executed on the game server thread.</summary>
@@ -32,7 +32,7 @@ namespace Impunity.GameState
 	{
 		/// <summary>Error response set during execution, or null on success.</summary>
 		[BsonIgnore]
-		public ImpunityErrorResponse Error;
+		public ImpunityErrorResponse? Error;
 
 		/// <summary>The connection that sent this action (server-side only).</summary>
 		[BsonIgnore]
@@ -152,7 +152,7 @@ namespace Impunity.GameState
 	public abstract class ClientActionResultlessBase : GameStateActionBase
 	{
 		[BsonIgnore]
-		public ImpunityCallback OnCompleteCallback;
+		public ImpunityCallback? OnCompleteCallback;
 
 		public void SetGuaranteed(bool guaranteed) { this.Guaranteed = guaranteed; }
 		
@@ -191,10 +191,10 @@ namespace Impunity.GameState
 	public abstract class ClientActionResultBase<TResult> : GameStateActionBase
 	{
 		[BsonIgnore]
-		public TResult Result;
+		public TResult? Result;
 
 		[BsonIgnore]
-		public ImpunityCallback<TResult> OnCompleteCallback;
+		public ImpunityCallback<TResult>? OnCompleteCallback;
 
 		public override bool HasCallback()
 		{

@@ -19,7 +19,7 @@ namespace Impunity.Connection
 	public class RemoteGameConnection : BaseGameConnection
 	{
 		/// <summary>Called when a network-level error occurs (connection lost, socket error).</summary>
-		public ImpunityCallback OnNetworkError { get; set; }
+		public ImpunityCallback? OnNetworkError { get; set; }
 
 		private BlockingCollection<GameStateActionBase> PendingSend;
 		private ConcurrentQueue<GameStateActionBase> AwaitingReceive;
@@ -29,14 +29,14 @@ namespace Impunity.Connection
 		private ImpunityOptions Options;
 		private IImpunityNetworkClient NetworkClient;
 #if !UNITY_WEBGL
-		private Thread NetworkWriterThread;
+		private Thread? NetworkWriterThread;
 #endif
 		private bool Running;
 
 		private byte[] SendBuffer;
 		private ByteWriter SendBufferWriter;
 
-		public RemoteGameConnection(IImpunityNetworkClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options, ClientEntityManager em) : base(format, em)
+		public RemoteGameConnection(IImpunityNetworkClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options, ClientEntityManager? em) : base(format, em)
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
 			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
@@ -50,7 +50,7 @@ namespace Impunity.Connection
 			}
 			Options = options;
 			NetworkClient = networkClient;
-			NetworkClient.OnNetworkError = OnNetworkErrorReceived;
+			NetworkClient.OnNetworkError = OnNetworkErrorReceived!;
 			NetworkClient.OnMessageRecieved = OnNetworkMessageReceived;
 			NetworkClient.OnDisconnectedByServer = OnDisconnectedByServer;
 
@@ -61,7 +61,7 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Creates a TCP remote connection to the given server endpoint.</summary>
-		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
+		public static RemoteGameConnection MakeTCPRemoteConnection(IPEndPoint serverEndpoint, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options = null, ClientEntityManager? em = null)
 		{
 			if (options == null)
 			{
@@ -72,7 +72,7 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
-		public static RemoteGameConnection MakeTCPRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
+		public static RemoteGameConnection MakeTCPRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options = null, ClientEntityManager? em = null)
 		{
 			if (options == null)
 			{
@@ -83,7 +83,7 @@ namespace Impunity.Connection
 		}
 
 				/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
-		public static RemoteGameConnection MakeWebsocketRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions options = null, ClientEntityManager em = null)
+		public static RemoteGameConnection MakeWebsocketRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options = null, ClientEntityManager? em = null)
 		{
 			if (options == null)
 			{
@@ -95,7 +95,7 @@ namespace Impunity.Connection
 
 		public override void Connect(ImpunityCallback onComplete)
 		{
-			NetworkClient.Connect((ImpunityErrorResponse err) =>
+			NetworkClient.Connect((ImpunityErrorResponse? err) =>
 			{
 				if (err != null)
 				{
@@ -132,7 +132,7 @@ namespace Impunity.Connection
 
 			while (Running)
 			{
-				GameStateActionBase action = null;
+				GameStateActionBase? action = null;
 
 				try
 				{

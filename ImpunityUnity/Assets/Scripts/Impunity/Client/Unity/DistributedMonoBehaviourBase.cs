@@ -17,13 +17,12 @@ namespace Impunity.Unity
 	/// </summary>
 	public abstract class DistributedMonoBehvaiourEntityBase : MonoBehaviour, IDistributedEntity
 	{
-		public string Name { get; set; }
 		public uint DistributedEntityId { get; set; }
 		public int DistributedEntityType { get; set; }
 		public bool IsClientAuthoritative { get; set; }
 		public bool IsPersisted { get; set; }
 		public bool IsLocked { get; set; }
-		private event ImpunityCallback<LockWaitResult> LockWaiter;
+		private event ImpunityCallback<LockWaitResult>? LockWaiter;
 
 		public ClientEntityManager Manager { get; set; }
 		public IDistributedChannel Channel { get; set; }
@@ -112,19 +111,30 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>
+	/// Base MonoBehaviour implementing <see cref="IDistributedObject"/> for Unity GameObjects that represent
+	/// distributed objects.
+	/// </summary>
+	public abstract class DistributedMonoBehvaiourObjectBase : DistributedMonoBehvaiourEntityBase, IDistributedObject
+	{
+		public string? UniqueName { get; set; }
+
+	}
+
+	/// <summary>
 	/// Base MonoBehaviour implementing <see cref="IDistributedChannel"/> for Unity GameObjects that represent
 	/// distributed channels. Tracks child objects and provides channel lifecycle callbacks.
 	/// </summary>
 	public abstract class DistributedMonoBehvaiourChannelBase : DistributedMonoBehvaiourEntityBase, IDistributedChannel
 	{
-		public Dictionary<uint, IDistributedEntity> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedEntity>();
+		public string Name { get; set; }
+		public Dictionary<uint, IDistributedObject> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedObject>();
 
 		public void Unsubscribe(ImpunityCallback onComplete)
 		{
 			Manager.UnsubscribeFromChannel(this, onComplete);
 		}
 
-		public virtual void OnObjectAdded(IDistributedEntity entity, bool newlyCreated)
+		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)
 		{
 			DistributedObjects.Add(entity.DistributedEntityId, entity);
 		}

@@ -9,13 +9,13 @@ namespace Impunity
 {
 	/// <summary>Callback for async operations that may fail. Null error indicates success.</summary>
 	/// <param name="err">Error response, or null on success.</param>
-	public delegate void ImpunityCallback(ImpunityErrorResponse err);
+	public delegate void ImpunityCallback(ImpunityErrorResponse? err);
 
 	/// <summary>Callback for async operations that return a value. Null error indicates success.</summary>
 	/// <typeparam name="TReturn">Type of the return value.</typeparam>
 	/// <param name="err">Error response, or null on success.</param>
 	/// <param name="returnValue">The result value on success.</param>
-	public delegate void ImpunityCallback<TReturn>(ImpunityErrorResponse err, TReturn returnValue);
+	public delegate void ImpunityCallback<TReturn>(ImpunityErrorResponse? err, TReturn returnValue);
 
 	/// <summary>Protocol constants including version, ports, buffer sizes, and packet headers.</summary>
 	public static class ImpunityConstants
@@ -37,7 +37,7 @@ namespace Impunity
 	public class ImpunityOptions
 	{
 		/// <summary>Password required for database access. Null for no password.</summary>
-		public string DBPassword = null;
+		public string? DBPassword = null;
 		/// <summary>Whether clients can trigger database schema upgrades remotely.</summary>
 		public bool RemoteUpgradeAllowed = false;
 		/// <summary>Whether the server broadcasts its presence via UDP for LAN discovery.</summary>
@@ -270,13 +270,13 @@ namespace Impunity
 		public GameStateCollection[] Collections;
 
 		[BsonField("es")]
-		public GameStateEntityTypeDef[] EntityTypes;
+		public GameStateEntityTypeDef[]? EntityTypes;
 
 		public GameStateFormatData()
 		{ }
 
 
-		public GameStateFormatData(GameStateFormat format, GameStateEntityTypeDef[] entityTypes)
+		public GameStateFormatData(GameStateFormat format, GameStateEntityTypeDef[]? entityTypes)
 		{
 			Version = format.Version;
 
@@ -373,7 +373,7 @@ namespace Impunity
 		public int Index;
 
 		[BsonField("n")]
-		public string Name;
+		public string Name = null!;
 
 		[BsonField("ft")]
 		public byte FieldType = (byte)GameStateEntityFieldType.Value;
@@ -382,10 +382,25 @@ namespace Impunity
 		public byte PropValueType;
 
 		[BsonField("pa")]
-		public string PersistedAs;
+		public string? PersistedAs;
 
 		[BsonField("tm")]
 		public bool IsTemporal;
+
+		public GameStateEntityPropertyDef()
+		{
+			
+		}
+
+		public GameStateEntityPropertyDef(int index, string name, byte fieldType, byte propValueType, string? persistedAs, bool isTemporal)
+		{
+			Index = index;
+			Name = name;
+			FieldType = fieldType;
+			PropValueType = propValueType;
+			PersistedAs = persistedAs;
+			IsTemporal = isTemporal;
+		}
 	}
 
 	/// <summary>Schema definition for a distributed entity type, including its properties.</summary>
@@ -398,7 +413,7 @@ namespace Impunity
 		public string Name;
 
 		[BsonField("pa")]
-		public string PersistedAs;
+		public string? PersistedAs;
 
 		[BsonField("ps")]
 		public GameStateEntityPropertyDef[] Properties;
@@ -454,7 +469,7 @@ namespace Impunity
 		/// <summary>Checksum of the game state schema, for client/server compatibility verification.</summary>
 		public string GameStateFormatChecksum;
 		/// <summary>Custom game summary data (e.g. map name, game mode) as a BSON document.</summary>
-		public BsonDocument GameSummary;
+		public BsonDocument? GameSummary;
 
 	}
 }

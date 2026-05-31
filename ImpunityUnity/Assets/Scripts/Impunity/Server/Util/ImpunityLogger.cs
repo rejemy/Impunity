@@ -28,7 +28,7 @@ namespace Impunity
 	public static class ImpunityLogger
 	{
 		/// <summary>The active logger implementation. Set this at startup before using any Impunity APIs.</summary>
-		public static IImpunityLogger LoggerInstance;
+		public static IImpunityLogger? LoggerInstance;
 
 		public static void LogTrace(string message)
 		{

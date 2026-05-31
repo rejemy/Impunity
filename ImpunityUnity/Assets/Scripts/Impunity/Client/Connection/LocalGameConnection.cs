@@ -13,14 +13,14 @@ namespace Impunity.Connection
 	/// </summary>
 	public class LocalGameConnection : BaseGameConnection, IGameStateListener, IServerSideConnectionProxy
 	{
-		public GameStateReplicant ConnectionReplicant { get; set; }
+		public GameStateReplicant? ConnectionReplicant { get; set; }
 
 		private static int NextLocalConnectionId = 1;
 
         private GameStateServer State;
 
 
-		public LocalGameConnection(GameStateServer gameState, GameStateFormat format, ClientEntityManager em = null)
+		public LocalGameConnection(GameStateServer gameState, GameStateFormat format, ClientEntityManager? em = null)
 			: base(format, em)
 		{
 			State = gameState;

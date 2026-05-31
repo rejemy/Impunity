@@ -22,7 +22,7 @@ namespace Impunity.Unity
 		private bool Complete = false;
 
 		/// <summary>The error response if the operation failed, or null on success.</summary>
-		public ImpunityErrorResponse Error { get; private set; }
+		public ImpunityErrorResponse? Error { get; private set; }
 
 		public override bool keepWaiting
 		{
@@ -48,9 +48,9 @@ namespace Impunity.Unity
 	{
 		private bool Complete = false;
 		/// <summary>The result value on success.</summary>
-		public TReturn Value { get; private set; }
+		public TReturn? Value { get; private set; }
 		/// <summary>The error response if the operation failed, or null on success.</summary>
-		public ImpunityErrorResponse Error { get; private set; }
+		public ImpunityErrorResponse? Error { get; private set; }
 
 		public override bool keepWaiting
 		{
@@ -301,14 +301,14 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="ClientEntityManager"/>.</summary>
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedEntity
+		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedObject
 		{
 			var t = new ImpunityYield<T>();
 			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
 			return t;
 		}
 
-		public static ImpunityYield<bool> CreateChannelYield<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects) where T : class, IDistributedChannel
+		public static ImpunityYield<bool> CreateChannelYield<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityYield<bool>();
 			manager.CreateChannel<T>(channelName, channel, replace, channelObjects, t.OnComplete);

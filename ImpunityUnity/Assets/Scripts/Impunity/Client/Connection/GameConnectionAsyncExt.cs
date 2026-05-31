@@ -13,7 +13,7 @@ namespace Impunity.Connection
 	internal class ImpunityTaskCompletionSource : TaskCompletionSource<bool>
 	{
 		/// <summary>Callback handler that completes the task, setting an exception on error or a result on success.</summary>
-		public void OnComplete(ImpunityErrorResponse err)
+		public void OnComplete(ImpunityErrorResponse? err)
 		{
 			if (err != null)
 			{
@@ -31,7 +31,7 @@ namespace Impunity.Connection
 	internal class ImpunityTaskCompletionSource<TResult> : TaskCompletionSource<TResult>
 	{
 		/// <summary>Callback handler that completes the task with the result, or sets an exception on error.</summary>
-		public void OnComplete(ImpunityErrorResponse err, TResult result)
+		public void OnComplete(ImpunityErrorResponse? err, TResult result)
 		{
 			if (err != null)
 			{
@@ -290,14 +290,14 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedEntity
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedObject
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
 			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
 			return t.Task;
 		}
 
-		public static Task<bool> CreateChannelAsync<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedEntity> channelObjects) where T : class, IDistributedChannel
+		public static Task<bool> CreateChannelAsync<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			manager.CreateChannel<T>(channelName, channel, replace, channelObjects, t.OnComplete);
