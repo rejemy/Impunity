@@ -541,7 +541,7 @@ namespace Impunity.GameState
 			}
 			else
 			{
-				Value = null;
+				Value = default;
 			}
 		}
 

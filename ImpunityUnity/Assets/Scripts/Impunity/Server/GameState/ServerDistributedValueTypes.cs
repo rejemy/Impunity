@@ -87,7 +87,7 @@ namespace Impunity.GameState
 			}
 			else
 			{
-				Value = null;
+				Value = default;
 			}
 		}
 
@@ -180,7 +180,7 @@ namespace Impunity.GameState
 			}
 			else
 			{
-				Value = null;
+				Value = default;
 			}
 		}
 
@@ -668,7 +668,7 @@ namespace Impunity.GameState
 		public static IStandardDistributableValueType MakeValue(byte type)
 		{
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
-			return (IStandardDistributableValueType)Activator.CreateInstance(dtype);
+			return (IStandardDistributableValueType)Activator.CreateInstance(dtype)!;
 		}
 
 
@@ -678,7 +678,7 @@ namespace Impunity.GameState
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedArray<>).MakeGenericType(dtype);
 
-			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType)!;
 		}
 
 		/// <summary>Creates a <see cref="ServerDistributedQueue{T}"/> for the given element type code.</summary>
@@ -687,7 +687,7 @@ namespace Impunity.GameState
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedQueue<>).MakeGenericType(dtype);
 
-			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType)!;
 		}
 
 		/// <summary>Creates a <see cref="ServerDistributedIntDictionary{T}"/> for the given value type code.</summary>
@@ -696,7 +696,7 @@ namespace Impunity.GameState
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedIntDictionary<>).MakeGenericType(dtype);
 
-			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType)!;
 		}
 
 		/// <summary>Creates a <see cref="ServerDistributedStringDictionary{T}"/> for the given value type code.</summary>
@@ -705,7 +705,7 @@ namespace Impunity.GameState
 			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
 			Type arrayType = typeof(ServerDistributedStringDictionary<>).MakeGenericType(dtype);
 
-			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType);
+			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType)!;
 		}
 
 

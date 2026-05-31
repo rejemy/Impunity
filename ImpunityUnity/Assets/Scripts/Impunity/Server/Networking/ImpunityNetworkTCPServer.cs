@@ -50,7 +50,7 @@ namespace Impunity.Networking
 			Client = client;
 			ClientStream = client.GetStream();
 			ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
-			RemoteEndpoint = (IPEndPoint)Client.Client.RemoteEndPoint;
+			RemoteEndpoint = (IPEndPoint)Client.Client.RemoteEndPoint!;
 			ConnectionId = connectionId;
 		}
 
@@ -174,7 +174,7 @@ namespace Impunity.Networking
 		/// <inheritdoc/>
 		public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
 		{
-			return ClientStream.WriteAsync(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			return ClientStream.WriteAsync(messageBytes.Array!, messageBytes.Offset, messageBytes.Count);
 		}
 
 		/// <inheritdoc/>
@@ -360,7 +360,7 @@ namespace Impunity.Networking
 			body["mc"] = Options.MaxConnections;
 			body["cc"] = ClientsConnected <= Options.MaxConnections ? ClientsConnected : Options.MaxConnections;
 
-			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array,
+			tcpGameData.AnnouncePacket = ImpunityNetworkingUtil.MakeBroadcastPacket(tcpGameData.AnnouncePacket.Array!,
 				ImpunityConstants.ServerAnnouncePacketHeader + tcpGameData.GameTypeCode + ":", body);
 		}
 
@@ -597,7 +597,7 @@ namespace Impunity.Networking
 
 			foreach(PerGameTCPServerData gameData in PerGameData.Values)
 			{
-				ServerUdpSocket?.Send(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
+				ServerUdpSocket?.Send(gameData.AnnouncePacket.Array!, gameData.AnnouncePacket.Count, broadcastEp);
 			}
 			
 		}
@@ -639,7 +639,7 @@ namespace Impunity.Networking
 		{
 			byte[] buffer = new byte[messageBytes.Count + SessionDataPacket.Length];
 			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
-			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
+			Buffer.BlockCopy(messageBytes.Array!, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
 
 			return ServerUdpSocket!.SendAsync(buffer, buffer.Length, destination);
 		}

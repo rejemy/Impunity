@@ -40,11 +40,12 @@ public class WorldData
 
 	public string? GetGameSummaryAsJson()
 	{
-		if (GameState.GetGameSummary() == null)
+		BsonDocument? summary = GameState.GetGameSummary();
+		if (summary == null)
 		{
 			return null;
 		}
-		return JsonSerializer.Serialize(GameState.GetGameSummary());
+		return JsonSerializer.Serialize(summary);
 	}
 }
 

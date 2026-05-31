@@ -61,7 +61,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Creates a new game database at the given path with an initial summary. Returns null if a database already exists there.</summary>
-		public static GameStateDB? Create(string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateDB? Create(string path, BsonDocument? summary, ImpunityOptions? options = null)
 		{
 			GameStateDB game = new GameStateDB(path);
 
@@ -83,7 +83,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing database or creates a new one if none exists at the given path.</summary>
-		public static GameStateDB? OpenOrCreate(string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateDB? OpenOrCreate(string path, BsonDocument? summary, ImpunityOptions? options = null)
 		{
 			if (File.Exists(GetDBFilename(path)))
 			{
@@ -191,7 +191,7 @@ namespace Impunity.GameState
 
 
 		/// <summary>Persists the game summary to disk. Called from the live thread.</summary>
-		public void SetGameSummary(BsonDocument summary)
+		public void SetGameSummary(BsonDocument? summary)
 		{
 			if (summary == null)
 			{
@@ -488,7 +488,7 @@ namespace Impunity.GameState
 					string entityId = rowId.Substring(0, sepIndex);
 					string propertyName = rowId.Substring(sepIndex+1);
 
-					LiveEntityData entData;
+					LiveEntityData? entData;
 					if (entityId == channelName)
 					{
 						entData = channelData;

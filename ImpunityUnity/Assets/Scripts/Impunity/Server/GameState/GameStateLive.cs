@@ -245,7 +245,7 @@ namespace Impunity.GameState
 		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
 						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
-			if (propData == null || propData.Count == 0 || TypeInfo == null)
+			if (propData.Array == null || propData.Count == 0 || TypeInfo == null)
 			{
 				persistedProps = null;
 				return;
@@ -273,7 +273,7 @@ namespace Impunity.GameState
 				if (seq != 0 && RecvSeq != null && !((short)(seq - RecvSeq[propId]) > 0))
 				{
 					// Stale update for this field — skip its data without applying
-					var skipInstance = (IDistributableValueType)System.Activator.CreateInstance(Properties[propId].GetType());
+					var skipInstance = (IDistributableValueType)System.Activator.CreateInstance(Properties[propId].GetType())!;
 					skipInstance.ReadFrom(propReader);
 					continue;
 				}
@@ -322,11 +322,11 @@ namespace Impunity.GameState
 			}
 		}
 
-		public byte[]? GetPropBytes()
+		public ArraySegment<byte> GetPropBytes()
 		{
 			if (TypeInfo == null || TypeInfo.PackedProperties == null || TypeInfo.PackedProperties.Length == 0)
 			{
-				return null;
+				return default;
 			}
 
 			BinaryWriter writer = LiveData.GetTempBufferWriter();
@@ -439,7 +439,7 @@ namespace Impunity.GameState
 			return UniqueNames.ContainsKey(name);
 		}
 
-		public GameStateObject GetNamedObject(string name)
+		public GameStateObject? GetNamedObject(string name)
 		{
 			return UniqueNames.GetValueOrDefault(name);
 		}
@@ -974,7 +974,7 @@ namespace Impunity.GameState
 		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
 							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
-			if (propBytes == null || propBytes.Count == 0)
+			if (propBytes.Array == null || propBytes.Count == 0)
 			{
 				persistedProps = null;
 				return;
@@ -990,14 +990,14 @@ namespace Impunity.GameState
 
 		// ----- Public API below
 
-		public GameStateEntity GetNamedEntity(string entityName)
+		public GameStateEntity? GetNamedEntity(string entityName)
 		{
 			return NamedEntities.GetValueOrDefault(entityName);
 		}
 
 		public GameStateChannelLoadProxy LoadChannel(string channelName)
 		{
-			GameStateEntity entity = NamedEntities.GetValueOrDefault(channelName);
+			GameStateEntity? entity = NamedEntities.GetValueOrDefault(channelName);
 			if (entity is GameStateChannelLoadProxy)
 			{
 				return (GameStateChannelLoadProxy)entity;
@@ -1146,7 +1146,7 @@ namespace Impunity.GameState
 			{
 				if (replace)
 				{
-					GameStateObject existing = channel.GetNamedObject(uniqueName);
+					GameStateObject existing = channel.GetNamedObject(uniqueName)!;
 
 					if (force)
 					{
@@ -1210,7 +1210,7 @@ namespace Impunity.GameState
 
 		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0)
 		{
-			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
@@ -1238,7 +1238,7 @@ namespace Impunity.GameState
 
 		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
-			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
@@ -1249,7 +1249,7 @@ namespace Impunity.GameState
 
 		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData)
 		{
-			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
@@ -1268,7 +1268,7 @@ namespace Impunity.GameState
 
 		public bool LockEntity(GameStateReplicant origin, uint entityId)
 		{
-			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
@@ -1285,7 +1285,7 @@ namespace Impunity.GameState
 
 		public bool UnlockEntity(GameStateReplicant origin, uint entityId)
 		{
-			GameStateEntity entity = AllEntities.GetValueOrDefault(entityId);
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
@@ -1296,7 +1296,7 @@ namespace Impunity.GameState
 
 		public bool TryToLockNamedLock(GameStateReplicant origin, string name, bool waitForUnlock)
 		{
-			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
+			GameStateEntity? entity = NamedEntities.GetValueOrDefault(name);
 			if (entity == null || entity.InLoadingState)
 			{
 				// Create placeholder named lock object if no entity with that name exists
@@ -1312,7 +1312,7 @@ namespace Impunity.GameState
 
 		public bool UnlockNamedLock(GameStateReplicant origin, string name)
 		{
-			GameStateEntity entity = NamedEntities.GetValueOrDefault(name);
+			GameStateEntity? entity = NamedEntities.GetValueOrDefault(name);
 			if (entity == null || entity.InLoadingState)
 			{
 				return false;

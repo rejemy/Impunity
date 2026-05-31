@@ -81,7 +81,7 @@ namespace Impunity.Networking
 			Type messageActionClassType = ClientActionFactory.GetActionClassType(msg.MessageType);
 
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			GameStateActionBase action = (GameStateActionBase)mapper.DeserializeFromBytes(messageActionClassType, messageBytes.Array, bodyOffset);
+			GameStateActionBase action = (GameStateActionBase)mapper.DeserializeFromBytes(messageActionClassType, messageBytes.Array!, bodyOffset);
 			action.Origin = this;
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
 
@@ -179,7 +179,7 @@ namespace Impunity.Networking
 
 			if (!writeTask.IsCompletedSuccessfully)
 			{
-				ImpunityLogger.LogError("Error writing to socket: ", writeTask.Exception);
+				ImpunityLogger.LogError("Error writing to socket: ", writeTask.Exception!);
 
 				// Close socket or something?
 

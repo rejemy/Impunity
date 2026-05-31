@@ -155,7 +155,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing game world from the database at the given path.</summary>
-		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions? options = null)
+		public static GameStateServer Open(string gameId, string? gamePassword, string path, ImpunityOptions? options = null)
 		{
 			var db = GameStateDB.Open(path, options);
 			if (db == null)
@@ -166,7 +166,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Creates a new game world with the given summary.</summary>
-		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateServer Create(string gameId, string? gamePassword, string path, BsonDocument? summary, ImpunityOptions? options = null)
 		{
 			var db = GameStateDB.Create(path, summary, options);
 			if (db == null)
@@ -177,7 +177,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing game world or creates a new one.</summary>
-		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateServer OpenOrCreate(string gameId, string? gamePassword, string path, BsonDocument? summary, ImpunityOptions? options = null)
 		{
 			var db = GameStateDB.OpenOrCreate(path, summary, options);
 			if (db == null)

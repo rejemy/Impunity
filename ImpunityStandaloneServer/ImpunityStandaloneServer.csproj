@@ -13,7 +13,7 @@
     <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
 
     <TargetFramework>net10.0</TargetFramework>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
   </PropertyGroup>
 

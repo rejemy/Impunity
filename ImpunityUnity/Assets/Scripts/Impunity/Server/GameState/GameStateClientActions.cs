@@ -647,7 +647,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			GameStateEntity entity = game.Live.GetNamedEntity(Name);
+			GameStateEntity? entity = game.Live.GetNamedEntity(Name);
 			if (entity == null)
 			{
 				AwaitingTask = true;

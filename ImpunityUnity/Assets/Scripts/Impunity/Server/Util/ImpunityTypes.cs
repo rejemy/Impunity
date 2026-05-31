@@ -427,7 +427,7 @@ namespace Impunity
 		public bool PasswordProtected { get; set; }
 		public int CurrentPlayers { get; set; }
 		public int MaxPlayers { get; set; }
-		public string GameSummary {get; set;} = null!;
+		public string? GameSummary {get; set;} = null!;
 		public int GameVersion {get; set;}
 		public string DataFormatChecksum { get; set;} = null!;
 	}
