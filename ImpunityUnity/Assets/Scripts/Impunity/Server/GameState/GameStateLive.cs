@@ -12,13 +12,13 @@ namespace Impunity.GameState
 	{
 		public int Index;
 
-		public string Name;
+		public string Name = null!;
 
-		public string PersistedAs;
+		public string PersistedAs = null!;
 
-		public GameStateEntityPropertyDef[] PackedProperties;
-		public GameStateEntityPropertyDef[] PropertyIndexLookup;
-		public Dictionary<string, GameStateEntityPropertyDef> PropertyPersistedAsLookup;
+		public GameStateEntityPropertyDef[] PackedProperties = null!;
+		public GameStateEntityPropertyDef[] PropertyIndexLookup = null!;
+		public Dictionary<string, GameStateEntityPropertyDef> PropertyPersistedAsLookup = null!;
 	}
 
 	/// <summary>Represents one client's view of the game state. Tracks which channels they're subscribed to, which entities they hold locks on, and their ephemeral (non-persisted) entities. One per connection.</summary>
@@ -137,10 +137,10 @@ namespace Impunity.GameState
 
 		public GameStateReplicant? EphemeralOwner;
 
-		private IStandardDistributableValueType[] Properties;
+		private IStandardDistributableValueType[] Properties = null!;
 
 		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.</summary>
-		private ushort[] RecvSeq;
+		private ushort[] RecvSeq = null!;
 		/// <summary>Outgoing sequence counter for broadcasting updates to clients.</summary>
 		public ushort OutSeq;
 
@@ -565,11 +565,11 @@ namespace Impunity.GameState
 
 		// Create if missing values
 		bool CreateIfMissing;
-		GameStateReplicant Creator;
+		GameStateReplicant Creator = null!;
 		int CreateEntityTypeId;
 		byte CreateInstanceFlags;
 		ArraySegment<byte> CreatePropBytes;
-		List<ObjectCreateData> CreateObjects;
+		List<ObjectCreateData>? CreateObjects;
 
 		List<GameStateChannelLoadListener> LoadListeners;
 
@@ -585,7 +585,7 @@ namespace Impunity.GameState
 			LoadListeners.Add(listener);
 		}
 
-		public void SetCreateIfMissing(GameStateReplicant creator, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
+		public void SetCreateIfMissing(GameStateReplicant creator, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData>? objects)
 		{
 			if (CreateIfMissing)
 			{
@@ -785,7 +785,7 @@ namespace Impunity.GameState
 	{
 		public override string ChannelName { get { return Name; } }
 
-		public List<GameStateReplicant> LockAwaitedBy;
+		public List<GameStateReplicant>? LockAwaitedBy;
 
 		public GameStateNamedLock(GameStateLive liveData, string name) : base (liveData, null, 0, name) {}
 
@@ -831,7 +831,7 @@ namespace Impunity.GameState
 	public class GameStateLive
 	{
 		public GameStateServer Server { get; private set; }
-		GameStateEntityType[] EntityTypes;
+		GameStateEntityType[] EntityTypes = null!;
 
 		Dictionary<uint, GameStateEntity> AllEntities;
 		Dictionary<string, GameStateEntity> NamedEntities;
@@ -1046,7 +1046,7 @@ namespace Impunity.GameState
 		}
 
 		// Create channel from client input
-		public bool CreateChannel(GameStateReplicant origin, string channelName, bool replace, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
+		public bool CreateChannel(GameStateReplicant origin, string channelName, bool replace, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData>? objects)
 		{
 			GameStateChannel existing = NamedEntities.GetValueOrDefault(channelName) as GameStateChannel;
 			
@@ -1063,7 +1063,7 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public GameStateChannel CreateChannelInternal(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData> objects)
+		public GameStateChannel CreateChannelInternal(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData>? objects)
 		{
 			if (channelName == null)
 			{
@@ -1134,7 +1134,7 @@ namespace Impunity.GameState
 			channel.RemoveListener(origin);
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, bool force)
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force)
 		{
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 

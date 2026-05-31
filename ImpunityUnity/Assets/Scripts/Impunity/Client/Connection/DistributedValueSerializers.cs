@@ -16,7 +16,7 @@ namespace Impunity.Connection
 		/// <summary>Writes <paramref name="value"/> to the binary stream.</summary>
 		void WriteTo(T value, BinaryWriter w);
 		/// <summary>Reads and returns a value from the binary stream.</summary>
-		T? ReadFrom(BinaryReader r);
+		T ReadFrom(BinaryReader r);
 
 		/// <summary>The property value type tag used in the wire protocol for this serializer's type.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
@@ -231,9 +231,9 @@ namespace Impunity.Connection
 	}
 
 	/// <summary>Binary serializer for nullable <see cref="string"/> values. Prefixes with a boolean null indicator.</summary>
-	public readonly struct StringSerializer : IDistributableValueSerializer<string>
+	public readonly struct StringSerializer : IDistributableValueSerializer<string?>
 	{
-		public void WriteTo(string value, BinaryWriter w)
+		public void WriteTo(string? value, BinaryWriter w)
 		{
 			if (value == null)
 			{
@@ -387,7 +387,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public T? ReadFrom(BinaryReader r)
+		public T ReadFrom(BinaryReader r)
 		{
 			byte length = r.ReadByte();
 			if (length > 0)
@@ -426,7 +426,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public T? ReadFrom(BinaryReader r)
+		public T ReadFrom(BinaryReader r)
 		{
 			ushort length = r.ReadUInt16();
 			if (length > 0)

@@ -15,11 +15,11 @@ namespace Impunity.Networking
 	public interface IImpunityNetworkServerClientContext : IDisposable
 	{
 		/// <summary>Called when a complete framed message is received from this client.</summary>
-		ImpunityServerMessageHandler OnMessageRecieved { get; set; }
+		ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 		/// <summary>Called on network errors (broken pipe, timeout, etc.).</summary>
-		ImpunityServerErrorCallback OnNetworkError { get; set; }
+		ImpunityServerErrorCallback? OnNetworkError { get; set; }
 		/// <summary>Called when the client disconnects (gracefully or not).</summary>
-		ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
+		ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
 
 		/// <summary>Server-assigned unique identifier for this connection.</summary>
 		string ConnectionId { get; }

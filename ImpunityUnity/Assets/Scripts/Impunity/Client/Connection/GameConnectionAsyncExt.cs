@@ -278,9 +278,9 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<List<DTYPE>> ListDocumentsAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection)
+		public static Task<List<DTYPE>?> ListDocumentsAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
-			var t = new ImpunityTaskCompletionSource<List<DTYPE>>();
+			var t = new ImpunityTaskCompletionSource<List<DTYPE>?>();
 			collection.ListDocuments(t.OnComplete);
 			return t.Task;
 		}

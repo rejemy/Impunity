@@ -290,9 +290,9 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<List<DTYPE>> ListDocumentsYield<DTYPE>(this GameStateDBCollection<DTYPE> collection)
+		public static ImpunityYield<List<DTYPE>?> ListDocumentsYield<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
-			ImpunityYield<List<DTYPE>> action = new ImpunityYield<List<DTYPE>>();
+			ImpunityYield<List<DTYPE>?> action = new ImpunityYield<List<DTYPE>?>();
 			collection.ListDocuments(action.OnComplete);
 			return action;
 		}

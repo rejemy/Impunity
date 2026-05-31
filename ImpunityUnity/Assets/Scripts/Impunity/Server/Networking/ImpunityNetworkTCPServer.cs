@@ -18,11 +18,11 @@ namespace Impunity.Networking
 	public class ImpunityTCPServerClientContext : IImpunityNetworkServerClientContext
 	{
 		/// <inheritdoc/>
-		public ImpunityServerMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
-		public ImpunityServerErrorCallback OnNetworkError { get; set; }
+		public ImpunityServerErrorCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
-		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
+		public ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
 
 		/// <inheritdoc/>
 		public string ConnectionId { get; private set;}
@@ -105,7 +105,7 @@ namespace Impunity.Networking
 				HandleDataRead();
 			}
 
-			if (!ClientStream.CanRead || !Client.Connected)
+			if (Client == null || !ClientStream.CanRead || !Client.Connected)
 			{
 				if (Client == null)
 				{
@@ -225,10 +225,10 @@ namespace Impunity.Networking
 
 	class PerGameTCPServerData
 	{
-		public string GameTypeCode;
-		public string GameId;
+		public string GameTypeCode = null!;
+		public string GameId = null!;
 		public int GameStateFormatVersion;
-		public string GameStateFormatChecksum;
+		public string GameStateFormatChecksum = null!;
 		public BsonDocument? CurrGameSummary = null;
 		public bool PasswordProtected;
 
@@ -253,7 +253,7 @@ namespace Impunity.Networking
 	public class ImpunityTCPServer
 	{
 		/// <summary>Called on the TCP listener thread when a new client connects, before reading begins.</summary>
-		public ImpunityServerClientContextCallback OnClientConnected { get; set; }
+		public ImpunityServerClientContextCallback? OnClientConnected { get; set; }
 
 		ImpunityOptions Options;
 
@@ -285,6 +285,11 @@ namespace Impunity.Networking
 			PerGameData = new Dictionary<string, PerGameTCPServerData>();
 			ClientsByRemoteEndpoint = new ConcurrentDictionary<IPEndPoint, ImpunityTCPServerClientContext>();
 			ShutdownToken = new CancellationTokenSource();
+
+			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
+			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
+			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
+			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
 
 			Running = true;
 		}
@@ -369,10 +374,7 @@ namespace Impunity.Networking
 
 			StartTcpListener();
 
-			SearchPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSearchPacketHeader + Options.GameTypeCode + ":");
-			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
-			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
-			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
+
 
 			StartUDPListen();
 			
@@ -474,7 +476,7 @@ namespace Impunity.Networking
 
 		private void StopUDPListen()
 		{
-			if (ServerUdpSocket == null)
+			if (ServerUdpSocket == null || UDPListenerThread == null)
 			{
 				return;
 			}
@@ -517,7 +519,7 @@ namespace Impunity.Networking
 						break;
 					}
 
-					IPEndPoint senderEndpoint = null;
+					IPEndPoint senderEndpoint = null!;
 					byte[] packet = ServerUdpSocket.Receive(ref senderEndpoint);
 					
 					if (ImpunityUtil.StartsWith(packet, SessionDataPacket))
@@ -595,7 +597,7 @@ namespace Impunity.Networking
 
 			foreach(PerGameTCPServerData gameData in PerGameData.Values)
 			{
-				ServerUdpSocket.Send(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
+				ServerUdpSocket?.Send(gameData.AnnouncePacket.Array, gameData.AnnouncePacket.Count, broadcastEp);
 			}
 			
 		}
@@ -607,7 +609,7 @@ namespace Impunity.Networking
 				try
 				{
 					// Return the ping
-					ServerUdpSocket.Send(PingPacket, PingPacket.Length, sender);
+					ServerUdpSocket?.Send(PingPacket, PingPacket.Length, sender);
 				}
 				catch (Exception e)
 				{
@@ -639,7 +641,7 @@ namespace Impunity.Networking
 			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
 			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
 
-			return ServerUdpSocket.SendAsync(buffer, buffer.Length, destination);
+			return ServerUdpSocket!.SendAsync(buffer, buffer.Length, destination);
 		}
 
 		/// <summary>Shuts down the server: stops UDP, disconnects all clients, and stops the TCP listener.</summary>
@@ -652,7 +654,6 @@ namespace Impunity.Networking
 			{
 				client.Dispose();
 			}
-			ClientsByRemoteEndpoint = null;
 
 			TcpListener? listener = TCPSocket;
 			TCPSocket = null;

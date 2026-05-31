@@ -69,7 +69,7 @@ namespace Impunity.Connection
 
 		void OnFullyInitialized();
 		void OnEventTriggered(int eventType, BsonValue eventData);
-		void OnDeleted(BsonValue deleteData);
+		void OnDeleted(BsonValue? deleteData);
 		void OnLocked();
 		void OnUnlocked();
 		void OnUndistributed();
@@ -185,7 +185,7 @@ namespace Impunity.Connection
 
 		public virtual void OnFullyInitialized() { }
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
-		public virtual void OnDeleted(BsonValue deleteData) { }
+		public virtual void OnDeleted(BsonValue? deleteData) { }
 		public virtual void OnUndistributed() { }
 	}
 
@@ -1079,7 +1079,7 @@ namespace Impunity.Connection
 			entity.OnUnlocked();
 		}
 
-		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
+		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)

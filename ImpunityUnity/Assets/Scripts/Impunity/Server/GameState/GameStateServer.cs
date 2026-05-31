@@ -119,16 +119,13 @@ namespace Impunity.GameState
 
 		ConcurrentDictionary<int, IGameStateListener> Listeners;
 
-		private GameStateServer(string gameId, string? gamePassword, GameStateDB gameDatabase, ImpunityOptions options)
+		private GameStateServer(string gameId, string? gamePassword, GameStateDB gameDatabase, ImpunityOptions? options)
 		{
-			if (options == null)
-			{
-				options = new ImpunityOptions();
-			}
+			Options = options ?? new ImpunityOptions();
 
 			GameId = gameId;
 			GamePasswordHash = gamePassword != null ? ImpunityUtil.HashPassword(gamePassword) : null;
-			Options = options;
+			
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
 			
 			DB = gameDatabase;
@@ -160,19 +157,34 @@ namespace Impunity.GameState
 		/// <summary>Opens an existing game world from the database at the given path.</summary>
 		public static GameStateServer Open(string gameId, string gamePassword, string path, ImpunityOptions? options = null)
 		{
-			return new GameStateServer(gameId, gamePassword, GameStateDB.Open(path, options), options);
+			var db = GameStateDB.Open(path, options);
+			if (db == null)
+			{
+				throw new Exception("Unable to open game "+ gameId);
+			}
+			return new GameStateServer(gameId, gamePassword, db, options);
 		}
 
 		/// <summary>Creates a new game world with the given summary.</summary>
 		public static GameStateServer Create(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
-			return new GameStateServer(gameId, gamePassword, GameStateDB.Create(path, summary, options), options);
+			var db = GameStateDB.Create(path, summary, options);
+			if (db == null)
+			{
+				throw new Exception("Unable to create game "+ gameId);
+			}
+			return new GameStateServer(gameId, gamePassword, db, options);
 		}
 
 		/// <summary>Opens an existing game world or creates a new one.</summary>
 		public static GameStateServer OpenOrCreate(string gameId, string gamePassword, string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
-			return new GameStateServer(gameId, gamePassword, GameStateDB.OpenOrCreate(path, summary, options), options);
+			var db = GameStateDB.OpenOrCreate(path, summary, options);
+			if (db == null)
+			{
+				throw new Exception("Unable to open or create game "+ gameId);
+			}
+			return new GameStateServer(gameId, gamePassword, db, options);
 		}
 
 		public static long GetServerTime()
@@ -328,12 +340,7 @@ namespace Impunity.GameState
 		private void ShutdownDB()
 		{
 			DBActionQueue.Dispose();
-
-			if (DB != null)
-			{
-				DB.Dispose();
-				DB = null;
-			}
+			DB.Dispose();
 		}
 
 		private void ShutdownLive()

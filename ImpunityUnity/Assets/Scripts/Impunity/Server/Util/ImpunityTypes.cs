@@ -105,16 +105,16 @@ namespace Impunity
 	public class GameMetadata
 	{
 		[BsonId]
-		public string Id;
+		public string Id = null!;
 
 		[BsonField("Version")]
 		public int Version;
 
 		[BsonField("DataFormatChecksum")]
-		public string DataFormatChecksum;
+		public string DataFormatChecksum = null!;
 
 		[BsonField("Collections")]
-		public GameStateCollection[] Collections;
+		public GameStateCollection[] Collections = null!;
 
 		[BsonField("EntityTypes")]
 		public GameStateEntityTypeDef[]? EntityTypes;
@@ -264,10 +264,10 @@ namespace Impunity
 		public int Version;
 
 		[BsonField("dc")]
-		public string DataChecksum;
+		public string DataChecksum = null!;
 
 		[BsonField("cs")]
-		public GameStateCollection[] Collections;
+		public GameStateCollection[] Collections = null!;
 
 		[BsonField("es")]
 		public GameStateEntityTypeDef[]? EntityTypes;
@@ -311,7 +311,7 @@ namespace Impunity
 		public int Index;
 
 		[BsonField("n")]
-		public string Name;
+		public string Name = null!;
 
 	}
 
@@ -410,52 +410,52 @@ namespace Impunity
 		public int Index;
 
 		[BsonField("n")]
-		public string Name;
+		public string Name = null!;
 
 		[BsonField("pa")]
 		public string? PersistedAs;
 
 		[BsonField("ps")]
-		public GameStateEntityPropertyDef[] Properties;
+		public GameStateEntityPropertyDef[] Properties = null!;
 	}
 
 	/// <summary>Info about a single game world on a standalone server, returned by the HTTP discovery API.</summary>
 	public class StandaloneServerWorldInfo
 	{
-		public string WorldId { get; set; }
-		public string WorldName { get; set; }
+		public string WorldId { get; set; } = null!;
+		public string WorldName { get; set; } = null!;
 		public bool PasswordProtected { get; set; }
 		public int CurrentPlayers { get; set; }
 		public int MaxPlayers { get; set; }
-		public string GameSummary {get; set;}
+		public string GameSummary {get; set;} = null!;
 		public int GameVersion {get; set;}
-		public string DataFormatChecksum { get; set;}
+		public string DataFormatChecksum { get; set;} = null!;
 	}
 
 	/// <summary>Top-level response from the standalone server HTTP discovery API, listing all available worlds.</summary>
 	public class StandaloneServerWorldsInfo
 	{
-		public string ImpunityVersion { get; set; }
-		public string GameType {get; set;}
+		public string ImpunityVersion { get; set; } = null!;
+		public string GameType {get; set;} = null!;
 		public int? TCPPort { get; set; }
-		public List<StandaloneServerWorldInfo> Worlds { get; set; }
+		public List<StandaloneServerWorldInfo> Worlds { get; set; } = null!;
 	}
 
 	/// <summary>Client-side representation of a discovered server. Populated by either LAN UDP discovery or HTTP discovery.</summary>
 	public class ServerInfo
 	{
 		/// <summary>Display name of the game world.</summary>
-		public string WorldName;
+		public string WorldName = null!;
 
 		/// <summary>Hostname for remote servers (mutually exclusive with <see cref="Address"/>).</summary>
-		public string Hostname;
+		public string? Hostname;
 		/// <summary>TCP port for remote servers (used with <see cref="Hostname"/>).</summary>
 		public int Port;
 		/// <summary>Direct IP endpoint for LAN servers (mutually exclusive with <see cref="Hostname"/>/<see cref="Port"/>).</summary>
-		public IPEndPoint Address;
+		public IPEndPoint? Address;
 
 		/// <summary>Unique identifier for the game world on the server.</summary>
-		public string GameId;
+		public string GameId = null!;
 		/// <summary>Whether the server requires a password to connect.</summary>
 		public bool PasswordProtected;
 
@@ -467,7 +467,7 @@ namespace Impunity
 		/// <summary>The game state schema version the server is running.</summary>
 		public int GameStateFormatVersion;
 		/// <summary>Checksum of the game state schema, for client/server compatibility verification.</summary>
-		public string GameStateFormatChecksum;
+		public string GameStateFormatChecksum = null!;
 		/// <summary>Custom game summary data (e.g. map name, game mode) as a BSON document.</summary>
 		public BsonDocument? GameSummary;
 

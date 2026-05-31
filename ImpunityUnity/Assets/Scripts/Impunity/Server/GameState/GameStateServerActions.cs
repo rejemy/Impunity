@@ -87,7 +87,7 @@ namespace Impunity.GameState
 		public uint ChannelId;
 
 		[BsonField("n")]
-		public string ChannelName;
+		public string ChannelName = null!;
 
 		[BsonField("t")]
 		public int ChannelType;
@@ -102,7 +102,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		[BsonField("obs")]
-		public ObjectCreateMessageAction[] ObjectsInChannel;
+		public ObjectCreateMessageAction[] ObjectsInChannel = Array.Empty<ObjectCreateMessageAction>();
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.CHANNEL_CREATE_MESSAGE; }
 
@@ -182,7 +182,7 @@ namespace Impunity.GameState
 		public int EventType;
 
 		[BsonField("ed")]
-		public BsonValue EventData;
+		public BsonValue EventData = null!;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_EVENT_MESSAGE; }
 
@@ -246,7 +246,7 @@ namespace Impunity.GameState
 	public class NamedLockUnlockedMessageAction : ServerActionBase
 	{
 		[BsonField("ln")]
-		public string Name;
+		public string Name = null!;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.NAMED_LOCK_UNLOCKED_MESSAGE; }
 
@@ -265,10 +265,10 @@ namespace Impunity.GameState
 		public int MessageType;
 
 		[BsonField("mb")]
-		public BsonValue MessageBody;
+		public BsonValue MessageBody = null!;
 
 		[BsonField("s")]
-		public string SentBy;
+		public string SentBy = null!;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.BROADCAST_MESSAGE; }
 
@@ -414,7 +414,7 @@ namespace Impunity.GameState
 		public int EntityType;
 		public byte InstanceFlags;
 
-		public List<LiveEntityPersistedPropertyData> Properties;
+		public List<LiveEntityPersistedPropertyData> Properties = null!;
 
 		public LiveEntityData(string entityId)
 		{
@@ -425,7 +425,7 @@ namespace Impunity.GameState
 	/// <summary>Data loaded from DB for a channel entity, including its child objects.</summary>
 	public class LiveChannelData : LiveEntityData
 	{
-		public List<LiveEntityData> ChannelObjects;
+		public List<LiveEntityData> ChannelObjects = null!;
 
 		public LiveChannelData(string channelName) : base(channelName)
 		{

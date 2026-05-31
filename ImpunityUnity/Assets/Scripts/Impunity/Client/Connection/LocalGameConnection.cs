@@ -13,7 +13,7 @@ namespace Impunity.Connection
 	/// </summary>
 	public class LocalGameConnection : BaseGameConnection, IGameStateListener, IServerSideConnectionProxy
 	{
-		public GameStateReplicant? ConnectionReplicant { get; set; }
+		public GameStateReplicant ConnectionReplicant { get; set; }
 
 		private static int NextLocalConnectionId = 1;
 

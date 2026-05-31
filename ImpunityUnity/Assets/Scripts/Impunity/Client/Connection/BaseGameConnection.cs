@@ -209,7 +209,7 @@ namespace Impunity.Connection
 			EntityManager.HandleEntityUnlocked(entityId);
 		}
 
-		public void HandleEntityDelete(uint entityId, BsonValue deleteData)
+		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
         {
 			EntityManager.HandleEntityDelete(entityId, deleteData);
 		}

@@ -11,8 +11,8 @@ namespace Impunity.GameState
 
 	class CollectionData
 	{
-		public string Name;
-		public UltraLiteCollection<BsonDocument> Collection;
+		public string Name = null!;
+		public UltraLiteCollection<BsonDocument> Collection = null!;
 	}
 
 	/// <summary>Manages the persistent database for a game world. Wraps UltraLiteDB with collection management, entity storage, and game summary persistence.</summary>
@@ -25,8 +25,8 @@ namespace Impunity.GameState
 		string RootDirectory;
 		string DBFilename;
 		
-		UltraLiteDatabase GameDB;
-		CollectionData[] Collections;
+		UltraLiteDatabase GameDB = null!;
+		CollectionData[] Collections = null!;
 
 		
 
@@ -83,7 +83,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Opens an existing database or creates a new one if none exists at the given path.</summary>
-		public static GameStateDB OpenOrCreate(string path, BsonDocument summary, ImpunityOptions? options = null)
+		public static GameStateDB? OpenOrCreate(string path, BsonDocument summary, ImpunityOptions? options = null)
 		{
 			if (File.Exists(GetDBFilename(path)))
 			{
@@ -123,7 +123,7 @@ namespace Impunity.GameState
 			if (GameDB != null)
 			{
 				GameDB.Dispose();
-				GameDB = null;
+				GameDB = null!;
 			}
 		}
 

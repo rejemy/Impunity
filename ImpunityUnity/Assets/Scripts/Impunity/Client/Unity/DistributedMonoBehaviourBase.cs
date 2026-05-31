@@ -106,7 +106,7 @@ namespace Impunity.Unity
 		
 		public virtual void OnFullyInitialized() { }
 		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
-		public virtual void OnDeleted(BsonValue deleteData) { }
+		public virtual void OnDeleted(BsonValue? deleteData) { }
 		public virtual void OnUndistributed() { }
 	}
 
