@@ -87,7 +87,7 @@ namespace Impunity.Connection
 		string Name { get; set; }
 		Dictionary<uint, IDistributedObject> DistributedObjects { get; }
 
-		void Unsubscribe(ImpunityCallback onComplete);
+		void Unsubscribe(ImpunityCallback onComplete, bool immediate = false);
 
 		void OnObjectAdded(IDistributedObject entity, bool newlyCreated);
 		void OnObjectRemoved(uint entityId, bool destroyed);
@@ -202,9 +202,9 @@ namespace Impunity.Connection
 
 		public Dictionary<uint, IDistributedObject> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedObject>();
 
-		public void Unsubscribe(ImpunityCallback onComplete)
+		public void Unsubscribe(ImpunityCallback onComplete, bool immediate = false)
 		{
-			Manager.UnsubscribeFromChannel(this, onComplete);
+			Manager.UnsubscribeFromChannel(this, onComplete, immediate);
 		}
 
 		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)
@@ -297,6 +297,13 @@ namespace Impunity.Connection
 		private Dictionary<uint, IDistributedEntity> DistributedObjects;
 		private HashSet<IDistributedEntity> DirtyObjects;
 
+		// Suppression registry for in-flight unsubscribes (immediate mode only).
+		// SuppressedEntities maps entityId -> owning channelId for O(1) drop checks.
+		// PendingUnsubscribes maps channelId -> every suppressed id under it (channel + children
+		// + in-flight new objects), so suppression can be lifted in bulk when the ack returns.
+		private Dictionary<uint, uint> SuppressedEntities;
+		private Dictionary<uint, HashSet<uint>> PendingUnsubscribes;
+
 		private byte[] PropertyEncodingBuffer;
 		private BinaryWriter PropertyEncodingWriter;
 		private object[] WriteMethodArgs;
@@ -313,6 +320,9 @@ namespace Impunity.Connection
 			SubscribedChannels = new Dictionary<string, IDistributedChannel>();
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
 			DirtyObjects = new HashSet<IDistributedEntity>();
+
+			SuppressedEntities = new Dictionary<uint, uint>();
+			PendingUnsubscribes = new Dictionary<uint, HashSet<uint>>();
 
 			PropertyEncodingBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			PropertyEncodingWriter = new BinaryWriter(new MemoryStream(PropertyEncodingBuffer));
@@ -626,21 +636,100 @@ namespace Impunity.Connection
 			});
         }
 
-		/// <summary>Unsubscribes from a channel and removes it from the local subscription list.</summary>
-		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete)
+		/// <summary>
+		/// Unsubscribes from a channel and removes it (and all its objects) from the manager.
+		/// When <paramref name="immediate"/> is false (default), the channel and its objects stay
+		/// live and continue to receive updates until the server acknowledges the unsubscribe, at
+		/// which point <see cref="IDistributedEntity.OnUndistributed"/> is invoked on each and all
+		/// references are released. When <paramref name="immediate"/> is true, the channel and its
+		/// objects are unregistered synchronously and all further incoming updates for them are
+		/// suppressed (no lifecycle callbacks) — the caller is responsible for cleaning them up.
+		/// </summary>
+		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete, bool immediate = false)
 		{
-			Connection.UnsubscribeFromChannel(channel.DistributedEntityId, (ImpunityErrorResponse? err) =>
+			uint channelId = channel.DistributedEntityId;
+
+			if (immediate)
 			{
-				if (err != null)
-                {
-					onComplete?.Invoke(err);
-					return;
-                }
+				// Build + register the suppression set BEFORE sending, so any message dispatched
+				// afterward (including ones already queued in CompletedActions) is dropped.
+				HashSet<uint> set = new HashSet<uint> { channelId };
+				SuppressedEntities[channelId] = channelId;
+				foreach (IDistributedObject child in channel.DistributedObjects.Values)
+				{
+					set.Add(child.DistributedEntityId);
+					SuppressedEntities[child.DistributedEntityId] = channelId;
+				}
+				PendingUnsubscribes[channelId] = set;
 
-				SubscribedChannels.Remove(channel.Name!);
+				TearDownChannel(channel, invokeCallbacks: false);
+			}
 
-				onComplete?.Invoke(null);
+			Connection.UnsubscribeFromChannel(channelId, (ImpunityErrorResponse? err) =>
+			{
+				if (immediate)
+				{
+					// Lift suppression — the server has stopped sending and the ack is ordered
+					// after all prior channel messages, so nothing more is in flight.
+					if (PendingUnsubscribes.TryGetValue(channelId, out HashSet<uint> s))
+					{
+						foreach (uint id in s)
+						{
+							SuppressedEntities.Remove(id);
+						}
+						PendingUnsubscribes.Remove(channelId);
+					}
+				}
+				else if (err == null)
+				{
+					// Deferred teardown: objects stayed live during the window; tear down now,
+					// invoking lifecycle callbacks so app code can release its resources.
+					TearDownChannel(channel, invokeCallbacks: true);
+				}
+
+				onComplete?.Invoke(err);
 			});
+		}
+
+		/// <summary>
+		/// Unregisters a channel and all its child objects from the manager. When
+		/// <paramref name="invokeCallbacks"/> is true, fires <see cref="IDistributedEntity.OnUndistributed"/>
+		/// on each child object and then the channel.
+		/// </summary>
+		private void TearDownChannel(IDistributedChannel channel, bool invokeCallbacks)
+		{
+			foreach (IDistributedObject child in new List<IDistributedObject>(channel.DistributedObjects.Values))
+			{
+				UnregisterEntity(child);
+
+				if (invokeCallbacks)
+				{
+					try
+					{
+						child.OnUndistributed();
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in OnUndistributed: ", e);
+					}
+				}
+			}
+
+			channel.DistributedObjects.Clear();
+
+			UnregisterEntity(channel);
+
+			if (invokeCallbacks)
+			{
+				try
+				{
+					channel.OnUndistributed();
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in OnUndistributed: ", e);
+				}
+			}
 		}
 
 		// ---------------
@@ -889,6 +978,17 @@ namespace Impunity.Connection
 
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
 		{
+			// A fresh channel-create means the client has re-subscribed to this id; clear any
+			// lingering suppression so the re-established channel and its objects flow normally.
+			if (PendingUnsubscribes.TryGetValue(channelId, out HashSet<uint> suppressed))
+			{
+				foreach (uint id in suppressed)
+				{
+					SuppressedEntities.Remove(id);
+				}
+				PendingUnsubscribes.Remove(channelId);
+			}
+
 			IDistributedChannel channel;
 			if (channelType != 0)
             {
@@ -932,6 +1032,19 @@ namespace Impunity.Connection
 
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
 		{
+			// In-flight create on a channel being immediately-unsubscribed. Drop it, and also
+			// suppress this brand-new object id so its later updates drop quietly rather than
+			// logging "unknown entity" warnings.
+			if (SuppressedEntities.ContainsKey(channelId))
+			{
+				if (PendingUnsubscribes.TryGetValue(channelId, out HashSet<uint> suppressed))
+				{
+					suppressed.Add(objectId);
+				}
+				SuppressedEntities[objectId] = channelId;
+				return;
+			}
+
 			IDistributedObject entity;
 
 			DistributedTypeInfo typeInfo = DistributedTypes[objectType];
@@ -1024,6 +1137,8 @@ namespace Impunity.Connection
 
 			public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
 		{
+			if (SuppressedEntities.ContainsKey(entityId)) return;
+
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
             {
@@ -1036,6 +1151,8 @@ namespace Impunity.Connection
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
+			if (SuppressedEntities.ContainsKey(entityId)) return;
+
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
@@ -1055,6 +1172,8 @@ namespace Impunity.Connection
 
 		public void HandleEntityLocked(uint entityId)
 		{
+			if (SuppressedEntities.ContainsKey(entityId)) return;
+
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
@@ -1068,6 +1187,8 @@ namespace Impunity.Connection
 
 		public void HandleEntityUnlocked(uint entityId)
 		{
+			if (SuppressedEntities.ContainsKey(entityId)) return;
+
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
 			{
@@ -1081,6 +1202,8 @@ namespace Impunity.Connection
 
 		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
 		{
+			if (SuppressedEntities.ContainsKey(entityId)) return;
+
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
 			{

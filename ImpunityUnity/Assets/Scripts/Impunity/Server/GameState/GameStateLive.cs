@@ -266,7 +266,7 @@ namespace Impunity.GameState
 					break;
 				}
 
-				if (propId >= Properties.Length)
+				if (propId >= Properties.Length || Properties[propId] == null)
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
 				}

@@ -30,6 +30,7 @@ public partial class IntegrationTestEntity : DistributedObjectBase
 	public DistributedValue<string, StringSerializer> DisplayName;
 
 	public bool WasDeleted;
+	public int UndistributedCount;
 
 	public IntegrationTestEntity()
 	{
@@ -39,6 +40,11 @@ public partial class IntegrationTestEntity : DistributedObjectBase
 	public override void OnDeleted(BsonValue deleteData)
 	{
 		WasDeleted = true;
+	}
+
+	public override void OnUndistributed()
+	{
+		UndistributedCount++;
 	}
 }
 
@@ -59,9 +65,16 @@ public partial class IntegrationTestChannel : DistributedChannelBase
 	[Distributed((byte)Props.FLAGS)]
 	public DistributedIntDictionary<string, StringSerializer> Flags;
 
+	public int UndistributedCount;
+
 	public IntegrationTestChannel()
 	{
 		InitializeDistributedFields();
+	}
+
+	public override void OnUndistributed()
+	{
+		UndistributedCount++;
 	}
 }
 
@@ -674,5 +687,168 @@ public class ImpunityIntegrationTests
 		yield return TickUntil(() => changedKey == 7, 3f, AllConnections());
 		Assert.AreEqual("active", changedVal);
 		Assert.AreEqual("active", c2Channel.Flags.Get(7));
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 7. Unsubscribe
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>Helper: subscribes C1 (creating the channel) and C2, creates one entity on C1,
+	/// and waits until C2 has replicated it. Returns C2's channel + entity via out params.</summary>
+	IEnumerator SetupTwoClientChannel(string channelName, System.Action<IntegrationTestChannel, IntegrationTestEntity> onReady)
+	{
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield(channelName, c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var entity = new IntegrationTestEntity();
+		entity.Health.Set(100);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>(channelName, null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values)
+		{
+			c2Entity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(c2Entity, "C2 did not replicate the entity");
+
+		onReady(c2Channel, c2Entity);
+	}
+
+	[UnityTest, Category("Unsubscribe")]
+	public IEnumerator Unsubscribe_Deferred_TearsDownWithCallbacksOnAck()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestChannel c2Channel = null;
+		IntegrationTestEntity c2Entity = null;
+		yield return SetupTwoClientChannel("deferred", (ch, e) => { c2Channel = ch; c2Entity = e; });
+
+		// Default (immediate == false): objects stay live until the server acks the unsubscribe.
+		var unsubYield = RemoteGame.EntityManager.UnsubscribeFromChannelYield(c2Channel, immediate: false);
+
+		// Before the ack returns, nothing has been torn down yet.
+		Assert.AreEqual(0, c2Channel.UndistributedCount, "Channel torn down too early");
+		Assert.AreEqual(0, c2Entity.UndistributedCount, "Entity torn down too early");
+		Assert.AreEqual(1, c2Channel.DistributedObjects.Count, "Objects removed too early");
+
+		yield return WaitForYield(unsubYield, AllConnections());
+
+		// On completion: OnUndistributed fired exactly once on the entity and the channel,
+		// and all references are released from the manager.
+		Assert.AreEqual(1, c2Entity.UndistributedCount, "Entity OnUndistributed not fired exactly once");
+		Assert.AreEqual(1, c2Channel.UndistributedCount, "Channel OnUndistributed not fired exactly once");
+		Assert.AreEqual(0, c2Channel.DistributedObjects.Count, "Channel child objects not cleared");
+
+		// Re-subscribing returns a fresh channel instance (proves the old one was fully released).
+		var resubYield = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("deferred", null);
+		yield return WaitForYield(resubYield, AllConnections());
+		Assert.AreNotSame(c2Channel, resubYield.Value, "Re-subscribe returned the stale channel");
+	}
+
+	[UnityTest, Category("Unsubscribe")]
+	public IEnumerator Unsubscribe_Immediate_SuppressesInFlightAndTearsDownSynchronously()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// C1-side handles for generating an in-flight burst.
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("immediate", c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(100);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("immediate", null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values)
+		{
+			c2Entity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(c2Entity);
+
+		// Watch for any suppressed traffic leaking through to C2.
+		bool healthChangedOnC2 = false;
+		c2Entity.Health.OnChanged += (oldVal, newVal) => { healthChangedOnC2 = true; };
+		bool newObjectSeenOnC2 = false;
+		RemoteGame.EntityManager.OnDistributedObjectCreated = (obj, ch, created) => { newObjectSeenOnC2 = true; };
+
+		// Immediate unsubscribe: synchronous teardown, no lifecycle callbacks.
+		var unsubYield = RemoteGame.EntityManager.UnsubscribeFromChannelYield(c2Channel, immediate: true);
+		Assert.AreEqual(0, c2Channel.UndistributedCount, "Immediate mode must not invoke OnUndistributed");
+		Assert.AreEqual(0, c2Entity.UndistributedCount, "Immediate mode must not invoke OnUndistributed");
+		Assert.AreEqual(0, c2Channel.DistributedObjects.Count, "Channel not torn down synchronously");
+
+		// Now generate an in-flight burst from C1 (update + brand-new object) that races the unsubscribe.
+		c1Entity.Health.Set(999);
+		var burstEntity = new IntegrationTestEntity();
+		burstEntity.Health.Set(7);
+		LocalGame.EntityManager.CreateObject(burstEntity, subYield1.Value, false, null);
+
+		yield return WaitForYield(unsubYield, AllConnections());
+		// Drain a few extra frames to make sure nothing arrives late.
+		float drain = 0f;
+		while (drain < 0.5f)
+		{
+			foreach (var c in AllConnections()) c.Update();
+			yield return null;
+			drain += Time.deltaTime;
+		}
+
+		Assert.IsFalse(healthChangedOnC2, "Suppressed update leaked to C2 after immediate unsubscribe");
+		Assert.IsFalse(newObjectSeenOnC2, "Suppressed object-create leaked to C2 after immediate unsubscribe");
+	}
+
+	[UnityTest, Category("Unsubscribe")]
+	public IEnumerator Unsubscribe_Immediate_AllowsResubscribe()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestChannel c2Channel = null;
+		IntegrationTestEntity c2Entity = null;
+		yield return SetupTwoClientChannel("resub", (ch, e) => { c2Channel = ch; c2Entity = e; });
+
+		var unsubYield = RemoteGame.EntityManager.UnsubscribeFromChannelYield(c2Channel, immediate: true);
+		yield return WaitForYield(unsubYield, AllConnections());
+
+		// Re-subscribe to the same channel: suppression must be fully lifted and fresh state replicated.
+		var resubYield = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("resub", null);
+		yield return WaitForYield(resubYield, AllConnections());
+		var c2Channel2 = resubYield.Value;
+		Assert.IsNotNull(c2Channel2);
+		Assert.AreNotSame(c2Channel, c2Channel2, "Re-subscribe returned the stale channel");
+
+		yield return TickUntil(() => c2Channel2.DistributedObjects.Count > 0, 3f, AllConnections());
+		Assert.AreEqual(1, c2Channel2.DistributedObjects.Count, "Entity did not replicate after re-subscribe");
+
+		IntegrationTestEntity reEntity = null;
+		foreach (var obj in c2Channel2.DistributedObjects.Values)
+		{
+			reEntity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(reEntity);
+		Assert.AreEqual(100, reEntity.Health.Get(), "Re-subscribed entity has wrong state");
 	}
 }

@@ -129,9 +129,9 @@ namespace Impunity.Unity
 		public string Name { get; set; } = null!;
 		public Dictionary<uint, IDistributedObject> DistributedObjects { get; private set; } = new Dictionary<uint, IDistributedObject>();
 
-		public void Unsubscribe(ImpunityCallback onComplete)
+		public void Unsubscribe(ImpunityCallback onComplete, bool immediate = false)
 		{
-			Manager.UnsubscribeFromChannel(this, onComplete);
+			Manager.UnsubscribeFromChannel(this, onComplete, immediate);
 		}
 
 		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)

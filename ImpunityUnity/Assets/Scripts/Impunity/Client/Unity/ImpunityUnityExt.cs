@@ -322,10 +322,10 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield UnsubscribeFromChannelYield(this ClientEntityManager manager, IDistributedChannel channel)
+		public static ImpunityYield UnsubscribeFromChannelYield(this ClientEntityManager manager, IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityYield();
-			manager.UnsubscribeFromChannel(channel, t.OnComplete);
+			manager.UnsubscribeFromChannel(channel, t.OnComplete, immediate);
 			return t;
 		}
 	}
@@ -373,10 +373,10 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelYieldExtensions
 	{
-		public static ImpunityYield UnsubscribeYield(this IDistributedChannel channel)
+		public static ImpunityYield UnsubscribeYield(this IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityYield();
-			channel.Unsubscribe(t.OnComplete);
+			channel.Unsubscribe(t.OnComplete, immediate);
 			return t;
 		}
 

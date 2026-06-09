@@ -362,10 +362,10 @@ namespace Impunity.Connection
 	/// <summary>Async/await extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelAsyncExtensions
 	{
-		public static Task UnsubscribeAsync(this IDistributedChannel channel)
+		public static Task UnsubscribeAsync(this IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			channel.Unsubscribe(t.OnComplete);
+			channel.Unsubscribe(t.OnComplete, immediate);
 			return t.Task;
 		}
 
