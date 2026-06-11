@@ -163,8 +163,11 @@ namespace Impunity.Networking
 					{
 						bytesRead = TCPSocketStream.Read(receiveBuffer, bytesReceived, receiveBuffer.Length - bytesReceived);
 					}
-					catch (System.IO.IOException ex) when (ex.InnerException is SocketException se && se.SocketErrorCode == SocketError.TimedOut)
+					catch (System.IO.IOException ex) when (ex.InnerException is SocketException se && (se.SocketErrorCode == SocketError.TimedOut || se.SocketErrorCode == SocketError.WouldBlock))
 					{
+						// No data arrived within the ReceiveTimeout window. Depending on platform this
+						// surfaces as either TimedOut or WouldBlock (macOS). Both are benign — loop back
+						// so the thread can re-check ImpunityLifecycle.ShuttingDown and keep waiting.
 						continue;
 					}
 

@@ -21,13 +21,16 @@ using UltraLiteDB;
 [DistributedEntity(IntegrationTestTypes.ENTITY)]
 public partial class IntegrationTestEntity : DistributedObjectBase
 {
-	public enum Props : byte { HEALTH = 1, NAME = 2 }
+	public enum Props : byte { HEALTH = 1, NAME = 2, ACTION = 3 }
 
 	[Distributed((byte)Props.HEALTH)]
 	public DistributedValue<int, Int32Serializer> Health;
 
 	[Distributed((byte)Props.NAME)]
 	public DistributedValue<string, StringSerializer> DisplayName;
+
+	[Distributed((byte)Props.ACTION)]
+	public DistributedTemporalValue<int, Int32Serializer> Action;
 
 	public bool WasDeleted;
 	public int UndistributedCount;
@@ -850,5 +853,156 @@ public class ImpunityIntegrationTests
 		}
 		Assert.IsNotNull(reEntity);
 		Assert.AreEqual(100, reEntity.Health.Get(), "Re-subscribed entity has wrong state");
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 8. Temporal Cooldown Locks
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>Helper: like SetupTwoClientChannel but also returns C1's entity instance so both
+	/// sides of the replication can be asserted on.</summary>
+	IEnumerator SetupTwoClientEntity(string channelName, System.Action<IntegrationTestEntity, IntegrationTestEntity> onReady)
+	{
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield(channelName, c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(100);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>(channelName, null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values)
+		{
+			c2Entity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(c2Entity, "C2 did not replicate the entity");
+
+		onReady(c1Entity, c2Entity);
+	}
+
+	[UnityTest, Category("CooldownLock")]
+	public IEnumerator CooldownLock_FirstUpdateWinsAndDropsWholeUpdate()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("cooldown1", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		// Establish a baseline Health via a normal update so BOTH sides hold it reliably.
+		// (These entities are not client-authoritative: local values are only populated by
+		// the server's relayed echo, so initial create-time values are never echoed to the creator.)
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// C1 wins the property with a cooldown lock
+		Assert.IsTrue(c1Entity.Action.Set(5, TimeSpan.FromSeconds(1.5)));
+		yield return TickUntil(() => c1Entity.Action.Get() == 5 && c2Entity.Action.Get() == 5, 3f, AllConnections());
+
+		Assert.IsTrue(c2Entity.Action.IsCooldownLocked, "C2 should see the cooldown lock");
+		Assert.Greater(c2Entity.Action.CooldownRemaining.TotalMilliseconds, 0.0);
+
+		// Local pre-check refuses while locked
+		Assert.IsFalse(c2Entity.Action.Set(99), "Set should fail locally during cooldown");
+
+		// Watch the non-sender (C1) for any leaked changes
+		bool c1ActionChanged = false, c1HealthChanged = false;
+		c1Entity.Action.OnChanged += (o, n) => c1ActionChanged = true;
+		c1Entity.Health.OnChanged += (o, n) => c1HealthChanged = true;
+
+		// A forced attempt bypasses the local check, but the server drops the whole update —
+		// including the non-temporal Health change batched into the same message
+		Assert.IsTrue(c2Entity.Action.Set(99, force: true));
+		c2Entity.Health.Set(1);
+
+		float drain = 0f;
+		while (drain < 0.7f)
+		{
+			foreach (var c in AllConnections()) c.Update();
+			yield return null;
+			drain += Time.deltaTime;
+		}
+
+		Assert.IsFalse(c1ActionChanged, "Locked temporal update leaked through to C1");
+		Assert.IsFalse(c1HealthChanged, "Batched non-temporal update was not dropped with the locked temporal field");
+		Assert.AreEqual(5, c1Entity.Action.Get(), "C1 action value changed despite the lock");
+		Assert.AreEqual(50, c1Entity.Health.Get(), "C1 health value changed despite the dropped update");
+	}
+
+	[UnityTest, Category("CooldownLock")]
+	public IEnumerator CooldownLock_ExpiryAllowsUpdates()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("cooldown2", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		Assert.IsTrue(c1Entity.Action.Set(5, TimeSpan.FromSeconds(1)));
+		yield return TickUntil(() => c2Entity.Action.Get() == 5, 3f, AllConnections());
+		Assert.IsTrue(c2Entity.Action.IsCooldownLocked);
+
+		// Wait out the cooldown
+		yield return TickUntil(() => !c2Entity.Action.IsCooldownLocked, 3f, AllConnections());
+
+		// A plain update (no lock requested) now succeeds and replicates everywhere
+		Assert.IsTrue(c2Entity.Action.Set(42));
+		yield return TickUntil(() => c1Entity.Action.Get() == 42 && c2Entity.Action.Get() == 42, 3f, AllConnections());
+		Assert.IsFalse(c1Entity.Action.IsCooldownLocked, "Plain update must not start a new cooldown");
+	}
+
+	[UnityTest, Category("CooldownLock")]
+	public IEnumerator CooldownLock_LateJoinerReceivesRemainingCooldown()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// C1 creates the channel + entity and locks the action before C2 subscribes
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("cooldown3", c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(100);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		Assert.IsTrue(c1Entity.Action.Set(5, TimeSpan.FromSeconds(2)));
+		// The echo from the server confirms the update (and its lock) was accepted
+		yield return TickUntil(() => c1Entity.Action.Get() == 5, 3f, AllConnections());
+
+		// C2 joins while the lock is active and learns the remaining cooldown from initial state
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("cooldown3", null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values)
+		{
+			c2Entity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(c2Entity);
+
+		Assert.AreEqual(5, c2Entity.Action.Get(), "Late joiner did not replicate the temporal value");
+		Assert.IsTrue(c2Entity.Action.IsCooldownLocked, "Late joiner should see the active cooldown");
+		Assert.LessOrEqual(c2Entity.Action.CooldownRemaining.TotalSeconds, 2.0, "Remaining cooldown should not exceed the original lockout");
+		Assert.IsFalse(c2Entity.Action.Set(99), "Late joiner Set should fail during cooldown");
+
+		// And the lock still expires normally
+		yield return TickUntil(() => !c2Entity.Action.IsCooldownLocked, 4f, AllConnections());
 	}
 }

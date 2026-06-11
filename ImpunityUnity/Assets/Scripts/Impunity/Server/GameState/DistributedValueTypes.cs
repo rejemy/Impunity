@@ -18,6 +18,8 @@ namespace Impunity.GameState
 		void WriteTo(BinaryWriter w);
 		/// <summary>Reads this value from a binary stream.</summary>
 		void ReadFrom(BinaryReader r);
+		/// <summary>Reads and discards this value's bytes from a binary stream, advancing the reader position without modifying this instance.</summary>
+		void SkipFrom(BinaryReader r);
 	}
 
 	/// <summary>Extended interface for standard value types that also support BSON persistence and temporal tracking.</summary>
@@ -61,6 +63,11 @@ namespace Impunity.GameState
 			Value = r.ReadBoolean();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadBoolean();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Boolean; }
 
 		public static implicit operator bool(DBool d) => d.Value;
@@ -91,6 +98,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadSByte();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadSByte();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int8; }
@@ -125,6 +137,11 @@ namespace Impunity.GameState
 			Value = r.ReadByte();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadByte();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt8; }
 
 		public static implicit operator byte(DUInt8 d) => d.Value;
@@ -155,6 +172,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt16();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt16();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int16; }
@@ -189,6 +211,11 @@ namespace Impunity.GameState
 			Value = r.ReadUInt16();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadUInt16();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
 
 		public static implicit operator ushort(DUInt16 d) => d.Value;
@@ -219,6 +246,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt32();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt32();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int32; }
@@ -253,6 +285,11 @@ namespace Impunity.GameState
 			Value = r.ReadUInt32();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadUInt32();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt32; }
 
 		public static implicit operator uint(DUInt32 d) => d.Value;
@@ -283,6 +320,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadInt64();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt64();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int64; }
@@ -317,6 +359,11 @@ namespace Impunity.GameState
 			Value = r.ReadUInt64();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadUInt64();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt64; }
 
 		public static implicit operator ulong(DUInt64 d) => d.Value;
@@ -347,6 +394,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadSingle();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadSingle();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Float; }
@@ -381,6 +433,11 @@ namespace Impunity.GameState
 			Value = r.ReadDouble();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadDouble();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Double; }
 
 		public static implicit operator double(DDouble d) => d.Value;
@@ -413,6 +470,11 @@ namespace Impunity.GameState
 			Value = r.ReadDecimal();
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadDecimal();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Decimal; }
 
 		public static implicit operator decimal(DDecimal d) => d.Value;
@@ -443,6 +505,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = r.ReadChar();
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadChar();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Char; }
@@ -490,6 +557,14 @@ namespace Impunity.GameState
 			else
 			{
 				Value = null;
+			}
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			if (r.ReadBoolean())
+			{
+				r.ReadString();
 			}
 		}
 
@@ -545,6 +620,15 @@ namespace Impunity.GameState
 			}
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			if (r.ReadBoolean())
+			{
+				int count = r.ReadUInt16();
+				r.ReadBytes(count);
+			}
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
 
 		public static implicit operator ArraySegment<byte>(DBlob d) => d.Value;
@@ -575,6 +659,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = DateTime.FromBinary(r.ReadInt64());
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt64();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
@@ -610,6 +699,12 @@ namespace Impunity.GameState
 			long ticks = r.ReadInt64();
 			TimeSpan offset = TimeSpan.FromMinutes(r.ReadInt16());
 			Value = new DateTimeOffset(ticks, offset);
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt64();
+			r.ReadInt16();
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTimeOffset; }
@@ -657,6 +752,11 @@ namespace Impunity.GameState
 			Value = new TimeSpan(r.ReadInt64());
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadInt64();
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
 
 		public static implicit operator TimeSpan(DTimeSpan d) => d.Value;
@@ -687,6 +787,11 @@ namespace Impunity.GameState
 		public void ReadFrom(BinaryReader r)
 		{
 			Value = new Guid(r.ReadBytes(16));
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			r.ReadBytes(16);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }

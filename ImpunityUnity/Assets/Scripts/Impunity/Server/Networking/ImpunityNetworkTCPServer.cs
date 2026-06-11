@@ -141,6 +141,15 @@ namespace Impunity.Networking
 			}
 
 			int messageLength = ImpunityNetworkingUtil.GetMessageLength(ReceiveBuffer);
+			if (messageLength < 12 || messageLength >= ImpunityConstants.MaxMessageSize)
+			{
+				// A length below the 12-byte header or beyond our fixed receive buffer can never
+				// be satisfied, so it would stall this connection forever (or spin on zero-length
+				// reads once the buffer fills). Drop the connection instead.
+				ImpunityLogger.LogWarning("Closing connection, received message with invalid length: " + messageLength);
+				Disconnect();
+				return;
+			}
 			if (BytesReceived < messageLength)
 			{
 				ImpunityLogger.LogDebug("Got partial message: " + BytesReceived + " / " + messageLength);
@@ -405,6 +414,22 @@ namespace Impunity.Networking
 					}
 
 					TcpClient client = TCPSocket.AcceptTcpClient();
+
+					if (ClientsConnected >= Options.MaxConnections)
+					{
+						// Server is full — reject before allocating the per-connection receive buffer
+						ImpunityLogger.LogWarning("Rejecting connection, server is full (" + Options.MaxConnections + " max connections)");
+						try
+						{
+							client.Close();
+							client.Dispose();
+						}
+						catch (Exception e)
+						{
+							ImpunityLogger.LogError("Exception closing rejected connection", e);
+						}
+						continue;
+					}
 
 					string connectionId = "tcp_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 					ImpunityTCPServerClientContext context = new ImpunityTCPServerClientContext(this, client, connectionId);

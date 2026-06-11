@@ -40,6 +40,12 @@ namespace Impunity.GameState
 			Value = r.ReadBytes(count);
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			int count = r.ReadByte();
+			r.ReadBytes(count);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 
 		public static implicit operator ArraySegment<byte>?(DSmallCustom d) => d.Value;
@@ -91,6 +97,15 @@ namespace Impunity.GameState
 			}
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			if (r.ReadBoolean())
+			{
+				int count = r.ReadByte();
+				r.ReadBytes(count);
+			}
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
 
 		public static implicit operator ArraySegment<byte>(DSmallNullableCustom d) => d.Value;
@@ -131,6 +146,12 @@ namespace Impunity.GameState
 		{
 			int count = r.ReadUInt16();
 			Value = r.ReadBytes(count);
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			int count = r.ReadUInt16();
+			r.ReadBytes(count);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
@@ -184,6 +205,15 @@ namespace Impunity.GameState
 			}
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			if (r.ReadBoolean())
+			{
+				int count = r.ReadUInt16();
+				r.ReadBytes(count);
+			}
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 
 		public static implicit operator ArraySegment<byte>(DNullableCustom d) => d.Value;
@@ -213,9 +243,13 @@ namespace Impunity.GameState
 				for (int i = 0; i < numChanges; i++)
 				{
 					int index = r.ReadUInt16();
-					T oldValue = Value![index];
+					if (Value == null || index >= Value.Length)
+					{
+						// Reject hostile/out-of-range index. Throwing here aborts the whole
+						// update before it is relayed to other subscribers.
+						throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Array update index out of range: " + index);
+					}
 					Value[index].ReadFrom(r);
-					T newValue = Value[index];
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -234,6 +268,29 @@ namespace Impunity.GameState
 			else
 			{
 				Value = null;
+			}
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			T skip = default;
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadUInt16(); // index
+					skip.SkipFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int arraySize = r.ReadUInt16();
+				for (int index = 0; index < arraySize; index++)
+				{
+					skip.SkipFrom(r);
+				}
 			}
 		}
 
@@ -347,6 +404,29 @@ namespace Impunity.GameState
 			}
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			T skip = default;
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					skip.SkipFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				r.ReadUInt16(); // capacity
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					skip.SkipFrom(r);
+				}
+			}
+		}
+
 		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
@@ -451,6 +531,30 @@ namespace Impunity.GameState
 			}
 		}
 
+		public void SkipFrom(BinaryReader r)
+		{
+			T skip = default;
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadInt32(); // key
+					skip.SkipFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					r.ReadInt32(); // key
+					skip.SkipFrom(r);
+				}
+			}
+		}
+
 		public void WriteTo(BinaryWriter w)
 		{
 			if (Value == null)
@@ -548,6 +652,30 @@ namespace Impunity.GameState
 			else
 			{
 				Value = null;
+			}
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			T skip = default;
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					r.ReadString(); // key
+					skip.SkipFrom(r);
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					r.ReadString(); // key
+					skip.SkipFrom(r);
+				}
 			}
 		}
 
