@@ -10,13 +10,18 @@ namespace Impunity.Connection
 	/// <summary>Base interface for all client-side distributed field types. Provides binary serialization for wire protocol and read/write lifecycle.</summary>
 	public interface IDistributedField
 	{
+		/// <summary>Serializes this field's pending local changes to the wire and clears the pending state. Called when the entity manager flushes dirty fields.</summary>
 		void WriteChangesTo(BinaryWriter w);
+		/// <summary>Reads the field's full initial state from the stream, applied when the entity is first received.</summary>
 		void ReadInitialFrom(BinaryReader r);
+		/// <summary>Reads an incremental update from the stream and applies it to the current value.</summary>
 		void ReadChangesFrom(BinaryReader r);
 		/// <summary>Reads and discards field data from the stream, advancing the reader position without applying changes. Used to skip stale out-of-order updates.</summary>
 		void SkipFrom(BinaryReader r);
 
+		/// <summary>The wire-protocol category of this field (value, array, queue, dictionary).</summary>
 		GameStateEntityFieldType FieldType { get; }
+		/// <summary>The serialized element value type for this field.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
@@ -28,8 +33,10 @@ namespace Impunity.Connection
 	}
 
 	/// <summary>
-	/// Client-side distributed single value. Tracks local changes and syncs them to the server via dirty-bit mechanism.
-	/// Supports client-authoritative mode where local changes are applied immediately before server confirmation.
+	/// Client-side distributed single value. Tracks local changes and syncs them to the server via a dirty-bit mechanism.
+	/// Reads (<see cref="DistributedValue{T, S}.Get"/>) always return the last server-confirmed value; a locally set value is
+	/// not reflected until the server echoes it back. The exception is client-authoritative mode — when the entity is flagged
+	/// client-authoritative or has no connected manager — where local changes are applied to the current value immediately.
 	/// </summary>
 	/// <typeparam name="T">The value type (must be equatable for dirty detection).</typeparam>
 	/// <typeparam name="S">The serializer struct used for binary read/write.</typeparam>
@@ -43,7 +50,7 @@ namespace Impunity.Connection
 		ulong FieldBitmask;
 
 		T CurrentValue;
-		T NewValue;
+		T? PendingValue;
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -51,27 +58,27 @@ namespace Impunity.Connection
 			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
-		/// <summary>Returns the current replicated value.</summary>
+		/// <summary>Returns the last server-confirmed value. Pending local changes made via <see cref="Set"/> are not reflected here unless the entity is client-authoritative.</summary>
 		public readonly T Get()
 		{
 			return CurrentValue;
 		}
 
-		/// <summary>Sets the value and marks the field dirty. Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
+		/// <summary>Queues the value to be sent to the server and marks the field dirty. Applied to the local current value immediately only when the entity is client-authoritative. Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
 		public bool Set(T newValue, bool force = false)
 		{
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && Equals(newValue, CurrentValue))
 			{
 				return false;
 			}
 
+			PendingValue = newValue;
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T oldValue = CurrentValue;
-				CurrentValue = NewValue;
+				CurrentValue = PendingValue;
 
 				InvokeOnChanged(oldValue, CurrentValue);
 			}
@@ -79,21 +86,21 @@ namespace Impunity.Connection
 			return true;
 		}
 
-		/// <summary>Sets the value and marks the field dirty. Will be sent as an unguaranteed update if possible.</summary>
+		/// <summary>Same as <see cref="Set(T, bool)"/> but flushed as an unguaranteed (best-effort) update when possible.</summary>
 		public bool SetUnguaranteed(T newValue, bool force = false)
 		{
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && Equals(newValue, CurrentValue))
 			{
 				return false;
 			}
 
+			PendingValue = newValue;
 			Entity.SetDirty(FieldBitmask, false);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T oldValue = CurrentValue;
-				CurrentValue = NewValue;
+				CurrentValue = PendingValue;
 
 				InvokeOnChanged(oldValue, CurrentValue);
 			}
@@ -104,14 +111,13 @@ namespace Impunity.Connection
 		/// <summary>Updates the value locally without sending to the server. Useful for client-side prediction or cosmetic state.</summary>
 		public bool SetLocalOnly(T newValue, bool force = false)
 		{
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && Equals(newValue, CurrentValue))
 			{
 				return false;
 			}
 
 			T oldValue = CurrentValue;
-			CurrentValue = NewValue;
+			CurrentValue = newValue;
 
 			InvokeOnChanged(oldValue, CurrentValue);
 
@@ -119,9 +125,11 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public readonly void WriteChangesTo(BinaryWriter w)
+		public void WriteChangesTo(BinaryWriter w)
 		{
-			Serializer.WriteTo(NewValue, w);
+			// Only called if there's a pending value
+			Serializer.WriteTo(PendingValue!, w);
+			PendingValue = default;
 		}
 
 		/// <inheritdoc/>
@@ -199,13 +207,14 @@ namespace Impunity.Connection
 		ulong FieldBitmask;
 
 		T CurrentValue;
-		T NewValue;
+		T? PendingValue;
 
 		/// <summary>Cooldown lock duration (ms) to send with the next update flush. 0 = no lock.</summary>
 		ushort PendingCooldownMs;
 		/// <summary>Server time (ms) when the currently known cooldown lock expires. 0 = no lock.</summary>
 		long CooldownExpiry;
 
+		/// <inheritdoc/>
 		public long LastModifiedTime { get; set; }
 
 		/// <summary>True while a cooldown lock is active on this field. While locked, the server drops any entity update that includes this field.</summary>
@@ -231,8 +240,8 @@ namespace Impunity.Connection
 		/// <summary>Reads the connection's server time, returning false if this field's entity is not yet attached to a connected manager (e.g. before the entity is created or subscribed). In that state no server-enforced cooldown can be active.</summary>
 		private readonly bool TryGetServerTime(out long serverTime)
 		{
-			ClientEntityManager? manager = Entity?.Manager;
-			if (manager == null || manager.Connection == null)
+			ClientEntityManager? manager = Entity.Manager;
+			if (manager?.Connection == null)
 			{
 				serverTime = 0;
 				return false;
@@ -247,11 +256,13 @@ namespace Impunity.Connection
 			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
+		/// <summary>Returns the last server-confirmed value. Pending local changes are not reflected here unless the entity is client-authoritative.</summary>
 		public readonly T Get()
         {
 			return CurrentValue;
         }
 
+		/// <summary>Sets the value with no cooldown lock. See <see cref="Set(T, TimeSpan, bool)"/> for the locking overload.</summary>
 		public bool Set(T newValue, bool force = false)
 		{
 			return Set(newValue, TimeSpan.Zero, force);
@@ -265,22 +276,17 @@ namespace Impunity.Connection
 		/// </summary>
 		public bool Set(T newValue, TimeSpan updateLockout, bool force = false)
 		{
-			if (!force && IsCooldownLocked)
-			{
-				return false;
-			}
-
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && (IsCooldownLocked || Equals(newValue, CurrentValue)))
 			{
 				return false;
 			}
 
 			PendingCooldownMs = ClampCooldown(updateLockout);
 
+			PendingValue = newValue;
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				ApplyLocalSet();
 			}
@@ -288,6 +294,7 @@ namespace Impunity.Connection
 			return true;
 		}
 
+		/// <summary>Sets the value with no cooldown lock, flushed as an unguaranteed (best-effort) update when possible. See <see cref="SetUnguaranteed(T, TimeSpan, bool)"/>.</summary>
 		public bool SetUnguaranteed(T newValue, bool force = false)
 		{
 			return SetUnguaranteed(newValue, TimeSpan.Zero, force);
@@ -296,22 +303,17 @@ namespace Impunity.Connection
 		/// <summary>Same as <see cref="Set(T, TimeSpan, bool)"/> but sent as an unguaranteed update if possible.</summary>
 		public bool SetUnguaranteed(T newValue, TimeSpan updateLockout, bool force = false)
 		{
-			if (!force && IsCooldownLocked)
-			{
-				return false;
-			}
-
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && (IsCooldownLocked || Equals(newValue, CurrentValue)))
 			{
 				return false;
 			}
 
 			PendingCooldownMs = ClampCooldown(updateLockout);
 
+			PendingValue = newValue;
 			Entity.SetDirty(FieldBitmask, false);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				ApplyLocalSet();
 			}
@@ -321,11 +323,11 @@ namespace Impunity.Connection
 
 		private void ApplyLocalSet()
 		{
-			LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 			CooldownExpiry = PendingCooldownMs > 0 ? LastModifiedTime + PendingCooldownMs : 0;
 
 			T oldValue = CurrentValue;
-			CurrentValue = NewValue;
+			CurrentValue = PendingValue!;
 
 			InvokeOnChanged(oldValue, CurrentValue);
 		}
@@ -340,33 +342,36 @@ namespace Impunity.Connection
 			return ms >= ushort.MaxValue ? ushort.MaxValue : (ushort)ms;
 		}
 
+		/// <summary>Updates the value locally without sending to the server, refreshing <see cref="LastModifiedTime"/>. Useful for client-side prediction or cosmetic state.</summary>
 		public bool SetLocalOnly(T newValue, bool force = false)
 		{
-			NewValue = newValue;
-			if (!force && Equals(NewValue, CurrentValue))
+			if (!force && Equals(newValue, CurrentValue))
 			{
 				return false;
 			}
 
-			LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? LastModifiedTime;
 
 			T oldValue = CurrentValue;
-			CurrentValue = NewValue;
+			CurrentValue = newValue;
 
 			InvokeOnChanged(oldValue, CurrentValue);
 			
 			return true;
 		}
 
-		public readonly void WriteChangesTo(BinaryWriter w)
+		/// <inheritdoc/>
+		public void WriteChangesTo(BinaryWriter w)
 		{
 			w.Write(PendingCooldownMs);
-			Serializer.WriteTo(NewValue, w);
+			Serializer.WriteTo(PendingValue!, w);
+			PendingValue = default;
 		}
 
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
-			long now = Entity.Manager.Connection.GetServerTime();
+			long now = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			long ageMilliseconds = r.ReadUInt32();
 			LastModifiedTime = now - ageMilliseconds;
@@ -379,9 +384,10 @@ namespace Impunity.Connection
 			InvokeOnInitialized(CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
 		}
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
-			LastModifiedTime = Entity.Manager.Connection.GetServerTime();
+			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			ushort cooldownMs = r.ReadUInt16();
 			CooldownExpiry = cooldownMs > 0 ? LastModifiedTime + cooldownMs : 0;
@@ -443,6 +449,7 @@ namespace Impunity.Connection
 		public static implicit operator T(DistributedTemporalValue<T,S> d) => d.CurrentValue;
 	}
 
+
 	/// <summary>
 	/// Client-side distributed fixed-size array. Supports both full replacement and per-index delta updates.
 	/// Only changed indices are serialized when using <see cref="Set"/> for efficient bandwidth usage.
@@ -464,9 +471,12 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		public readonly int Length => CurrentValue.Length;
-		public readonly int Count => CurrentValue.Length;
+		/// <summary>The length of the array, or 0 if it has not been initialized.</summary>
+		public readonly int Length => CurrentValue?.Length ?? 0;
+		/// <summary>The number of elements in the array, or 0 if it has not been initialized. Alias for <see cref="Length"/>.</summary>
+		public readonly int Count => CurrentValue?.Length ?? 0;
 
+		/// <summary>Gets the last server-confirmed element at the given index. See <see cref="Get"/>.</summary>
 		public readonly T this[int index] => Get(index);
 
 
@@ -476,6 +486,9 @@ namespace Impunity.Connection
 			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
+		/// <summary>True once the array has been initialized via <see cref="Init"/>, <see cref="Replace"/>, or an initial server load.</summary>
+		public bool HasValue => CurrentValue != null;
+
 		/// <summary>Initializes the array with default values of the given size. Marks the field dirty for full sync.</summary>
 		public void Init(int size)
 		{
@@ -484,7 +497,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -509,7 +522,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T[] oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -518,17 +531,17 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Returns the element at the given index, reflecting any pending local changes.</summary>
+		/// <summary>Returns the last server-confirmed element at the given index. Pending local changes are not reflected unless the entity is client-authoritative. Throws if the array has not been initialized.</summary>
 		public readonly T Get(int index)
 		{
-			if (Changes.TryGetValue(index, out T value))
+			if (CurrentValue == null)
 			{
-				return value;
+				throw new Exception("Array must be initialized with a call to Init or Replace before getting a value");
 			}
 			return CurrentValue[index];
 		}
 
-		/// <summary>Sets a single element by index. Only the changed index is sent as a delta update.</summary>
+		/// <summary>Sets a single element by index, marking the field dirty. Only the changed index is sent as a delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
 		public bool Set(int index, T newValue, bool force = false)
 		{
 			if (NewValue != null)
@@ -543,8 +556,9 @@ namespace Impunity.Connection
 
 				Entity.SetDirty(FieldBitmask, true);
 
-				if (Entity.IsClientAuthoritative)
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 				{
+					// If IsClientAuthoritative, NewValue is an alias to CurrentValue so it's already set
 					InvokeOnChanged(index, oldValue, newValue);
 				}
 
@@ -565,7 +579,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T oldValue = CurrentValue[index];
 				CurrentValue[index] = newValue;
@@ -576,6 +590,7 @@ namespace Impunity.Connection
 			return true;
 		}
 
+		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
 			if (NewValue != null)
@@ -607,12 +622,14 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
 		}
 
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -706,7 +723,11 @@ namespace Impunity.Connection
 
 		public IEnumerator<T> GetEnumerator()
 		{
-			throw new NotImplementedException();
+			int count = Count;
+			for (int i = 0; i < count; i++)
+			{
+				yield return Get(i);
+			}
 		}
 
 		IEnumerator IEnumerable.GetEnumerator()
@@ -748,12 +769,17 @@ namespace Impunity.Connection
 
 		int NewCapacity;
 		Queue<T>? NewValue;
+
 		Queue<T> Changes;
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		public readonly int Count { get => CurrentValue.Count; }
+		/// <summary>The number of elements currently in the queue, or 0 if it has not been initialized.</summary>
+		public readonly int Count { get => CurrentValue?.Count ?? 0; }
+
+		/// <summary>True once the queue has been initialized via <see cref="Init"/>, <see cref="Replace"/>, or an initial server load.</summary>
+		public bool HasValue => CurrentValue != null;
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -770,7 +796,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				CurrentCapacity = NewCapacity;
 				Queue<T> oldValue = CurrentValue;
@@ -795,7 +821,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				CurrentCapacity = NewCapacity;
 				Queue<T> oldValue = CurrentValue;
@@ -836,7 +862,7 @@ namespace Impunity.Connection
 		}
 
 
-		/// <summary>Enqueues a value, evicting the oldest if at capacity. Sends as a delta update.</summary>
+		/// <summary>Enqueues a value, evicting the oldest if at capacity, and marks the field dirty. Sent as a delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
 		public void Add(T newValue)
 		{
 			if (NewValue != null)
@@ -845,8 +871,9 @@ namespace Impunity.Connection
 
 				Entity.SetDirty(FieldBitmask, true);
 
-				if (Entity.IsClientAuthoritative)
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 				{
+					// If IsClientAuthoritative, NewValue is an alias to CurrentValue so it's already set
 					InvokeOnChanged(newValue);
 				}
 
@@ -857,7 +884,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				AddToCurrent(newValue);
 
@@ -865,6 +892,7 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
 			if (NewValue != null)
@@ -896,11 +924,13 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
 		}
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -922,18 +952,17 @@ namespace Impunity.Connection
 				CurrentCapacity = r.ReadUInt16();
 				int numValues = r.ReadUInt16();
 
-				Queue<T> newValue = new Queue<T>(numValues);
 				Queue<T> oldValue = CurrentValue;
-				CurrentValue = newValue;
+				CurrentValue = new Queue<T>(numValues);
 
 				for (int index = 0; index < numValues; index++)
 				{
 					T val = Serializer.ReadFrom(r);
-					if (newValue.Count == CurrentCapacity)
+					if (CurrentValue.Count == CurrentCapacity)
 					{
-						newValue.Dequeue();
+						CurrentValue.Dequeue();
 					}
-					newValue.Enqueue(val);
+					CurrentValue.Enqueue(val);
 				}
 
 				InvokeOnReplaced(oldValue, CurrentValue);
@@ -998,7 +1027,7 @@ namespace Impunity.Connection
 
 		public readonly IEnumerator<T> GetEnumerator()
 		{
-			return GetEnumerator();
+			return CurrentValue.GetEnumerator();
 		}
 
 		readonly IEnumerator IEnumerable.GetEnumerator()
@@ -1034,12 +1063,19 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		public readonly int Count { get => CurrentValue.Count; }
+		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
+		public readonly int Count { get => CurrentValue?.Count ?? 0; }
+		/// <summary>The keys in the last server-confirmed dictionary.</summary>
 		public readonly IEnumerable<int> Keys => CurrentValue.Keys;
 
+		/// <summary>The values in the last server-confirmed dictionary.</summary>
 		public readonly IEnumerable<T> Values => CurrentValue.Values;
 
-		public readonly T? this[int key] => Get(key);
+		/// <summary>Gets the last server-confirmed value for the given key. See <see cref="Get"/>.</summary>
+		public readonly T this[int key] => Get(key);
+
+		/// <summary>True once the dictionary has been initialized via <see cref="Init"/>, <see cref="Replace"/>, or an initial server load.</summary>
+		public bool HasValue => CurrentValue != null;
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -1055,7 +1091,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -1073,7 +1109,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				Dictionary<int,T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -1082,7 +1118,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Adds or updates an entry by key. Sends as a per-key delta update.</summary>
+		/// <summary>Adds or updates an entry by key, marking the field dirty. Sent as a per-key delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
 		public void Add(int key, T newValue)
 		{
 			if (NewValue != null)
@@ -1092,7 +1128,7 @@ namespace Impunity.Connection
 
 				Entity.SetDirty(FieldBitmask, true);
 
-				if (Entity.IsClientAuthoritative)
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 				{
 					InvokeOnChanged(key, oldValue, newValue);
 				}
@@ -1104,7 +1140,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
@@ -1114,13 +1150,14 @@ namespace Impunity.Connection
 
 		}
 
-		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
-		public readonly T? Get(int key)
+		/// <summary>Returns the last server-confirmed value for the given key, or default if the key is not present. Pending local changes are not reflected unless the entity is client-authoritative. Throws if the dictionary has not been initialized.</summary>
+		public readonly T Get(int key)
 		{
 			if (CurrentValue == null)
 			{
-				return default;
+				throw new Exception("Dictionary must be initialized with a call to Init or Replace before getting a value");
 			}
+
 			return CurrentValue.GetValueOrDefault(key);
 		}
 
@@ -1163,6 +1200,7 @@ namespace Impunity.Connection
 			ReadChangesFrom(r);
 		}
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -1250,11 +1288,13 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Returns true if the last server-confirmed dictionary contains the given key.</summary>
 		public readonly bool ContainsKey(int key)
 		{
 			return CurrentValue.ContainsKey(key);
 		}
 
+		/// <summary>Gets the last server-confirmed value for the given key, returning false if the key is not present.</summary>
 		public readonly bool TryGetValue(int key, out T value)
 		{
 			return CurrentValue.TryGetValue(key, out value);
@@ -1306,12 +1346,19 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		public readonly int Count { get => CurrentValue.Count; }
+		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
+		public readonly int Count { get => CurrentValue?.Count ?? 0; }
+		/// <summary>The keys in the last server-confirmed dictionary.</summary>
 		public readonly IEnumerable<string> Keys => CurrentValue.Keys;
 
+		/// <summary>The values in the last server-confirmed dictionary.</summary>
 		public readonly IEnumerable<T> Values => CurrentValue.Values;
 
-		public readonly T? this[string key] => Get(key);
+		/// <summary>Gets the last server-confirmed value for the given key. See <see cref="Get"/>.</summary>
+		public readonly T this[string key] => Get(key);
+
+		/// <summary>True once the dictionary has been initialized via <see cref="Init"/>, <see cref="Replace"/>, or an initial server load.</summary>
+		public bool HasValue => CurrentValue != null;
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -1327,7 +1374,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -1345,7 +1392,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				var oldValue = CurrentValue;
 				CurrentValue = NewValue;
@@ -1354,7 +1401,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Adds or updates an entry by key. Sends as a per-key delta update.</summary>
+		/// <summary>Adds or updates an entry by key, marking the field dirty. Sent as a per-key delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
 		public void Add(string key, T newValue)
 		{
 			if (NewValue != null)
@@ -1364,7 +1411,7 @@ namespace Impunity.Connection
 
 				Entity.SetDirty(FieldBitmask, true);
 
-				if (Entity.IsClientAuthoritative)
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 				{
 					InvokeOnChanged(key, oldValue, newValue);
 				}
@@ -1376,7 +1423,7 @@ namespace Impunity.Connection
 
 			Entity.SetDirty(FieldBitmask, true);
 
-			if (Entity.IsClientAuthoritative)
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
 				T oldValue = CurrentValue.GetValueOrDefault(key);
 				CurrentValue[key] = newValue;
@@ -1386,13 +1433,14 @@ namespace Impunity.Connection
 
 		}
 
-		/// <summary>Returns the value for the given key, or default if not found or uninitialized.</summary>
-		public readonly T? Get(string key)
+		/// <summary>Returns the last server-confirmed value for the given key, or default if the key is not present. Pending local changes are not reflected unless the entity is client-authoritative. Throws if the dictionary has not been initialized.</summary>
+		public readonly T Get(string key)
 		{
 			if (CurrentValue == null)
 			{
-				return default(T);
+				throw new Exception("Dictionary must be initialized with a call to Init or Replace before getting a value");
 			}
+
 			return CurrentValue.GetValueOrDefault(key);
 		}
 
@@ -1429,11 +1477,13 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
 		}
 
+		/// <inheritdoc/>
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			byte updateType = r.ReadByte();
@@ -1521,11 +1571,13 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Returns true if the last server-confirmed dictionary contains the given key.</summary>
 		public readonly bool ContainsKey(string key)
 		{
 			return CurrentValue.ContainsKey(key);
 		}
 
+		/// <summary>Gets the last server-confirmed value for the given key, returning false if the key is not present.</summary>
 		public readonly bool TryGetValue(string key, out T value)
 		{
 			return CurrentValue.TryGetValue(key, out value);

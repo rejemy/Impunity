@@ -128,22 +128,22 @@ namespace Impunity.Connection
 
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
-			Manager.Connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+			Manager.Connection?.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
 		}
 
 		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.DeleteEntity(DistributedEntityId, deleteData, onComplete);
+			Manager.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete);
 		}
 
 		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
+			Manager.Connection?.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
 		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
+			Manager.Connection?.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
 			{
 				if (err != null)
 				{
@@ -163,7 +163,7 @@ namespace Impunity.Connection
 
 		public void Unlock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
+			Manager.Connection?.UnlockEntity(DistributedEntityId, onComplete);
 		}
 		
 		public virtual void OnLocked()
@@ -289,7 +289,7 @@ namespace Impunity.Connection
 	public class ClientEntityManager
 	{
 		/// <summary>The connection this manager sends actions through.</summary>
-		public BaseGameConnection Connection = default!;
+		public BaseGameConnection? Connection = default;
 
 		private DistributedTypeInfo[] DistributedTypes = default!;
 
@@ -384,6 +384,11 @@ namespace Impunity.Connection
 		/// <summary>Creates a distributed object in a channel. Serializes initial properties and sends to the server. Returns the entity via callback after server confirmation.</summary>
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedObject
 		{
+			if (Connection == null)
+			{
+				throw new Exception("ClientEntityManager has no connection");
+			}
+
 			if(distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
 			{
 				throw new Exception("Object name cannot contain forward slash");
@@ -499,6 +504,11 @@ namespace Impunity.Connection
 		/// <summary>Creates a distributed channel with optional initial child objects.</summary>
 		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
 		{
+			if (Connection == null)
+			{
+				throw new Exception("ClientEntityManager has no connection");
+			}
+
 			channel.Name = channelName;
 
 			Type entityType = channel.GetType();
@@ -554,6 +564,11 @@ namespace Impunity.Connection
 		/// <summary>Subscribes to a channel by name. If already subscribed, returns the existing channel. Pass a non-null <paramref name="createIfNeeded"/> to create the channel if it doesn't exist.</summary>
 		public void SubscribeToChannel<T>(string channelName, T createIfNeeded, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
+			if (Connection == null)
+			{
+				throw new Exception("ClientEntityManager has no connection");
+			}
+
 			if (channelName == null)
 			{
 				throw new Exception("Channel must have name");
@@ -647,6 +662,11 @@ namespace Impunity.Connection
 		/// </summary>
 		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete, bool immediate = false)
 		{
+			if (Connection == null)
+			{
+				throw new Exception("ClientEntityManager has no connection");
+			}
+
 			uint channelId = channel.DistributedEntityId;
 
 			if (immediate)
@@ -835,6 +855,11 @@ namespace Impunity.Connection
 					if (entityData.PersistedAs == null)
 					{
 						throw new Exception("Can't have a distributed field persisted if the entity is not persisted");
+					}
+
+					if (isTemporalValue)
+					{
+						throw new Exception("A temporal field can't be persisted");
 					}
 
 					hasPersistedField = true;
@@ -1348,8 +1373,12 @@ namespace Impunity.Connection
 
 		private void SendEntityUpdates(IDistributedEntity entity)
         {
-			bool guaranteedSend = true;
-			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out guaranteedSend);
+			if (Connection == null)
+			{
+				return;
+			}
+
+			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out bool guaranteedSend);
 
 			entity.SendSeq++;
 			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null);

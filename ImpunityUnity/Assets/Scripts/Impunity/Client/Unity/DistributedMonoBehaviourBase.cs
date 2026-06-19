@@ -50,22 +50,22 @@ namespace Impunity.Unity
 
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
-			Manager.Connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+			Manager?.Connection?.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
 		}
 
 		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.DeleteEntity(DistributedEntityId, deleteData, onComplete);
+			Manager?.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete);
 		}
 
 		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, onComplete);
+			Manager?.Connection?.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
 		{
-			Manager.Connection.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
+			Manager?.Connection?.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
 			{
 				if (err != null)
 				{
@@ -84,7 +84,7 @@ namespace Impunity.Unity
 
 		public void Unlock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection.UnlockEntity(DistributedEntityId, onComplete);
+			Manager?.Connection?.UnlockEntity(DistributedEntityId, onComplete);
 		}
 
 		public virtual void OnLocked()
@@ -131,7 +131,7 @@ namespace Impunity.Unity
 
 		public void Unsubscribe(ImpunityCallback onComplete, bool immediate = false)
 		{
-			Manager.UnsubscribeFromChannel(this, onComplete, immediate);
+			Manager?.UnsubscribeFromChannel(this, onComplete, immediate);
 		}
 
 		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)
