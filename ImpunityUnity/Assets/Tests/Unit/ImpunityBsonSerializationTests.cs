@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 
 using Impunity;
@@ -370,5 +371,64 @@ public class ImpunityBsonSerializationTests
 		var em = MakeManager();
 		var e = new BsonTestEntity { DistributedEntityType = 999 }; // not registered with this manager
 		Assert.Throws<Exception>(() => em.GetPersistedFieldsAsBson(e));
+	}
+
+	// ───────── 4. Field schema (Part D) ─────────
+
+	[Test, Category("BsonSchema")]
+	public void GetFieldSchema_ClassifiesKindsAndClrTypes()
+	{
+		var em = MakeManager();
+		var byId = em.GetFieldSchema(typeof(BsonTestEntity)).ToDictionary(f => f.FieldId);
+
+		Assert.AreEqual(14, byId.Count);
+
+		// Scalar, persisted
+		Assert.AreEqual("Name", byId[1].FieldName);
+		Assert.AreEqual("name", byId[1].PersistAs);
+		Assert.AreEqual(GameStateEntityFieldType.Value, byId[1].FieldType);
+		Assert.AreEqual(GameStateEntityPropertyValueType.String, byId[1].ValueType);
+		Assert.AreEqual(typeof(string), byId[1].ValueClrType);
+		Assert.IsFalse(byId[1].IsTemporal);
+
+		// Non-persisted → PersistAs null
+		Assert.IsNull(byId[7].PersistAs);
+
+		// Temporal (and never persisted)
+		Assert.IsTrue(byId[8].IsTemporal);
+		Assert.IsNull(byId[8].PersistAs);
+
+		// Collections expose the element/value CLR type
+		Assert.AreEqual(GameStateEntityFieldType.Array, byId[9].FieldType);
+		Assert.AreEqual(typeof(int), byId[9].ValueClrType);
+		Assert.AreEqual(GameStateEntityFieldType.IntDictionary, byId[10].FieldType);
+		Assert.AreEqual(typeof(string), byId[10].ValueClrType);   // value type, not the int key
+		Assert.AreEqual(GameStateEntityFieldType.StringDictionary, byId[11].FieldType);
+		Assert.AreEqual(GameStateEntityFieldType.Queue, byId[12].FieldType);
+		Assert.AreEqual(typeof(string), byId[12].ValueClrType);
+
+		// Complex classification via ValueType (no BsonSerializer<> sniffing)
+		Assert.AreEqual(GameStateEntityPropertyValueType.Custom, byId[13].ValueType);
+		Assert.AreEqual(typeof(BsonTestPoco), byId[13].ValueClrType);
+		Assert.AreEqual(GameStateEntityPropertyValueType.CustomSmall, byId[14].ValueType);
+		Assert.AreEqual(typeof(Vector3), byId[14].ValueClrType);
+	}
+
+	[Test, Category("BsonSchema")]
+	public void GetFieldSchema_IncludesInheritedFields()
+	{
+		var em = MakeManager();
+		var byId = em.GetFieldSchema(typeof(BsonTestSubEntity)).ToDictionary(f => f.FieldId);
+
+		Assert.AreEqual(15, byId.Count);             // 14 inherited + Extra
+		Assert.IsTrue(byId.ContainsKey(1));          // inherited Name
+		Assert.AreEqual("extra", byId[20].PersistAs); // subclass-declared field
+	}
+
+	[Test, Category("BsonSchema")]
+	public void GetFieldSchema_UnregisteredType_Throws()
+	{
+		var em = MakeManager();
+		Assert.Throws<Exception>(() => em.GetFieldSchema(typeof(ImpunityBsonSerializationTests)));
 	}
 }

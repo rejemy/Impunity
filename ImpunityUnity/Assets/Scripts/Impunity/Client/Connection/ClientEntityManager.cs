@@ -261,6 +261,8 @@ namespace Impunity.Connection
 		public bool IsTemporal;
 		public GameStateEntityFieldType FieldType;
 		public GameStateEntityPropertyValueType FieldValueType;
+		/// <summary>The CLR value type the field carries (the <c>T</c> of <c>DistributedValue&lt;T,S&gt;</c>; the element/value type for collections).</summary>
+		public Type ValueClrType = null!;
 		public MethodInfo WriteMethod;
 		public MethodInfo InitMethod;
 		public MethodInfo UpdateMethod;
@@ -304,6 +306,32 @@ namespace Impunity.Connection
 			ObjectType = objectType;
 			Persisted = persisted;
 		}
+	}
+
+
+	/// <summary>
+	/// Public read-only description of a single distributed field, for tools (e.g. an editor's property
+	/// dialog) that need to classify fields and know their CLR type without touching the internal metadata.
+	/// Derive Primitive/Complex/Collection/Temporal from <see cref="FieldType"/> + <see cref="ValueType"/>:
+	/// <see cref="FieldType"/> distinguishes scalar vs. array/queue/dictionary, and a <see cref="ValueType"/>
+	/// of <c>Custom</c>/<c>CustomSmall</c> (and their nullable variants) denotes a complex value.
+	/// </summary>
+	public sealed class DistributedFieldInfo
+	{
+		/// <summary>The field's unique byte id (1-63).</summary>
+		public byte FieldId;
+		/// <summary>The CLR field name on the entity.</summary>
+		public string FieldName = null!;
+		/// <summary>The persistence key from <c>[Distributed(PersistAs=…)]</c>, or null if the field is not persisted.</summary>
+		public string? PersistAs;
+		/// <summary>True for temporal fields (never persisted).</summary>
+		public bool IsTemporal;
+		/// <summary>The container kind: Value, Array, Queue, IntDictionary, or StringDictionary.</summary>
+		public GameStateEntityFieldType FieldType;
+		/// <summary>The wire value type, including Custom/CustomSmall (and nullable variants) for complex values.</summary>
+		public GameStateEntityPropertyValueType ValueType;
+		/// <summary>The CLR value type (T; the element/value type for collections).</summary>
+		public Type ValueClrType = null!;
 	}
 
 
@@ -881,10 +909,13 @@ namespace Impunity.Connection
 				}
 
 
-				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldAttr.PersistAs?.Trim(), 
-																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType, 
+				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldAttr.PersistAs?.Trim(),
+																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType,
 																				writeMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
 
+				// The field's first generic argument is the value CLR type (T), i.e. the element type
+				// for arrays/queues and the value type for dictionaries.
+				dfield.ValueClrType = fieldType.GetGenericArguments()[0];
 
 				distributedFields.Add(dfield);
 			}
@@ -1422,6 +1453,46 @@ namespace Impunity.Connection
 				object[] parameters = new object[] { fieldValue };
 				fieldInfo.SetFromBsonMethod.Invoke(entity, parameters);
 			}
+		}
+
+		/// <summary>
+		/// Returns a read-only description of every distributed field on a registered entity type, for tools
+		/// that need to enumerate and classify fields (id, name, persistence key, container kind, value type,
+		/// and CLR value type). Throws if <paramref name="entityType"/> is not registered with this manager.
+		/// </summary>
+		public IReadOnlyList<DistributedFieldInfo> GetFieldSchema(Type entityType)
+		{
+			int typeId = DistributedEntity.GetEntityTypeId(entityType);
+			if (typeId <= 0 || typeId >= DistributedTypes.Length || DistributedTypes[typeId] == null)
+			{
+				throw new Exception("Entity type " + entityType.Name + " is not registered with this manager");
+			}
+
+			DistributedTypeInfo typeInfo = DistributedTypes[typeId];
+
+			List<DistributedFieldInfo> schema = new List<DistributedFieldInfo>();
+			if (typeInfo.DistributedFields == null)
+			{
+				return schema;
+			}
+
+			foreach (DistributedTypeFieldInfo field in typeInfo.DistributedFields)
+			{
+				if (field == null) continue;
+
+				schema.Add(new DistributedFieldInfo
+				{
+					FieldId = field.FieldId,
+					FieldName = field.FieldName,
+					PersistAs = field.PersistedAs,
+					IsTemporal = field.IsTemporal,
+					FieldType = field.FieldType,
+					ValueType = field.FieldValueType,
+					ValueClrType = field.ValueClrType,
+				});
+			}
+
+			return schema;
 		}
 	}
 
