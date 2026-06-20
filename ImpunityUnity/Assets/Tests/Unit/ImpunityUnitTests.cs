@@ -200,6 +200,16 @@ public class ImpunityUnitTests
 		public string Y { get; set; }
 	}
 
+	// A complex value made of PUBLIC FIELDS (no properties). It only round-trips non-empty when the
+	// BsonSerializer's mapper has IncludeFields = true — i.e. when WriteTo/ReadFrom use Impunity's
+	// configured mapper, not an unconfigured default that ignores fields. (TestPoco above is
+	// property-based, so it can't catch this.)
+	class FieldOnlyComplex
+	{
+		public string Name;
+		public int Count;
+	}
+
 	[Test, Category("Serializers")]
 	public void BsonSmallSerializer_RoundTrip()
 	{
@@ -232,6 +242,20 @@ public class ImpunityUnitTests
 	{
 		var ser = new BsonSerializer<TestPoco>();
 		Assert.IsNull(RoundTrip(ser, (TestPoco)null));
+	}
+
+	// Wire path (WriteTo/ReadFrom) must serialize public fields, not just properties — otherwise
+	// field-based replicated values (e.g. character appearance) sync empty. Regression guard for the
+	// serializer using an unconfigured BsonMapper.Global instead of Impunity's IncludeFields mapper.
+	[Test, Category("Serializers")]
+	public void BsonSerializer_WireRoundTrip_PreservesPublicFields()
+	{
+		var ser = new BsonSerializer<FieldOnlyComplex>();
+		var back = RoundTrip<FieldOnlyComplex, BsonSerializer<FieldOnlyComplex>>(
+			ser, new FieldOnlyComplex { Name = "hello", Count = 42 });
+
+		Assert.AreEqual("hello", back.Name);
+		Assert.AreEqual(42, back.Count);
 	}
 
 	// ───────── 2. Server-Side Value Type Round-Trips ─────────

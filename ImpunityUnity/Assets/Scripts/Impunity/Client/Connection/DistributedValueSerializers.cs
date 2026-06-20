@@ -625,7 +625,7 @@ namespace Impunity.Connection
 			}
 			else
 			{
-				byte[] bytes = BsonSerializer.Serialize(BsonMapper.Global.SerializeObject(value));
+				byte[] bytes = BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value));
 				if (bytes.Length >= 255)
 				{
 					throw new Exception("Value to large to serialize as a small value");
@@ -641,7 +641,7 @@ namespace Impunity.Connection
 			if (length > 0)
 			{
 				byte[] bytes = r.ReadBytes(length);
-				return BsonMapper.Global.ToObject<T>(BsonSerializer.Deserialize(bytes));
+				return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 			}
 			else
 			{
@@ -677,7 +677,7 @@ namespace Impunity.Connection
 			}
 			else
 			{
-				byte[] bytes = BsonSerializer.Serialize(BsonMapper.Global.SerializeObject(value));
+				byte[] bytes = BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value));
 				if (bytes.Length >= ushort.MaxValue)
 				{
 					throw new Exception("Value to large to serialize");
@@ -693,7 +693,7 @@ namespace Impunity.Connection
 			if (length > 0)
 			{
 				byte[] bytes = r.ReadBytes(length);
-				return BsonMapper.Global.ToObject<T>(BsonSerializer.Deserialize(bytes));
+				return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 			}
 			else
 			{

@@ -147,9 +147,12 @@ namespace Impunity
 				return Mapper;
 			}
 
-			Mapper = new BsonMapper();
-			Mapper.IncludeFields = true;
-			Mapper.IncludeFullType = false;
+			Mapper = new BsonMapper
+			{
+				IncludeFields = true,
+				IncludeFullType = false,
+				EmptyStringToNull = false
+			};
 
 			foreach (ClientActionType actionTypeId in Enum.GetValues(typeof(ClientActionType)))
 			{
