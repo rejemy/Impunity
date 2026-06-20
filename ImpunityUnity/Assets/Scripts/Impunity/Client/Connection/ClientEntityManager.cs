@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -19,6 +20,17 @@ namespace Impunity.Connection
 		public DistributedEntity(int entityId)
 		{
 			EntityId = entityId;
+		}
+
+		private static readonly ConcurrentDictionary<Type, int> EntityTypeIdCache = new ConcurrentDictionary<Type, int>();
+
+		/// <summary>Returns the entity type id declared by the <see cref="DistributedEntity"/> attribute on
+		/// <paramref name="type"/>, or 0 if it has none. Cached per type; used by the entity base constructors
+		/// so a freshly-constructed instance knows its type id without going through the manager.</summary>
+		internal static int GetEntityTypeId(Type type)
+		{
+			return EntityTypeIdCache.GetOrAdd(type, static t =>
+				((DistributedEntity?)GetCustomAttribute(t, typeof(DistributedEntity)))?.EntityId ?? 0);
 		}
 	}
 
@@ -110,6 +122,15 @@ namespace Impunity.Connection
 
 		public ushort SendSeq { get; set; }
 		public ushort[]? FieldRecvSeq { get; set; }
+
+		protected DistributedEntityBase()
+		{
+			// The type id is intrinsic to the [DistributedEntity] attribute, so populate it at
+			// construction. This makes offline/editor-built instances (which never go through
+			// CreateObject/HandleCreate*) usable with the manager's persisted-field BSON methods.
+			DistributedEntityType = DistributedEntity.GetEntityTypeId(GetType());
+			InitializeDistributedFields();
+		}
 
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
         {
@@ -244,10 +265,12 @@ namespace Impunity.Connection
 		public MethodInfo InitMethod;
 		public MethodInfo UpdateMethod;
 		public MethodInfo SkipMethod;
+		public MethodInfo GetAsBsonMethod;
+		public MethodInfo SetFromBsonMethod;
 
 		public DistributedTypeFieldInfo(byte fieldId, UInt64 fieldBitmask, string fieldName, string? persistedAs, bool isTemporal,
 			GameStateEntityFieldType fieldType, GameStateEntityPropertyValueType fieldValueType,
-			MethodInfo writeMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod)
+			MethodInfo writeMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod, MethodInfo getAsBsonMethod, MethodInfo setFromBsonMethod)
 		{
 			this.FieldId = fieldId;
 			this.FieldBitmask = fieldBitmask;
@@ -260,6 +283,8 @@ namespace Impunity.Connection
 			this.InitMethod = initMethod;
 			this.UpdateMethod = updateMethod;
 			this.SkipMethod = skipMethod;
+			this.GetAsBsonMethod = getAsBsonMethod;
+			this.SetFromBsonMethod = setFromBsonMethod;
 		}
 	}
 
@@ -311,6 +336,8 @@ namespace Impunity.Connection
 		private byte[] PropertyDecodingBuffer;
 		private BinaryReader PropertyDecodingReader;
 		private object[] UpdateMethodArgs;
+
+		private object[] GetAsBsonMethodArgs = new object[0];
 
 		/// <summary>Called when a distributed object is created in any subscribed channel. Parameters: entity, parent channel, newly created flag.</summary>
 		public Action<IDistributedObject, IDistributedChannel, bool>? OnDistributedObjectCreated;
@@ -394,20 +421,8 @@ namespace Impunity.Connection
 				throw new Exception("Object name cannot contain forward slash");
 			}
 
-			Type entityType = distObj.GetType();
-			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
-			if (distAttr == null)
-			{
-				throw new Exception("Tried to create distributed object type " + entityType.Name + " with no DistributedEntity attribute");
-			}
-
-			int entityTypeId = distAttr.EntityId;
-			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
-			{
-				throw new Exception("Tried to create distributed object with invalid entity type id: " + entityTypeId);
-			}
-
-			distObj.DistributedEntityType = entityTypeId;
+			int entityTypeId = distObj.DistributedEntityType;
+	
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
 			byte instaceFlags = 0;
@@ -457,20 +472,8 @@ namespace Impunity.Connection
 				throw new Exception("Object name cannot contain forward slash");
 			}
 
-			Type entityType = distObj.GetType();
-			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
-			if (distAttr == null)
-			{
-				throw new Exception("Tried to create distributed object type " + entityType.Name + " with no DistributedEntity attribute");
-			}
+			int entityTypeId = distObj.DistributedEntityType;
 
-			int entityTypeId = distAttr.EntityId;
-			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
-			{
-				throw new Exception("Tried to create distributed object with invalid entity type id: " + entityTypeId);
-			}
-
-			distObj.DistributedEntityType = entityTypeId;
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
 			byte instanceFlags = 0;
@@ -511,20 +514,8 @@ namespace Impunity.Connection
 
 			channel.Name = channelName;
 
-			Type entityType = channel.GetType();
-			DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
-			if (distAttr == null)
-			{
-				throw new Exception("Tried to create distributed channel type " + entityType.Name + " with no DistributedEntity attribute");
-			}
+			int entityTypeId = channel.DistributedEntityType;
 
-			int entityTypeId = distAttr.EntityId;
-			if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
-			{
-				throw new Exception("Tried to create distributed channel with invalid entity type id: " + entityTypeId);
-			}
-
-			channel.DistributedEntityType = entityTypeId;
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel, out _);
 			byte instanceFlags = 0;
 
@@ -596,20 +587,8 @@ namespace Impunity.Connection
 
 				createIfNeeded.Name = channelName;
 
-				Type entityType = createIfNeeded.GetType();
-				DistributedEntity distAttr = (DistributedEntity)entityType.GetCustomAttribute(typeof(DistributedEntity));
-				if (distAttr == null)
-				{
-					throw new Exception("Tried to create distributed channel type " + entityType.Name + " with no DistributedEntity attribute");
-				}
+				entityTypeId = createIfNeeded.DistributedEntityType;
 
-				entityTypeId = distAttr.EntityId;
-				if (entityTypeId <= 0 || entityTypeId >= DistributedTypes.Length || DistributedTypes[entityTypeId] == null)
-				{
-					throw new Exception("Tried to create distributed channel with invalid entity type id: " + entityTypeId);
-				}
-
-				createIfNeeded.DistributedEntityType = entityTypeId;
 				propertyBytes = GetPropertyBytes(createIfNeeded, out _);
 
 				if (createIfNeeded.IsClientAuthoritative)
@@ -889,10 +868,22 @@ namespace Impunity.Connection
 					throw new Exception("Cant find skip method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
 
+				MethodInfo? getAsBsonMethod = GetTypeMethodInherited(entityType, "_imp_GetBsonValueWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (getAsBsonMethod == null)
+				{
+					throw new Exception("Cant find getAsBson method for property " + fieldInfo.Name + " on type " + entityType.Name);
+				}
+
+				MethodInfo? setFromBsonMethod = GetTypeMethodInherited(entityType, "_imp_SetFromBsonValueWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (setFromBsonMethod == null)
+				{
+					throw new Exception("Cant find setFromBson method for property " + fieldInfo.Name + " on type " + entityType.Name);
+				}
+
 
 				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldAttr.PersistAs?.Trim(), 
 																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType, 
-																				writeMethod, initMethod, updateMethod, skipMethod);
+																				writeMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
 
 
 				distributedFields.Add(dfield);
@@ -1383,6 +1374,54 @@ namespace Impunity.Connection
 			entity.SendSeq++;
 			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null);
 
+		}
+
+		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,
+		/// throwing a clear error rather than indexing the reserved/empty slots when the type isn't registered with this manager
+		/// (e.g. a bare instance whose type id was never set, or one registered with a different manager).</summary>
+		private DistributedTypeInfo GetRegisteredTypeInfo(IDistributedEntity entity)
+		{
+			int typeId = entity.DistributedEntityType;
+			if (typeId <= 0 || typeId >= DistributedTypes.Length || DistributedTypes[typeId] == null)
+			{
+				throw new Exception("Entity type " + entity.GetType().Name + " (id " + typeId + ") is not registered with this manager");
+			}
+
+			return DistributedTypes[typeId];
+		}
+
+		public BsonDocument GetPersistedFieldsAsBson(IDistributedEntity entity)
+		{
+			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
+			BsonDocument persistedDoc = new BsonDocument();
+
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo == null) continue;
+
+				if (fieldInfo.PersistedAs == null) continue;
+
+				persistedDoc[fieldInfo.PersistedAs] = (BsonValue)fieldInfo.GetAsBsonMethod.Invoke(entity, GetAsBsonMethodArgs);
+			}
+
+			return persistedDoc;
+		}
+
+		public void ApplyPersistedFieldsFromBson(IDistributedEntity entity, BsonDocument doc)
+		{
+			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
+
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo == null) continue;
+
+				if (fieldInfo.PersistedAs == null) continue;
+				BsonValue fieldValue = doc[fieldInfo.PersistedAs];
+				if(fieldValue == null || fieldValue.IsNull) continue;
+
+				object[] parameters = new object[] { fieldValue };
+				fieldInfo.SetFromBsonMethod.Invoke(entity, parameters);
+			}
 		}
 	}
 

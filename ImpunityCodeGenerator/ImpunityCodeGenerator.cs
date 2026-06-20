@@ -182,6 +182,7 @@ namespace SourceGenerator
 
 			Output.AppendLine("using System.Collections.Generic;");
 			Output.AppendLine("using System.IO;");
+			Output.AppendLine("using UltraLiteDB;");
 			
 			string? currentNamespace = null;
 			foreach(DistributedClassInfo classInfo in DistributedClasses)
@@ -255,6 +256,17 @@ namespace SourceGenerator
 		{{
 			{propInfo.PropertyName}.SkipFrom(r);
 		}}");
+
+			Output.AppendLine($@"		private BsonValue _imp_GetBsonValueWrapper_{propInfo.PropertyName}()
+		{{
+			return {propInfo.PropertyName}.GetAsBsonValue();
+		}}");
+
+			Output.AppendLine($@"		private void _imp_SetFromBsonValueWrapper_{propInfo.PropertyName}(BsonValue v)
+		{{
+			{propInfo.PropertyName}.SetFromBsonValue(v);
+		}}");
+
 		}
 
 

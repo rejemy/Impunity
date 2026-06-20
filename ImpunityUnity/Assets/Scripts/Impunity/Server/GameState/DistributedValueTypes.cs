@@ -691,7 +691,7 @@ namespace Impunity.GameState
 		public void WriteTo(BinaryWriter w)
 		{
 			w.Write(Value.Ticks);
-			w.Write((short)Value.Offset.Minutes);
+			w.Write((short)Value.Offset.TotalMinutes);
 		}
 
 		public void ReadFrom(BinaryReader r)
@@ -717,7 +717,7 @@ namespace Impunity.GameState
 		{
 			BsonDocument doc = new BsonDocument();
 			doc["t"] = Value.Ticks;
-			doc["o"] = Value.Offset.Minutes;
+			doc["o"] = (int)Value.Offset.TotalMinutes;
 			return doc;
 		}
 

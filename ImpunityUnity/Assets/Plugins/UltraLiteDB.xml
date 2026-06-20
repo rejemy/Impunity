@@ -2983,6 +2983,12 @@
             </summary>
             <typeparam name="T">The entity type.</typeparam>
         </member>
+        <member name="M:UltraLiteDB.BsonMapper.ToBsonValue(System.Object)">
+            <summary>
+            Recursively serializes a .NET object to a <see cref="T:UltraLiteDB.BsonValue"/>. Handles primitive types, custom serializers,
+            dictionaries, collections, and complex objects.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.Serialize(System.Type,System.Object,System.Int32)">
             <summary>
             Recursively serializes a .NET object to a <see cref="T:UltraLiteDB.BsonValue"/>. Handles primitive types, custom serializers,

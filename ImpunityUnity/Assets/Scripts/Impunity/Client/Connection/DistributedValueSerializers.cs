@@ -18,6 +18,12 @@ namespace Impunity.Connection
 		/// <summary>Reads and returns a value from the binary stream.</summary>
 		T ReadFrom(BinaryReader r);
 
+		/// <summary>Converts value to BsonValue</summary>
+		BsonValue ToBsonValue(T value);
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		T FromBsonValue(BsonValue value);
+
 		/// <summary>The property value type tag used in the wire protocol for this serializer's type.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
@@ -33,6 +39,18 @@ namespace Impunity.Connection
 		public bool ReadFrom(BinaryReader r)
 		{
 			return r.ReadBoolean();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(bool value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public bool FromBsonValue(BsonValue value)
+		{
+			return value;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Boolean; }
@@ -51,6 +69,18 @@ namespace Impunity.Connection
 			return r.ReadSByte();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(sbyte value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public sbyte FromBsonValue(BsonValue value)
+		{
+			return (sbyte)value.AsInt32;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int8; }
 	}
 
@@ -65,6 +95,18 @@ namespace Impunity.Connection
 		public byte ReadFrom(BinaryReader r)
 		{
 			return r.ReadByte();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(byte value)
+		{
+			return (int)value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public byte FromBsonValue(BsonValue value)
+		{
+			return (byte)value.AsInt32;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt8; }
@@ -83,6 +125,18 @@ namespace Impunity.Connection
 			return r.ReadInt16();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(short value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public short FromBsonValue(BsonValue value)
+		{
+			return (short)value.AsInt32;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int16; }
 	}
 
@@ -97,6 +151,18 @@ namespace Impunity.Connection
 		public readonly ushort ReadFrom(BinaryReader r)
 		{
 			return r.ReadUInt16();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(ushort value)
+		{
+			return (int)value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public ushort FromBsonValue(BsonValue value)
+		{
+			return (ushort)value.AsInt32;
 		}
 
 		public readonly GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
@@ -115,6 +181,18 @@ namespace Impunity.Connection
 			return r.ReadInt32();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(int value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public int FromBsonValue(BsonValue value)
+		{
+			return value;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int32; }
 	}
 
@@ -129,6 +207,18 @@ namespace Impunity.Connection
 		public readonly uint ReadFrom(BinaryReader r)
 		{
 			return r.ReadUInt32();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(uint value)
+		{
+			return (int)value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public uint FromBsonValue(BsonValue value)
+		{
+			return (uint)value.AsInt32;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt32; }
@@ -147,6 +237,18 @@ namespace Impunity.Connection
 			return r.ReadInt64();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(long value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public long FromBsonValue(BsonValue value)
+		{
+			return value;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int64; }
 	}
 
@@ -161,6 +263,20 @@ namespace Impunity.Connection
 		public ulong ReadFrom(BinaryReader r)
 		{
 			return r.ReadUInt64();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(ulong value)
+		{
+			// Store the bit pattern as Int64 (matches the server's DUInt64). A bare `return value;`
+			// would route ulong->double->BsonValue, losing precision and throwing on read-back.
+			return unchecked((long)value);
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public ulong FromBsonValue(BsonValue value)
+		{
+			return unchecked((ulong)value.AsInt64);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt64; }
@@ -179,6 +295,20 @@ namespace Impunity.Connection
 			return r.ReadSingle();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(float value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public float FromBsonValue(BsonValue value)
+		{
+			// BsonValue stores floats as Double; the implicit BsonValue->float cast throws on a
+			// boxed Double, so read through AsSingle.
+			return value.AsSingle;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Float; }
 	}
 
@@ -193,6 +323,18 @@ namespace Impunity.Connection
 		public double ReadFrom(BinaryReader r)
 		{
 			return r.ReadDouble();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(double value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public double FromBsonValue(BsonValue value)
+		{
+			return value;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Double; }
@@ -211,6 +353,18 @@ namespace Impunity.Connection
 			return r.ReadDecimal();
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(decimal value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public decimal FromBsonValue(BsonValue value)
+		{
+			return value;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Decimal; }
 	}
 
@@ -225,6 +379,18 @@ namespace Impunity.Connection
 		public char ReadFrom(BinaryReader r)
 		{
 			return r.ReadChar();
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(char value)
+		{
+			return value.ToString();
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public char FromBsonValue(BsonValue value)
+		{
+			return value.AsString[0];
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Char; }
@@ -257,6 +423,19 @@ namespace Impunity.Connection
 			{
 				return null;
 			}
+		}
+
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(string? value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public string? FromBsonValue(BsonValue value)
+		{
+			return value;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.String; }
@@ -295,6 +474,18 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(ArraySegment<byte> value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public ArraySegment<byte> FromBsonValue(BsonValue value)
+		{
+			return value;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
 	}
 
@@ -311,6 +502,19 @@ namespace Impunity.Connection
 			return DateTime.FromBinary(r.ReadInt64());
 		}
 
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(DateTime value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public DateTime FromBsonValue(BsonValue value)
+		{
+			return value;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
 	}
 
@@ -320,13 +524,33 @@ namespace Impunity.Connection
 		public void WriteTo(DateTimeOffset value, BinaryWriter w)
 		{
 			w.Write(value.Ticks);
-			w.Write((short)value.Offset.Minutes);
+			w.Write((short)value.Offset.TotalMinutes);
 		}
 
 		public DateTimeOffset ReadFrom(BinaryReader r)
 		{
 			long ticks = r.ReadInt64();
 			TimeSpan offset = TimeSpan.FromMinutes(r.ReadInt16());
+			return new DateTimeOffset(ticks, offset);
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(DateTimeOffset value)
+		{
+			BsonDocument doc = new BsonDocument();
+			doc["t"] = value.Ticks;
+			// TotalMinutes, not Minutes: Offset.Minutes is only the minute-of-hour component, so
+			// e.g. +05:30 would otherwise round-trip as +00:30.
+			doc["o"] = (int)value.Offset.TotalMinutes;
+			return doc;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public DateTimeOffset FromBsonValue(BsonValue value)
+		{
+			BsonDocument doc = value.AsDocument!;
+			long ticks = doc.GetInt64OrDefault("t", 0);
+			TimeSpan offset = TimeSpan.FromMinutes(doc.GetInt32OrDefault("o", 0));
 			return new DateTimeOffset(ticks, offset);
 		}
 
@@ -346,6 +570,18 @@ namespace Impunity.Connection
 			return new TimeSpan(r.ReadInt64());
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(TimeSpan value)
+		{
+			return value.Ticks;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public TimeSpan FromBsonValue(BsonValue value)
+		{
+			return new TimeSpan(value.AsInt64);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
 	}
 
@@ -360,6 +596,18 @@ namespace Impunity.Connection
 		public Guid ReadFrom(BinaryReader r)
 		{
 			return new Guid(r.ReadBytes(16));
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Guid value)
+		{
+			return value;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Guid FromBsonValue(BsonValue value)
+		{
+			return value;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
@@ -401,6 +649,19 @@ namespace Impunity.Connection
 			}
 		}
 
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(T value)
+		{
+			return ImpunityUtil.GetBsonMapper().SerializeObject(value);
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public T FromBsonValue(BsonValue value)
+		{
+			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
@@ -438,6 +699,18 @@ namespace Impunity.Connection
 			{
 				return null!; // null is a valid value for this type
 			}
+		}
+
+				/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(T value)
+		{
+			return ImpunityUtil.GetBsonMapper().SerializeObject(value);
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public T FromBsonValue(BsonValue value)
+		{
+			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }

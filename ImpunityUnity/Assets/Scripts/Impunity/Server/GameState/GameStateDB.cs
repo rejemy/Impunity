@@ -107,7 +107,7 @@ namespace Impunity.GameState
 					Password = options?.DBPassword,
 					Flush = true
 				},
-				new BsonMapper(),
+				ImpunityUtil.GetBsonMapper(),
 				new Logger(UltraLiteDB.Logger.ERROR, DatabaseLogger)
 			);
 

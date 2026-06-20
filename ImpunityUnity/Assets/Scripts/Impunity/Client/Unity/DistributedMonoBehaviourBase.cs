@@ -33,6 +33,16 @@ namespace Impunity.Unity
 		public ushort SendSeq { get; set; }
 		public ushort[]? FieldRecvSeq { get; set; }
 
+		protected DistributedMonoBehvaiourEntityBase()
+		{
+			// Mirror DistributedEntityBase: resolve the intrinsic [DistributedEntity] type id at
+			// construction so offline/editor-built instances know their type id without the manager.
+			// Pure managed reflection + a field set — no Unity API calls — so it is safe in a
+			// MonoBehaviour constructor.
+			DistributedEntityType = DistributedEntity.GetEntityTypeId(GetType());
+			InitializeDistributedFields();
+		}
+
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
 		{
 			DirtyBits |= fieldBitmask;

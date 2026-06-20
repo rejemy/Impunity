@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Impunity.Connection;
+using UltraLiteDB;
 using UnityEngine;
 
 namespace Impunity.Unity
@@ -30,6 +31,25 @@ namespace Impunity.Unity
 			return value;
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Vector2 value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Vector2 FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Vector2(vect[0].AsSingle, vect[1].AsSingle);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
@@ -57,6 +77,26 @@ namespace Impunity.Unity
 			value.y = r.ReadSingle();
 			value.z = r.ReadSingle();
 			return value;
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Vector3 value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y,
+				value.z
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Vector3 FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Vector3(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
@@ -89,6 +129,27 @@ namespace Impunity.Unity
 			return value;
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Vector4 value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y,
+				value.z,
+				value.w
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Vector4 FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Vector4(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle, vect[3].AsSingle);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
@@ -113,6 +174,25 @@ namespace Impunity.Unity
 			value.x = r.ReadInt32();
 			value.y = r.ReadInt32();
 			return value;
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Vector2Int value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Vector2Int FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Vector2Int(vect[0], vect[1]);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
@@ -140,6 +220,26 @@ namespace Impunity.Unity
 			value.y = r.ReadInt32();
 			value.z = r.ReadInt32();
 			return value;
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Vector3Int value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y,
+				value.z
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Vector3Int FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Vector3Int(vect[0], vect[1], vect[2]);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
@@ -171,6 +271,28 @@ namespace Impunity.Unity
 			return value;
 		}
 
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Color value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.r,
+				value.g,
+				value.b,
+				value.a
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Color FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Color(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle, vect[3].AsSingle);
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
@@ -198,6 +320,27 @@ namespace Impunity.Unity
 			value.b = r.ReadByte();
 			value.a = r.ReadByte();
 			return value;
+		}
+
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Color32 value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				(int)value.r,
+				(int)value.g,
+				(int)value.b,
+				(int)value.a
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Color32 FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Color32((byte)vect[0].AsInt32, (byte)vect[1].AsInt32, (byte)vect[2].AsInt32, (byte)vect[3].AsInt32);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
@@ -229,6 +372,30 @@ namespace Impunity.Unity
 			return value;
 		}
 
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Matrix4x4 value)
+		{
+			BsonArray array = new BsonArray();
+			for(int i=0; i<16; i++)
+			{
+				array.Add(value[i]);
+			}
+			return array;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Matrix4x4 FromBsonValue(BsonValue value)
+		{
+			BsonArray array = value.AsArray!;
+			Matrix4x4 matrix = new Matrix4x4();
+
+			for(int i=0; i<16; i++)
+			{
+				matrix[i] = array[i].AsSingle;
+			}
+			return matrix ;
+		}
+
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
@@ -256,6 +423,27 @@ namespace Impunity.Unity
 			value.z = r.ReadInt32();
 			value.w = r.ReadInt32();
 			return value;
+		}
+		
+		/// <summary>Converts value to BsonValue</summary>
+		public BsonValue ToBsonValue(Quaternion value)
+		{
+			BsonArray vect = new BsonArray
+			{
+				value.x,
+				value.y,
+				value.z,
+				value.w
+			};
+			return vect;
+		}
+
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		public Quaternion FromBsonValue(BsonValue value)
+		{
+			BsonArray vect = value.AsArray!;
+	
+			return new Quaternion(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle, vect[3].AsSingle);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }

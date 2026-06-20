@@ -103,6 +103,19 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 		return value;
 	}
 
+	/// <summary>Converts value to BsonValue</summary>
+	public BsonValue ToBsonValue(CustomMovementStateData value)
+	{
+		BsonDocument doc = new BsonDocument();
+		return doc;
+	}
+
+	/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+	public CustomMovementStateData FromBsonValue(BsonValue value)
+	{
+		return new CustomMovementStateData();
+	}
+
 	public GameStateEntityPropertyValueType ValueType { get { return GameStateEntityPropertyValueType.CustomSmallNullable; }}
 }
 
@@ -127,7 +140,6 @@ public partial class TestDistObj : DistributedObjectBase
 
 	public TestDistObj()
 	{
-		InitializeDistributedFields();
 		Position.OnChanged += OnPositionChanged;
 	}
 
@@ -156,8 +168,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 
 	public TestPlayer()
 	{
-		InitializeDistributedFields();
-
 		TestBool.OnChanged += OnTestBoolChanged;
 		Direction.OnChanged += OnDirectionChanged;
 		Flags.OnChanged += OnFlagsChanged;
@@ -254,8 +264,6 @@ public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 
 	public TestZone()
 	{
-		InitializeDistributedFields();
-
 		Grid.OnChanged += OnGridChanged;
 		Grid.OnReplaced += OnGridReplaced;
 		Chat.OnChanged += OnChatChanged;
@@ -321,8 +329,6 @@ public partial class PersistedTestZone : DistributedChannelBase
 
 	public PersistedTestZone()
 	{
-		InitializeDistributedFields();
-
 		Grid.OnChanged += OnGridChanged;
 		Grid.OnReplaced += OnGridReplaced;
 		Chat.OnChanged += OnChatChanged;
@@ -379,8 +385,6 @@ public partial class ZonePersistedObject : DistributedObjectBase
 
 	public ZonePersistedObject()
 	{
-		InitializeDistributedFields();
-
 		Position.OnChanged += OnPositionChanged;
 		Direction.OnChanged += OnDirectionChanged;
 		Flags.OnChanged += OnFlagsChanged;

@@ -175,7 +175,7 @@ public class ImpunityUnitTests
 		var dto = new DateTimeOffset(2025, 6, 15, 10, 30, 0, TimeSpan.FromMinutes(30));
 		var result = RoundTrip(new DateTimeOffsetSerializer(), dto);
 		Assert.AreEqual(dto.Ticks, result.Ticks);
-		Assert.AreEqual(dto.Offset.Minutes, result.Offset.Minutes);
+		Assert.AreEqual(dto.Offset.TotalMinutes, result.Offset.TotalMinutes);
 	}
 
 	[Test, Category("Serializers")]

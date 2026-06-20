@@ -35,11 +35,6 @@ public partial class IntegrationTestEntity : DistributedObjectBase
 	public bool WasDeleted;
 	public int UndistributedCount;
 
-	public IntegrationTestEntity()
-	{
-		InitializeDistributedFields();
-	}
-
 	public override void OnDeleted(BsonValue deleteData)
 	{
 		WasDeleted = true;
@@ -69,11 +64,6 @@ public partial class IntegrationTestChannel : DistributedChannelBase
 	public DistributedIntDictionary<string, StringSerializer> Flags;
 
 	public int UndistributedCount;
-
-	public IntegrationTestChannel()
-	{
-		InitializeDistributedFields();
-	}
 
 	public override void OnUndistributed()
 	{

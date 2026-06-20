@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using UltraLiteDB;
 
 
 namespace Impunity.Connection
@@ -10,6 +11,12 @@ namespace Impunity.Connection
 	/// <summary>Base interface for all client-side distributed field types. Provides binary serialization for wire protocol and read/write lifecycle.</summary>
 	public interface IDistributedField
 	{
+		/// <summary>Gets field value as a BsonValue</summary>
+		BsonValue GetAsBsonValue();
+		
+		/// <summary>Sets field from a BsonValue</summary>
+		void SetFromBsonValue(BsonValue val);
+
 		/// <summary>Serializes this field's pending local changes to the wire and clears the pending state. Called when the entity manager flushes dirty fields.</summary>
 		void WriteChangesTo(BinaryWriter w);
 		/// <summary>Reads the field's full initial state from the stream, applied when the entity is first received.</summary>
@@ -179,6 +186,18 @@ namespace Impunity.Connection
 			return Equals(CurrentValue, other);
 		}
 
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			return Serializer.ToBsonValue(CurrentValue);
+		}
+
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			Set(Serializer.FromBsonValue(val));
+		}
+
 		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
 		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
@@ -208,6 +227,8 @@ namespace Impunity.Connection
 
 		T CurrentValue;
 		T? PendingValue;
+
+		public object RawCurrentValue => CurrentValue;
 
 		/// <summary>Cooldown lock duration (ms) to send with the next update flush. 0 = no lock.</summary>
 		ushort PendingCooldownMs;
@@ -443,6 +464,18 @@ namespace Impunity.Connection
 			return Equals(CurrentValue, other);
 		}
 
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			return Serializer.ToBsonValue(CurrentValue);
+		}
+
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			Set(Serializer.FromBsonValue(val));
+		}
+
 		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
 		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
@@ -467,6 +500,8 @@ namespace Impunity.Connection
 		T[] CurrentValue;
 		T[]? NewValue;
 		Dictionary<int, T> Changes;
+
+		public object RawCurrentValue => CurrentValue;
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
@@ -744,6 +779,40 @@ namespace Impunity.Connection
 			return CurrentValue.Equals(other);
 		}
 
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			if (CurrentValue == null)
+			{
+				return BsonValue.Null;
+			}
+
+			BsonArray array = new BsonArray();
+			foreach(var val in CurrentValue)
+			{
+				array.Add(Serializer.ToBsonValue(val));
+			}
+
+			return array;
+		}
+		
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			if (val.IsNull || !val.IsArray)
+			{
+				return;
+			}
+			BsonArray source = val.AsArray!;
+			List<T> list = new List<T>(source.Count);
+
+			foreach(var item in source)
+			{
+				list.Add(Serializer.FromBsonValue(item));
+			}
+			Replace(list);
+		}
+
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Array; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 		public static implicit operator T[](DistributedArray<T, S> d) => d.CurrentValue;
@@ -766,6 +835,8 @@ namespace Impunity.Connection
 
 		int CurrentCapacity;
 		Queue<T> CurrentValue;
+
+		public object RawCurrentValue => CurrentValue;
 
 		int NewCapacity;
 		Queue<T>? NewValue;
@@ -1032,7 +1103,48 @@ namespace Impunity.Connection
 
 		readonly IEnumerator IEnumerable.GetEnumerator()
 		{
-			return GetEnumerator();
+			return CurrentValue.GetEnumerator();
+		}
+
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			if (CurrentValue == null)
+			{
+				return BsonValue.Null;
+			}
+			BsonDocument doc = new BsonDocument();
+			doc["Capacity"] = CurrentCapacity;
+
+			BsonArray array = new BsonArray();
+			foreach(var val in CurrentValue)
+			{
+				array.Add(Serializer.ToBsonValue(val));
+			}
+			doc["Queue"] = array;
+			
+			return doc;
+		}
+		
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			if (val.IsNull || !val.IsDocument)
+			{
+				return;
+			}
+			BsonDocument doc = val.AsDocument!;
+			int capacity = doc["Capacity"].AsInt32;
+			BsonArray source = doc["Queue"].AsArray!;
+
+			List<T> list = new List<T>(source.Count);
+
+			foreach(var item in source)
+			{
+				list.Add(Serializer.FromBsonValue(item));
+			}
+
+			Replace(capacity, list);
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Queue; }
@@ -1059,6 +1171,8 @@ namespace Impunity.Connection
 
 		Dictionary<int, T>? NewValue;
 		Dictionary<int, T> Changes;
+
+		public object RawCurrentValue => CurrentValue;
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
@@ -1319,6 +1433,41 @@ namespace Impunity.Connection
 			return CurrentValue.Equals(other);
 		}
 
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			if (CurrentValue == null)
+			{
+				return BsonValue.Null;
+			}
+
+			BsonDocument dict = new BsonDocument();
+			foreach(var val in CurrentValue)
+			{
+				dict[val.Key.ToString()] = Serializer.ToBsonValue(val.Value);
+			}
+			
+			return dict;
+		}
+		
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			if (val.IsNull || !val.IsDocument)
+			{
+				return;
+			}
+			BsonDocument source = val.AsDocument!;
+			Dictionary<int,T> dict = new Dictionary<int, T>();
+
+			foreach(var item in source)
+			{
+				dict[int.Parse(item.Key)] = Serializer.FromBsonValue(item.Value);
+			}
+
+			Replace(dict);
+		}
+
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.IntDictionary; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T,S> d) => d.CurrentValue;
@@ -1342,6 +1491,8 @@ namespace Impunity.Connection
 
 		Dictionary<string, T>? NewValue;
 		Dictionary<string, T> Changes;
+
+		public object RawCurrentValue => CurrentValue;
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
@@ -1600,6 +1751,41 @@ namespace Impunity.Connection
 				return other == null;
 			}
 			return CurrentValue.Equals(other);
+		}
+
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			if (CurrentValue == null)
+			{
+				return BsonValue.Null;
+			}
+
+			BsonDocument dict = new BsonDocument();
+			foreach(var val in CurrentValue)
+			{
+				dict[val.Key] = Serializer.ToBsonValue(val.Value);
+			}
+			
+			return dict;
+		}
+		
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			if (val.IsNull || !val.IsDocument)
+			{
+				return;
+			}
+			BsonDocument source = val.AsDocument!;
+			Dictionary<string,T> dict = new Dictionary<string, T>();
+
+			foreach(var item in source)
+			{
+				dict[item.Key] = Serializer.FromBsonValue(item.Value);
+			}
+
+			Replace(dict);
 		}
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.StringDictionary; }

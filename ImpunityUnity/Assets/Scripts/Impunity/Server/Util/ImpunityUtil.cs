@@ -187,9 +187,7 @@ namespace Impunity
 		/// <summary>Computes an MD5 checksum of the BSON-serialized form of an object. Used for schema compatibility checks.</summary>
 		public static string MakeDataChecksum(object dataObject)
 		{
-			BsonMapper mapper = new BsonMapper();
-			mapper.TrimWhitespace = true;
-			mapper.IncludeFields = true;
+			BsonMapper mapper = GetBsonMapper();
 			byte[] dataBytes = BsonSerializer.Serialize(mapper.SerializeObject(dataObject));
 
 			StringBuilder sb = new StringBuilder();
