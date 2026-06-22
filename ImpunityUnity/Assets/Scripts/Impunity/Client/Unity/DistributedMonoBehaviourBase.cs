@@ -25,7 +25,6 @@ namespace Impunity.Unity
 		private event ImpunityCallback<LockWaitResult>? LockWaiter;
 
 		public ClientEntityManager Manager { get; set; } = null!;
-		public IDistributedChannel Channel { get; set; } = null!;
 
 		public ulong DirtyBits { get; private set; }
 		public bool DirtyGuaranteed { get; private set; }
@@ -128,6 +127,8 @@ namespace Impunity.Unity
 	{
 		public string? UniqueName { get; set; }
 
+		public IDistributedChannel? Channel { get; set; } = null!;
+
 	}
 
 	/// <summary>
@@ -149,9 +150,9 @@ namespace Impunity.Unity
 			DistributedObjects.Add(entity.DistributedEntityId, entity);
 		}
 
-		public virtual void OnObjectRemoved(uint entityId, bool destroyed)
-		{
-			DistributedObjects.Remove(entityId);
+		public virtual void OnObjectRemoved(IDistributedObject entity)
+        {
+			DistributedObjects.Remove(entity.DistributedEntityId);
 		}
 
 	}

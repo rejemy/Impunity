@@ -91,6 +91,8 @@ namespace Impunity.Connection
 	public interface IDistributedObject : IDistributedEntity
 	{
 		string? UniqueName { get; set; }
+
+		IDistributedChannel? Channel { get; set; }
 	}
 
 	/// <summary>Client-side interface for a distributed channel entity. Channels contain child objects and support subscription.</summary>
@@ -102,7 +104,7 @@ namespace Impunity.Connection
 		void Unsubscribe(ImpunityCallback onComplete, bool immediate = false);
 
 		void OnObjectAdded(IDistributedObject entity, bool newlyCreated);
-		void OnObjectRemoved(uint entityId, bool destroyed);
+		void OnObjectRemoved(IDistributedObject entity);
 	}
 
 	/// <summary>Base implementation of <see cref="IDistributedEntity"/> with dirty-bit tracking, lock waiting, and lifecycle callback stubs.</summary>
@@ -214,6 +216,8 @@ namespace Impunity.Connection
 	public abstract class DistributedObjectBase : DistributedEntityBase, IDistributedObject
 	{
 		public string? UniqueName { get; set; }
+
+		public IDistributedChannel? Channel { get; set; } = null!;
 	}
 
 	/// <summary>Base implementation of <see cref="IDistributedChannel"/>. Maintains a dictionary of child objects and supports unsubscription.</summary>
@@ -233,9 +237,9 @@ namespace Impunity.Connection
 			DistributedObjects.Add(entity.DistributedEntityId, entity);
 		}
 
-		public virtual void OnObjectRemoved(uint entityId, bool destroyed)
+		public virtual void OnObjectRemoved(IDistributedObject entity)
         {
-			DistributedObjects.Remove(entityId);
+			DistributedObjects.Remove(entity.DistributedEntityId);
 		}
 
 	}
@@ -1260,13 +1264,13 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				foreach(var obj in channel.DistributedObjects.Values)
+				foreach(var member in channel.DistributedObjects.Values)
 				{
-					UnregisterEntity(obj);
+					UnregisterEntity(member);
 
 					try
 					{
-						obj.OnUndistributed();
+						member.OnUndistributed();
 					}
 					catch (Exception e)
 					{
@@ -1274,6 +1278,8 @@ namespace Impunity.Connection
 					}
 				}
 			}
+			IDistributedObject obj = (IDistributedObject)entity;
+			obj.Channel?.OnObjectRemoved(obj);
 
 			UnregisterEntity(entity);
 			try
