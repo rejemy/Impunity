@@ -98,10 +98,21 @@ namespace Impunity.Unity
 
 		public virtual void OnLocked()
 		{
+			OnLockedEvent?.Invoke();
 		}
+		public event Action? OnLockedEvent;
 
 		public virtual void OnUnlocked()
 		{
+			try
+			{
+				OnUnlockedEvent?.Invoke();
+			}
+			catch (Exception ex)
+			{
+				ImpunityLogger.LogError("Exception in OnUnlockedEvent:", ex);
+			}
+
 			try
 			{
 				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
@@ -112,11 +123,28 @@ namespace Impunity.Unity
 			}
 			LockWaiter = null;
 		}
+		public event Action? OnUnlockedEvent;
 		
-		public virtual void OnFullyInitialized() { }
-		public virtual void OnEventTriggered(int eventType, BsonValue eventData) { }
-		public virtual void OnDeleted(BsonValue? deleteData) { }
-		public virtual void OnUndistributed() { }
+		public virtual void OnFullyInitialized()
+		{
+			OnFullyInitializedEvent?.Invoke();	
+		}
+		public event Action? OnFullyInitializedEvent;
+		public virtual void OnEventTriggered(int eventType, BsonValue eventData)
+		{
+			OnEventTriggeredEvent?.Invoke(eventType, eventData);
+		}
+		public event Action<int,BsonValue>? OnEventTriggeredEvent;
+		public virtual void OnDeleted(BsonValue? deleteData)
+		{
+			OnDeletedEvent?.Invoke(deleteData);
+		}
+		public event Action<BsonValue?>? OnDeletedEvent;
+		public virtual void OnUndistributed()
+		{
+			OnUndistributedEvent?.Invoke();
+		}
+		public event Action? OnUndistributedEvent;
 	}
 
 	/// <summary>
@@ -148,12 +176,16 @@ namespace Impunity.Unity
 		public virtual void OnObjectAdded(IDistributedObject entity, bool newlyCreated)
 		{
 			DistributedObjects.Add(entity.DistributedEntityId, entity);
+			OnObjectAddedEvent?.Invoke(entity, newlyCreated);
 		}
+		public event Action<IDistributedObject,bool>? OnObjectAddedEvent;
 
 		public virtual void OnObjectRemoved(IDistributedObject entity)
         {
 			DistributedObjects.Remove(entity.DistributedEntityId);
+			OnObjectRemovedEvent?.Invoke(entity);
 		}
+		public event Action<IDistributedObject>? OnObjectRemovedEvent;
 
 	}
 }
