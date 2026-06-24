@@ -50,7 +50,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Releases all locks and cleans up ephemeral entities owned by this replicant. Called on disconnect.</summary>
-		public void Cleanup()
+		public void Cleanup(GameStateLive live)
 		{
 			Dictionary<uint, GameStateEntity> locked = LocksHeld;
 			LocksHeld = null!;
@@ -64,6 +64,9 @@ namespace Impunity.GameState
 			EphemeralEntities = null!;
 			foreach (GameStateEntity entity in ephemerals.Values)
 			{
+				// Unregister then destroy, mirroring DestroyEntity(). EphemeralEntities is
+				// nulled above so RemoveEphemeralEntity() is a no-op during this iteration.
+				live.UnregisterEntity(entity);
 				entity.Destroy(null);
 			}
 			ephemerals.Clear();
@@ -200,6 +203,11 @@ namespace Impunity.GameState
 		public bool IsPersisted()
 		{
 			return (Flags & ImpunityInstanceFlags.Persisted) != 0;
+		}
+
+		public bool IsDeleteOnDisconnect()
+		{
+			return (Flags & ImpunityInstanceFlags.DeleteOnDisconnect) != 0;
 		}
 
 		public virtual bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
@@ -1011,7 +1019,7 @@ namespace Impunity.GameState
 		public void RemoveGameStateReplicant(GameStateReplicant replica)
 		{
 			ConnectedReplicas.Remove(replica);
-			replica.Cleanup();
+			replica.Cleanup(this);
 		}
 
 		uint FindAvailableEntityId()
@@ -1161,8 +1169,27 @@ namespace Impunity.GameState
 			return true;
 		}
 
+		static void ValidateInstanceFlags(byte instanceFlags)
+		{
+			ImpunityInstanceFlags flags = (ImpunityInstanceFlags)instanceFlags;
+			if ((flags & ImpunityInstanceFlags.Persisted) != 0 &&
+			    (flags & ImpunityInstanceFlags.ClientAuthoritative) != 0)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter,
+					"Entity cannot be both Persisted and ClientAuthoritative");
+			}
+			if ((flags & ImpunityInstanceFlags.Persisted) != 0 &&
+			    (flags & ImpunityInstanceFlags.DeleteOnDisconnect) != 0)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter,
+					"Entity cannot be both Persisted and DeleteOnDisconnect");
+			}
+		}
+
 		public GameStateChannel CreateChannelInternal(GameStateReplicant origin, string channelName, int typeId, byte instanceFlags, ArraySegment<byte> propBytes, List<ObjectCreateData>? objects)
 		{
+			ValidateInstanceFlags(instanceFlags);
+
 			if (channelName == null)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Name must be set for channel");
@@ -1183,6 +1210,11 @@ namespace Impunity.GameState
 			List<LiveEntityPersistedPropertyData>? persistedProps;
 			UpdateEntityProps(channel, propBytes, origin, true, out persistedProps);
 			RegisterEntity(channel);
+
+			if (channel.IsDeleteOnDisconnect())
+			{
+				origin.AddEphemeralEntity(channel);
+			}
 
 			if(channel.IsClientAuthoritative())
 			{
@@ -1234,6 +1266,8 @@ namespace Impunity.GameState
 
 		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force)
 		{
+			ValidateInstanceFlags(instanceFlags);
+
 			GameStateEntityType typeInfo = GetEntityType(typeId);
 
 			GameStateChannel? channel = AllEntities.GetValueOrDefault(channelId) as GameStateChannel;
@@ -1275,6 +1309,11 @@ namespace Impunity.GameState
 			List<LiveEntityPersistedPropertyData>? persistedProps;
 			UpdateEntityProps(dobj, propBytes, origin, true, out persistedProps);
 			RegisterEntity(dobj);
+
+			if (dobj.IsDeleteOnDisconnect())
+			{
+				origin.AddEphemeralEntity(dobj);
+			}
 
 			if (dobj.IsClientAuthoritative())
 			{

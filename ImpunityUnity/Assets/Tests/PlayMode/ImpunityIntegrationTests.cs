@@ -1004,4 +1004,113 @@ public class ImpunityIntegrationTests
 		// And the lock still expires normally
 		yield return TickUntil(() => !c2Entity.Action.IsCooldownLocked, 4f, AllConnections());
 	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 9. Delete-On-Disconnect
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>Disposes the TCP remote connection and clears the field so TearDown won't double-dispose it
+	/// and AllConnections() stops ticking it. Simulates client A dropping its connection.</summary>
+	void DisconnectRemote()
+	{
+		RemoteGame.Dispose();
+		RemoteGame = null;
+	}
+
+	[UnityTest, Category("DeleteOnDisconnect")]
+	public IEnumerator DeleteOnDisconnect_Object_RemovedOnCreatorDisconnect_ControlSurvives()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// B (LocalGame) owns the channel so it survives A's disconnect.
+		var bChannel = new IntegrationTestChannel();
+		var subB = LocalGame.EntityManager.SubscribeToChannelYield("disco", bChannel);
+		yield return WaitForYield(subB, AllConnections());
+
+		// A (RemoteGame) subscribes, then creates one ephemeral object and one normal control object.
+		var subA = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("disco", null);
+		yield return WaitForYield(subA, AllConnections());
+		var aChannel = subA.Value;
+
+		var ephemeral = new IntegrationTestEntity { DeleteOnDisconnect = true };
+		ephemeral.Health.Set(11);
+		var createEph = RemoteGame.EntityManager.CreateObjectYield(ephemeral, aChannel, false);
+		yield return WaitForYield(createEph, AllConnections());
+
+		var survivor = new IntegrationTestEntity(); // no flag
+		survivor.Health.Set(22);
+		var createSurv = RemoteGame.EntityManager.CreateObjectYield(survivor, aChannel, false);
+		yield return WaitForYield(createSurv, AllConnections());
+
+		// B replicates both objects.
+		yield return TickUntil(() => subB.Value.DistributedObjects.Count == 2, 3f, AllConnections());
+
+		IntegrationTestEntity bEphemeral = null, bSurvivor = null;
+		foreach (var obj in subB.Value.DistributedObjects.Values)
+		{
+			var e = obj as IntegrationTestEntity;
+			if (e != null && e.Health.Get() == 11) bEphemeral = e;
+			else if (e != null && e.Health.Get() == 22) bSurvivor = e;
+		}
+		Assert.IsNotNull(bEphemeral, "B did not replicate the ephemeral object");
+		Assert.IsNotNull(bSurvivor, "B did not replicate the control object");
+
+		IDistributedObject removed = null;
+		subB.Value.OnObjectRemovedEvent += o => removed = o;
+
+		// A drops its connection — the server must delete only the DeleteOnDisconnect object.
+		DisconnectRemote();
+
+		yield return TickUntil(() => bEphemeral.WasDeleted, 5f, LocalGame);
+
+		Assert.IsTrue(bEphemeral.WasDeleted, "Ephemeral object was not deleted when its creator disconnected");
+		Assert.AreSame(bEphemeral, removed, "Channel OnObjectRemoved did not fire for the ephemeral object");
+		Assert.IsFalse(subB.Value.DistributedObjects.ContainsKey(bEphemeral.DistributedEntityId),
+			"Ephemeral object was not removed from the channel");
+
+		Assert.IsFalse(bSurvivor.WasDeleted, "Control object was wrongly deleted on disconnect");
+		Assert.IsTrue(subB.Value.DistributedObjects.ContainsKey(bSurvivor.DistributedEntityId),
+			"Control object did not survive the creator's disconnect");
+		Assert.AreEqual(1, subB.Value.DistributedObjects.Count, "Only the ephemeral object should have been removed");
+	}
+
+	[UnityTest, Category("DeleteOnDisconnect")]
+	public IEnumerator DeleteOnDisconnect_Channel_RemovedAndNameFreedOnCreatorDisconnect()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// A (RemoteGame) creates an ephemeral channel. CreateChannel does not subscribe the creator,
+		// but A still owns it for the lifetime of its connection.
+		var createGhost = RemoteGame.EntityManager.CreateChannelYield(
+			"ghost", new IntegrationTestChannel { DeleteOnDisconnect = true }, false, null);
+		yield return WaitForYield(createGhost, AllConnections());
+		Assert.IsTrue(createGhost.Value, "Ephemeral channel was not created");
+
+		// B (LocalGame) subscribes so it can observe the deletion.
+		var subB = LocalGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("ghost", null);
+		yield return WaitForYield(subB, AllConnections());
+		var bGhost = subB.Value;
+		Assert.IsNotNull(bGhost, "B failed to subscribe to the ephemeral channel");
+
+		bool ghostDeleted = false;
+		bGhost.OnDeletedEvent += _ => ghostDeleted = true;
+
+		// A drops its connection — the server destroys the channel and frees its name.
+		DisconnectRemote();
+
+		yield return TickUntil(() => ghostDeleted, 5f, LocalGame);
+		Assert.IsTrue(ghostDeleted, "Ephemeral channel was not deleted when its creator disconnected");
+		Assert.AreEqual(1, bGhost.UndistributedCount, "Channel OnUndistributed not fired exactly once");
+
+		// The name must be free again: re-creating a channel with the same name must succeed. Before the
+		// disconnect-cleanup unregister fix the name lingered in NamedEntities and this threw ActionUniqueNameExists.
+		var recreate = LocalGame.EntityManager.CreateChannelYield(
+			"ghost", new IntegrationTestChannel(), false, null);
+		yield return WaitForYield(recreate, LocalGame);
+		Assert.IsTrue(recreate.Value, "Channel name was not freed after the creator disconnected");
+	}
 }

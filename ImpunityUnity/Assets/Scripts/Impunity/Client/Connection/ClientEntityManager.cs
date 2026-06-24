@@ -255,14 +255,23 @@ namespace Impunity.Connection
 	
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
-			byte instaceFlags = 0;
+			byte instanceFlags = 0;
 			if (distObj.IsClientAuthoritative)
 			{
-				instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+				instanceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 
 				if (DistributedTypes[entityTypeId].Persisted)
 				{
 					throw new Exception("Can't create a client authoritative object that is also persisted");
+				}
+			}
+			if (distObj.DeleteOnDisconnect)
+			{
+				instanceFlags |= (byte)ImpunityInstanceFlags.DeleteOnDisconnect;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a delete on disconnect object that is also persisted");
 				}
 			}
 			if (distObj.IsPersisted)
@@ -277,10 +286,10 @@ namespace Impunity.Connection
 					throw new Exception("Unable to create persisted object in non-persisted channel");
 				}
 
-				instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
+				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
-			Connection.CreateObject(entityTypeId, instaceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName, replace, (ImpunityErrorResponse? err, uint objectId) =>
+			Connection.CreateObject(entityTypeId, instanceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName, replace, (ImpunityErrorResponse? err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -314,6 +323,15 @@ namespace Impunity.Connection
 				if (DistributedTypes[entityTypeId].Persisted)
 				{
 					throw new Exception("Can't create a client authoritative object that is also persisted");
+				}
+			}
+			if (distObj.DeleteOnDisconnect)
+			{
+				instanceFlags |= (byte)ImpunityInstanceFlags.DeleteOnDisconnect;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a delete on disconnect object that is also persisted");
 				}
 			}
 			if (distObj.IsPersisted)
@@ -365,6 +383,15 @@ namespace Impunity.Connection
 				if (DistributedTypes[entityTypeId].Persisted)
 				{
 					throw new Exception("Can't create a client authoritative channel that is also persisted");
+				}
+			}
+			if (channel.DeleteOnDisconnect)
+			{
+				instanceFlags |= (byte)ImpunityInstanceFlags.DeleteOnDisconnect;
+
+				if (DistributedTypes[entityTypeId].Persisted)
+				{
+					throw new Exception("Can't create a delete on disconnect object that is also persisted");
 				}
 			}
 			if (channel.IsPersisted)
@@ -425,7 +452,7 @@ namespace Impunity.Connection
 
 			bool createIfMising = false;
 			int entityTypeId = 0;
-			byte instaceFlags = 0;
+			byte instanceFlags = 0;
 			ArraySegment<byte> propertyBytes = null;
 
 
@@ -441,11 +468,20 @@ namespace Impunity.Connection
 
 				if (createIfNeeded.IsClientAuthoritative)
 				{
-					instaceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
+					instanceFlags |= (byte)ImpunityInstanceFlags.ClientAuthoritative;
 
 					if (DistributedTypes[entityTypeId].Persisted)
 					{
 						throw new Exception("Can't create a client authoritative channel that is also persisted");
+					}
+				}
+				if (createIfNeeded.DeleteOnDisconnect)
+				{
+					instanceFlags |= (byte)ImpunityInstanceFlags.DeleteOnDisconnect;
+
+					if (DistributedTypes[entityTypeId].Persisted)
+					{
+						throw new Exception("Can't create a delete on disconnect object that is also persisted");
 					}
 				}
 				if (createIfNeeded.IsPersisted)
@@ -455,11 +491,11 @@ namespace Impunity.Connection
 						throw new Exception("Can't create persisted channel of a type that is not persistant");
 					}
 
-					instaceFlags |= (byte)ImpunityInstanceFlags.Persisted;
+					instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 				}
 			}
 
-			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instaceFlags, propertyBytes, null, (ImpunityErrorResponse? err, uint channelId) =>
+			Connection.SubcribeToChannel(channelName, createIfMising, entityTypeId, instanceFlags, propertyBytes, null, (ImpunityErrorResponse? err, uint channelId) =>
 			{
 				if (err != null)
 				{

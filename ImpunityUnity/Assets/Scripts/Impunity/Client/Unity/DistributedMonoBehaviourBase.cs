@@ -26,10 +26,12 @@ namespace Impunity.Unity
 		public int DistributedEntityType { get; set; }
 		/// <summary>When true, this client owns the entity's state: the server accepts this client's updates without
 		/// echoing them back and locks the entity to this client on creation. Mutually exclusive with
-		/// <see cref="IsPersisted"/>. Set before creating the entity to request client authority.
-		/// NOTE: not repopulated from server instance flags on entities received from the server (only
-		/// <see cref="IsPersisted"/> is restored), so it is only reliable on the creating client — flagged for review.</summary>
+		/// <see cref="IsPersisted"/>. Set before creating the entity to request client authority.</summary>
 		public bool IsClientAuthoritative { get; set; }
+		/// <summary>When true, this entity is automatically deleted when this client disconnects. Complimentes
+		/// IsClientAuthoritative for anything that should not stick around after a client leaves. Mutually exclusive with
+		/// <see cref="IsPersisted"/>. Set before creating the entity to mark the entity as scoped to the client.</summary>
+		public bool DeleteOnDisconnect { get; set; }
 		/// <summary>Whether this entity is stored in the server's database and reloaded across server restarts. Set
 		/// before creating the entity to request persistence — the entity type, and for objects the containing channel,
 		/// must also be persisted; restored from server instance flags for entities received from the server. Mutually

@@ -375,6 +375,20 @@ Constraints:
 
 The same immediate-local-apply behavior also applies to any entity whose manager has **no connection** — i.e. an offline or editor-built instance. This lets you build and manipulate entities outside a live session.
 
+### Delete-on-disconnect objects
+
+Set `DeleteOnDisconnect = true` on an instance **before** creating it to scope the entity to the lifetime of the creating connection. When that client disconnects, the server automatically deletes the entity and pushes the normal delete to every subscriber (`OnDeleted` then `OnUndistributed`), and frees its name for reuse.
+
+```csharp
+var marker = new PlayerMarker { DeleteOnDisconnect = true };
+connection.EntityManager.CreateObject(marker, zone, replace: false, onComplete);
+```
+
+- Works for both objects and channels — set it on the instance passed to `CreateObject` or `CreateChannel`. Deleting a channel deletes its member objects too. (Note: the `createIfNeeded` overload of `SubscribeToChannel` does not currently carry this flag — use `CreateChannel` to make an ephemeral channel.)
+- **Complements `IsClientAuthoritative`**: an entity that is both client-authoritative and delete-on-disconnect is owned and updated by one client and disappears when that client leaves — the model for transient per-client state like an avatar, cursor, or presence marker.
+- **Mutually exclusive with persistence** — it makes no sense to store an entity that is deleted on disconnect, so creating one that is both `DeleteOnDisconnect` and persisted throws. This is enforced on the client and re-checked on the server.
+- Reuses the server's existing *ephemeral ownership* mechanism (the same one that cleans up [named locks](#10-locks) on disconnect).
+
 ---
 
 ## 9. Persistent objects

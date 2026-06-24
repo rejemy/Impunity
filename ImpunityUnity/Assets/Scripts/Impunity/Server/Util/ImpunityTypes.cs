@@ -62,7 +62,9 @@ namespace Impunity
 		/// <summary>Entity state is owned and updated by the client rather than the server.</summary>
 		ClientAuthoritative = 1,
 		/// <summary>Entity state is persisted to the database between sessions.</summary>
-		Persisted = 2
+		Persisted = 2,
+		/// <summary>Entity is automatically deleted when the creating client disconnects.</summary>
+		DeleteOnDisconnect = 4
 	}
 
 	public enum ImpunityInternalCollectionIds
