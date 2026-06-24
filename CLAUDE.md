@@ -29,6 +29,8 @@ All projects use `dotnet build -c Release`. The Unity project is opened via Unit
 
 ## Architecture
 
+> In-depth manual for the distributed entity/channel system (annotations & ids, client↔server flow, subscriptions, persistence, client-authoritative, locks, temporal fields, local-only setters): [`docs/DistributedEntities.md`](docs/DistributedEntities.md).
+
 - **Wire protocol**: 4-byte length prefix + 12-byte header + BSON body over TCP
 - **Serialization**: UltraLiteDB's `BsonMapper` for documents; custom binary serializers (readonly structs) for distributed field types
 - **Request/reply pattern**: Client sends `ClientAction` → server processes → server replies or pushes `ServerAction` messages

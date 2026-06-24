@@ -14,22 +14,37 @@ namespace Impunity.Connection
 	/// <summary>Internal metadata for a single distributed field: ID, serialization methods, persistence info.</summary>
 	public class DistributedTypeFieldInfo
 	{
+		/// <summary>The field's unique id (1–63), matching its <c>[Distributed(id)]</c> attribute.</summary>
 		public byte FieldId;
+		/// <summary>Precomputed dirty-bit mask for this field: <c>1UL &lt;&lt; (FieldId - 1)</c>.</summary>
 		public UInt64 FieldBitmask;
+		/// <summary>The CLR field name on the entity type.</summary>
 		public string FieldName;
+		/// <summary>The database key from <c>[Distributed(PersistAs=…)]</c>, or null if the field is not persisted.</summary>
 		public string? PersistedAs;
+		/// <summary>True if the field is temporal (a transient value carrying a cooldown lock; never persisted).</summary>
 		public bool IsTemporal;
+		/// <summary>The container kind: Value, Array, Queue, IntDictionary, or StringDictionary.</summary>
 		public GameStateEntityFieldType FieldType;
+		/// <summary>The wire value type, including Custom/CustomSmall (and nullable variants) for complex values.</summary>
 		public GameStateEntityPropertyValueType FieldValueType;
 		/// <summary>The CLR value type the field carries (the <c>T</c> of <c>DistributedValue&lt;T,S&gt;</c>; the element/value type for collections).</summary>
 		public Type ValueClrType = null!;
+		/// <summary>Generated wrapper that serializes the field's dirty changes to a <see cref="BinaryWriter"/>.</summary>
 		public MethodInfo WriteMethod;
+		/// <summary>Generated wrapper that reads the field's full initial value from a <see cref="BinaryReader"/>.</summary>
 		public MethodInfo InitMethod;
+		/// <summary>Generated wrapper that reads and applies a delta change for the field from a <see cref="BinaryReader"/>.</summary>
 		public MethodInfo UpdateMethod;
+		/// <summary>Generated wrapper that reads past a field's encoded bytes without applying them (used to discard stale updates).</summary>
 		public MethodInfo SkipMethod;
+		/// <summary>Generated wrapper that returns the field's current value as a <see cref="BsonValue"/> for persistence.</summary>
 		public MethodInfo GetAsBsonMethod;
+		/// <summary>Generated wrapper that sets the field's value from a persisted <see cref="BsonValue"/>.</summary>
 		public MethodInfo SetFromBsonMethod;
 
+		/// <summary>Creates field metadata from the field's <c>[Distributed]</c> attribute, resolved value/container
+		/// types, and the entity type's generated serialization wrapper methods.</summary>
 		public DistributedTypeFieldInfo(byte fieldId, UInt64 fieldBitmask, string fieldName, string? persistedAs, bool isTemporal,
 			GameStateEntityFieldType fieldType, GameStateEntityPropertyValueType fieldValueType,
 			MethodInfo writeMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod, MethodInfo getAsBsonMethod, MethodInfo setFromBsonMethod)
@@ -53,13 +68,23 @@ namespace Impunity.Connection
 	/// <summary>Internal metadata for a distributed entity type: type ID, factory, field definitions, channel/persistence flags.</summary>
 	public class DistributedTypeInfo
 	{
+		/// <summary>The entity type's distributed id, from its <c>[DistributedEntity(id)]</c> attribute.</summary>
 		public int DistributedTypeId;
+		/// <summary>True if the type implements <see cref="IDistributedChannel"/> (a channel rather than an object).</summary>
 		public bool IsChannel;
+		/// <summary>True if the type is persisted (its <c>[DistributedEntity]</c> has a <c>PersistAs</c> key).</summary>
 		public bool Persisted;
+		/// <summary>The CLR type of the entity.</summary>
 		public Type ObjectType;
+		/// <summary>Optional factory delegate (from <c>[DistributedEntity(FactoryMethod=…)]</c>) used to construct
+		/// instances instead of <c>Activator.CreateInstance</c>; null to use the default constructor.</summary>
 		public Func<IDistributedEntity>? Factory;
+		/// <summary>Per-field metadata indexed by field id (slot 0 and any gaps are null), or null if the type has no
+		/// distributed fields.</summary>
 		public DistributedTypeFieldInfo[] DistributedFields = null!;
 
+		/// <summary>Creates type metadata for a registered distributed entity type. <see cref="Factory"/>,
+		/// <see cref="IsChannel"/>, and <see cref="DistributedFields"/> are populated separately during registration.</summary>
 		public DistributedTypeInfo(int distributedTypeId, Type objectType, bool persisted)
 		{
 			DistributedTypeId = distributedTypeId;
@@ -130,6 +155,9 @@ namespace Impunity.Connection
 		/// <summary>Called when a distributed object is created in any subscribed channel. Parameters: entity, parent channel, newly created flag.</summary>
 		public Action<IDistributedObject, IDistributedChannel, bool>? OnDistributedObjectCreated;
 
+		/// <summary>Creates an entity manager with empty registries and pre-allocated property (de)serialization buffers.
+		/// Assign <see cref="Connection"/> and call <see cref="RegisterEntityTypes"/> before use; a connection normally
+		/// owns and wires up its own manager.</summary>
 		public ClientEntityManager()
         {
 			SubscribedChannels = new Dictionary<string, IDistributedChannel>();
@@ -150,7 +178,12 @@ namespace Impunity.Connection
 
 		// -------------- Public API
 
-		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns format definitions for the server handshake.</summary>
+		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns
+		/// format definitions for the server handshake. Throws if two types share a distributed id.</summary>
+		/// <param name="entityTypes">The <c>[DistributedEntity]</c>-annotated types this client will use. May be null or
+		/// empty, in which case no types are registered and null is returned.</param>
+		/// <returns>The wire format definitions to send to the server during the handshake, or null when
+		/// <paramref name="entityTypes"/> is null or empty.</returns>
 		public GameStateEntityTypeDef[]? RegisterEntityTypes(Type[] entityTypes)
         {
 			if (entityTypes == null || entityTypes.Length == 0)
@@ -196,7 +229,16 @@ namespace Impunity.Connection
         }
 
 
-		/// <summary>Creates a distributed object in a channel. Serializes initial properties and sends to the server. Returns the entity via callback after server confirmation.</summary>
+		/// <summary>Creates a distributed object in a channel. Serializes the object's initial properties and sends them
+		/// to the server, then registers the object locally and returns it via the callback once the server confirms.
+		/// Throws if the manager has no <see cref="Connection"/>, the unique name contains '/', or the persisted/client-
+		/// authoritative flags are inconsistent with the type or channel.</summary>
+		/// <typeparam name="T">The concrete distributed object type being created.</typeparam>
+		/// <param name="distObj">The object instance to create; its distributed fields supply the initial property values.</param>
+		/// <param name="channel">The channel to create the object in.</param>
+		/// <param name="replace">If true, replace any existing object with the same unique name in the channel.</param>
+		/// <param name="onComplete">Receives the same <paramref name="distObj"/> (now registered) on success, or a non-null
+		/// error with a null object on failure. May be null.</param>
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedObject
 		{
 			if (Connection == null)
@@ -292,7 +334,16 @@ namespace Impunity.Connection
 			return new ObjectCreateData(entityTypeId, instanceFlags, propertyBytes, distObj.UniqueName);
 		}
 
-		/// <summary>Creates a distributed channel with optional initial child objects.</summary>
+		/// <summary>Creates a distributed channel, optionally pre-populated with child objects, and sends it to the
+		/// server. Note this does not subscribe the caller to the channel — use <see cref="SubscribeToChannel"/> for that.
+		/// Throws if the manager has no <see cref="Connection"/> or the persisted/client-authoritative flags are
+		/// inconsistent with the type.</summary>
+		/// <typeparam name="T">The concrete distributed channel type being created.</typeparam>
+		/// <param name="channelName">The channel's unique name; assigned to <paramref name="channel"/>'s Name.</param>
+		/// <param name="channel">The channel instance to create; its distributed fields supply the initial property values.</param>
+		/// <param name="replace">If true, replace any existing channel with the same name.</param>
+		/// <param name="channelObjects">Optional initial child objects to create within the channel; may be null.</param>
+		/// <param name="onComplete">Receives true on success, or a non-null error on failure. May be null.</param>
 		public void CreateChannel<T>(string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects, ImpunityCallback<bool> onComplete) where T : class, IDistributedChannel
 		{
 			if (Connection == null)
@@ -340,7 +391,16 @@ namespace Impunity.Connection
 			Connection.CreateChannel(channelName, entityTypeId, instanceFlags, propertyBytes, replace, objectCreateList, onComplete);
 		}
 
-		/// <summary>Subscribes to a channel by name. If already subscribed, returns the existing channel. Pass a non-null <paramref name="createIfNeeded"/> to create the channel if it doesn't exist.</summary>
+		/// <summary>Subscribes to a channel by name and delivers the live channel instance via the callback. If already
+		/// subscribed, returns the existing channel immediately. Pass a non-null <paramref name="createIfNeeded"/> to
+		/// create the channel if it doesn't already exist on the server. Throws if the manager has no
+		/// <see cref="Connection"/>, the name is null, or the name contains '/'.</summary>
+		/// <typeparam name="T">The concrete distributed channel type expected back.</typeparam>
+		/// <param name="channelName">The name of the channel to subscribe to.</param>
+		/// <param name="createIfNeeded">A channel instance used to create the channel if it doesn't exist (its fields
+		/// supply the initial properties); pass null to only subscribe to an existing channel.</param>
+		/// <param name="onComplete">Receives the subscribed channel on success, or a non-null error with a null channel
+		/// on failure. May be null (though the already-subscribed fast path invokes it unconditionally).</param>
 		public void SubscribeToChannel<T>(string channelName, T createIfNeeded, ImpunityCallback<T> onComplete) where T : class, IDistributedChannel
 		{
 			if (Connection == null)
@@ -426,7 +486,11 @@ namespace Impunity.Connection
 		/// references are released. When <paramref name="immediate"/> is true, the channel and its
 		/// objects are unregistered synchronously and all further incoming updates for them are
 		/// suppressed (no lifecycle callbacks) — the caller is responsible for cleaning them up.
+		/// Throws if the manager has no <see cref="Connection"/>.
 		/// </summary>
+		/// <param name="channel">The subscribed channel to unsubscribe from.</param>
+		/// <param name="onComplete">Invoked when the server acknowledges the unsubscribe; the error argument is non-null on failure. May be null.</param>
+		/// <param name="immediate">If true, tear down the channel and its objects synchronously and suppress further updates instead of waiting for the server ack.</param>
 		public void UnsubscribeFromChannel(IDistributedChannel channel, ImpunityCallback onComplete, bool immediate = false)
 		{
 			if (Connection == null)
@@ -783,6 +847,17 @@ namespace Impunity.Connection
 		}
 
 
+		/// <summary>Handles a channel-create push from the server: instantiates the channel (via the type's factory,
+		/// <c>Activator</c>, or a <see cref="GenericDistributedChannel"/> when <paramref name="channelType"/> is 0),
+		/// registers it, applies its initial properties, and fires <see cref="IDistributedEntity.OnFullyInitialized"/>.
+		/// Also clears any lingering immediate-unsubscribe suppression for this id (a fresh create means a re-subscribe).
+		/// Invoked by the connection's server-message dispatch on the main thread; not called by application code.</summary>
+		/// <param name="channelId">The server-assigned entity id of the channel.</param>
+		/// <param name="channelName">The channel's name.</param>
+		/// <param name="channelType">The distributed type id of the channel, or 0 for a generic untyped channel.</param>
+		/// <param name="isLocked">Whether the channel is currently locked on the server.</param>
+		/// <param name="instanceFlags">Packed <see cref="ImpunityInstanceFlags"/> (e.g. persisted) for the channel.</param>
+		/// <param name="propData">The serialized initial property values for the channel.</param>
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
 		{
 			// A fresh channel-create means the client has re-subscribed to this id; clear any
@@ -837,6 +912,20 @@ namespace Impunity.Connection
 			}			
 		}
 
+		/// <summary>Handles an object-create push from the server: instantiates the object, registers it, fires
+		/// <see cref="OnDistributedObjectCreated"/> and the channel's <see cref="IDistributedChannel.OnObjectAdded"/>,
+		/// applies its initial properties, and fires <see cref="IDistributedEntity.OnFullyInitialized"/>. If the owning
+		/// channel is mid immediate-unsubscribe, the object is dropped and its id suppressed instead. Invoked by the
+		/// connection's server-message dispatch on the main thread; not called by application code.</summary>
+		/// <param name="objectId">The server-assigned entity id of the object.</param>
+		/// <param name="channelId">The entity id of the channel the object belongs to.</param>
+		/// <param name="objectType">The distributed type id of the object.</param>
+		/// <param name="isLocked">Whether the object is currently locked on the server.</param>
+		/// <param name="instanceFlags">Packed <see cref="ImpunityInstanceFlags"/> (e.g. persisted) for the object.</param>
+		/// <param name="propData">The serialized initial property values for the object.</param>
+		/// <param name="uniqueName">The object's unique name within the channel, or null if anonymous.</param>
+		/// <param name="newlyCreated">True if the object was just created while subscribed; false if it is part of the
+		/// initial snapshot delivered when the channel was first received.</param>
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
 		{
 			// In-flight create on a channel being immediately-unsubscribed. Drop it, and also
@@ -877,6 +966,8 @@ namespace Impunity.Connection
 			{
 				throw new Exception("No channel with id " + channelId);
 			}
+
+			entity.Channel = channel;
 
 			try
 			{
@@ -942,6 +1033,13 @@ namespace Impunity.Connection
 			}
 		}
 
+			/// <summary>Handles an entity property-update push from the server, applying the delta to the entity's
+			/// distributed fields. Per-field sequence numbers discard stale out-of-order updates. Updates for entities
+			/// suppressed by an immediate unsubscribe are dropped; an update for an unknown entity is logged and ignored.
+			/// Invoked by the connection's server-message dispatch on the main thread; not called by application code.</summary>
+			/// <param name="entityId">The entity id the update applies to.</param>
+			/// <param name="updateData">The serialized delta of changed property values.</param>
+			/// <param name="seq">The server's outgoing sequence number for this update, used for stale-update detection.</param>
 			public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
@@ -956,6 +1054,13 @@ namespace Impunity.Connection
 			SetPropertyBytes(entity, updateData, false, seq);
 		}
 
+		/// <summary>Handles an entity event push from the server by dispatching it to the entity's
+		/// <see cref="IDistributedEntity.OnEventTriggered"/>. Events for suppressed entities are dropped; an event for an
+		/// unknown entity is logged and ignored. Invoked by the connection's server-message dispatch on the main thread;
+		/// not called by application code.</summary>
+		/// <param name="entityId">The entity id the event was fired on.</param>
+		/// <param name="eventType">The application-defined event type id.</param>
+		/// <param name="eventData">The BSON payload delivered with the event.</param>
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
@@ -977,6 +1082,11 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Handles an entity-locked push from the server: sets <see cref="IDistributedEntity.IsLocked"/> true and
+		/// fires <see cref="IDistributedEntity.OnLocked"/>. Locks for suppressed entities are dropped; a lock for an
+		/// unknown entity is logged and ignored. Invoked by the connection's server-message dispatch on the main thread;
+		/// not called by application code.</summary>
+		/// <param name="entityId">The entity id that became locked.</param>
 		public void HandleEntityLocked(uint entityId)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
@@ -999,6 +1109,11 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Handles an entity-unlocked push from the server: sets <see cref="IDistributedEntity.IsLocked"/> false
+		/// and fires <see cref="IDistributedEntity.OnUnlocked"/> (which also completes any pending <c>WaitForLock</c>
+		/// callbacks). Unlocks for suppressed entities are dropped; an unlock for an unknown entity is logged and ignored.
+		/// Invoked by the connection's server-message dispatch on the main thread; not called by application code.</summary>
+		/// <param name="entityId">The entity id that became unlocked.</param>
 		public void HandleEntityUnlocked(uint entityId)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
@@ -1021,6 +1136,15 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Handles an entity-delete push from the server. Unregisters the entity and fires its
+		/// <see cref="IDistributedEntity.OnDeleted"/> then <see cref="IDistributedEntity.OnUndistributed"/>; if it is a
+		/// channel, each member is first unregistered and given <see cref="IDistributedEntity.OnUndistributed"/>. Deletes
+		/// for suppressed entities are dropped; a delete for an unknown entity is logged and ignored. Invoked by the
+		/// connection's server-message dispatch on the main thread; not called by application code.
+		/// If the deleted entity is an object, its owning channel is notified via
+		/// <see cref="IDistributedChannel.OnObjectRemoved"/>.</summary>
+		/// <param name="entityId">The entity id that was deleted.</param>
+		/// <param name="deleteData">Optional BSON payload supplied by the deleter, relayed to <see cref="IDistributedEntity.OnDeleted"/>; may be null.</param>
 		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
@@ -1048,14 +1172,16 @@ namespace Impunity.Connection
 					}
 				}
 			}
-			IDistributedObject obj = (IDistributedObject)entity;
-			try
+			if (entity is IDistributedObject obj)
 			{
-				obj.Channel?.OnObjectRemoved(obj);
-			}
-			catch(Exception e)
-			{
-				ImpunityLogger.LogError("Exception in channel's OnObjectRemoved: ", e);
+				try
+				{
+					obj.Channel?.OnObjectRemoved(obj);
+				}
+				catch(Exception e)
+				{
+					ImpunityLogger.LogError("Exception in channel's OnObjectRemoved: ", e);
+				}
 			}
 
 			UnregisterEntity(entity);
@@ -1077,7 +1203,9 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Marks an entity as having dirty properties that need to be sent to the server on the next <see cref="SendUpdates"/> call.</summary>
+		/// <summary>Marks an entity as having dirty properties that need to be sent to the server on the next <see cref="SendUpdates"/> call.
+		/// Called by an entity's own <see cref="IDistributedEntity.SetDirty"/>; not normally called by application code directly.</summary>
+		/// <param name="entity">The entity with pending changes to flush on the next update.</param>
 		public void SetDirty(IDistributedEntity entity)
         {
 			DirtyObjects.Add(entity);
@@ -1098,6 +1226,16 @@ namespace Impunity.Connection
 
 		}
 
+		/// <summary>Serializes an entity's changed (or all) distributed fields into the manager's shared encoding buffer
+		/// and clears the entity's dirty state. The returned segment points into that reused buffer, so it is only valid
+		/// until the next call that writes to the buffer — consume or copy it before then.</summary>
+		/// <param name="entity">The entity whose fields to serialize.</param>
+		/// <param name="guaranteed">Receives the entity's <see cref="IDistributedEntity.DirtyGuaranteed"/> flag, i.e.
+		/// whether the produced update must be delivered reliably.</param>
+		/// <param name="allProperties">If true, serialize every field regardless of dirty bits (used for the full initial
+		/// state on create); if false (default), serialize only the currently dirty fields.</param>
+		/// <returns>An <see cref="ArraySegment{T}"/> over the shared buffer holding the encoded property bytes, or a
+		/// default/null segment when there is nothing to send.</returns>
 		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, out bool guaranteed, bool allProperties = false)
         {
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
@@ -1131,6 +1269,14 @@ namespace Impunity.Connection
 			return new ArraySegment<byte>(PropertyEncodingBuffer, startPos, bufferSize);
 		}
 
+		/// <summary>Deserializes a property byte buffer onto an entity's distributed fields. When
+		/// <paramref name="initialRead"/> is true each field is read as a full initial value; otherwise each field is
+		/// applied as a delta, and the per-field sequence number is used to skip stale out-of-order updates. A null or
+		/// empty buffer is a no-op. Throws on an invalid property id in the buffer.</summary>
+		/// <param name="entity">The entity to apply the property values to.</param>
+		/// <param name="propertyBytes">The serialized property bytes (full values or a delta).</param>
+		/// <param name="initialRead">True to read full initial values; false to apply a delta update.</param>
+		/// <param name="seq">The update's sequence number for stale-update detection on delta reads; ignored (use 0) for initial reads.</param>
 		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead, ushort seq = 0)
         {
 			if (propertyBytes == null || propertyBytes.Count == 0)
@@ -1212,6 +1358,12 @@ namespace Impunity.Connection
 			return DistributedTypes[typeId];
 		}
 
+		/// <summary>Builds a <see cref="BsonDocument"/> of the entity's persisted distributed fields, keyed by each
+		/// field's <c>PersistAs</c> name. Non-persisted fields are skipped. Useful for storing an entity's state locally
+		/// (e.g. an offline/editor instance) using the same keys the server persists under. Throws if the entity's type
+		/// is not registered with this manager.</summary>
+		/// <param name="entity">The entity whose persisted fields to serialize.</param>
+		/// <returns>A document mapping each persisted field's <c>PersistAs</c> key to its current value.</returns>
 		public BsonDocument GetPersistedFieldsAsBson(IDistributedEntity entity)
 		{
 			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
@@ -1229,6 +1381,12 @@ namespace Impunity.Connection
 			return persistedDoc;
 		}
 
+		/// <summary>Applies persisted field values from a <see cref="BsonDocument"/> (as produced by
+		/// <see cref="GetPersistedFieldsAsBson"/>) back onto an entity, matching each persisted field by its
+		/// <c>PersistAs</c> key. Missing or null entries are left unchanged. Throws if the entity's type is not
+		/// registered with this manager.</summary>
+		/// <param name="entity">The entity to populate.</param>
+		/// <param name="doc">The document holding persisted field values keyed by <c>PersistAs</c> name.</param>
 		public void ApplyPersistedFieldsFromBson(IDistributedEntity entity, BsonDocument doc)
 		{
 			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
@@ -1251,6 +1409,9 @@ namespace Impunity.Connection
 		/// that need to enumerate and classify fields (id, name, persistence key, container kind, value type,
 		/// and CLR value type). Throws if <paramref name="entityType"/> is not registered with this manager.
 		/// </summary>
+		/// <param name="entityType">The registered <c>[DistributedEntity]</c> type to describe.</param>
+		/// <returns>A read-only list of <see cref="DistributedFieldInfo"/>, one per distributed field; empty if the type
+		/// has no distributed fields.</returns>
 		public IReadOnlyList<DistributedFieldInfo> GetFieldSchema(Type entityType)
 		{
 			int typeId = DistributedEntity.GetEntityTypeId(entityType);

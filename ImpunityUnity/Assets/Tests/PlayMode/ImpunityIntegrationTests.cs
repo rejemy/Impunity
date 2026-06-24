@@ -518,12 +518,21 @@ public class ImpunityIntegrationTests
 			break;
 		}
 
+		// The channel must be notified when the object is removed. This relies on the manager
+		// populating IDistributedObject.Channel at create time and reaching it on delete.
+		IDistributedObject removedObj = null;
+		c2Channel.OnObjectRemovedEvent += o => removedObj = o;
+
 		// C1 deletes entity
 		entity.Delete("goodbye", null);
 
 		// Wait for C2 to see deletion
 		yield return TickUntil(() => c2Entity.WasDeleted, 3f, AllConnections());
-		Assert.IsTrue(c2Entity.WasDeleted);
+		Assert.IsTrue(c2Entity.WasDeleted, "OnDeleted did not fire on the deleted object");
+		Assert.AreEqual(1, c2Entity.UndistributedCount, "OnUndistributed not fired exactly once on the deleted object");
+		Assert.AreSame(c2Entity, removedObj, "Channel OnObjectRemoved did not fire for the deleted object");
+		Assert.IsFalse(c2Channel.DistributedObjects.ContainsKey(c2Entity.DistributedEntityId),
+			"Deleted object was not removed from the channel's DistributedObjects");
 	}
 
 	// ═══════════════════════════════════════════════════════════
