@@ -183,7 +183,7 @@ BsonDocument result = findYield.Value;
 
 All field types fire `OnChanged` callbacks and serialize only deltas over the wire.
 
-> **📖 Full guide:** [docs/DistributedEntities.md](docs/DistributedEntities.md) covers the distributed entity system in depth — the annotation/id system, client→server→client flow, subscriptions, persistence, client-authoritative objects, locks, and niche features like temporal fields and local-only setters.
+> **📖 Full guide:** [docs/guides/DistributedEntities.md](docs/guides/DistributedEntities.md) covers the distributed entity system in depth — the annotation/id system, client→server→client flow, subscriptions, persistence, client-authoritative objects, locks, and niche features like temporal fields and local-only setters.
 
 ## Architecture
 

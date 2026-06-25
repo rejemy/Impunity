@@ -48,7 +48,7 @@ namespace Impunity.Connection
 	/// <para>
 	/// The methods here are the low-level, byte-oriented surface. For ergonomic, strongly-typed access prefer the higher
 	/// layers built on top: <see cref="ClientEntityManager"/> and the distributed entity types for live state (see
-	/// <c>docs/DistributedEntities.md</c>), <see cref="GameStateDBCollection{DTYPE}"/> for typed documents, and the
+	/// <c>docs/guides/DistributedEntities.md</c>), <see cref="GameStateDBCollection{DTYPE}"/> for typed documents, and the
 	/// <c>…Async</c>/<c>…Yield</c> extensions for await/coroutine styles.
 	/// </para>
 	/// </summary>
@@ -247,7 +247,7 @@ namespace Impunity.Connection
 
 		// Server message handlers (IServerMessageHandler). These run on the main thread via Update() and forward live
 		// state pushes to the entity manager, which applies them to the typed entities. See ClientEntityManager and
-		// docs/DistributedEntities.md for what each does to entity state.
+		// docs/guides/DistributedEntities.md for what each does to entity state.
 
 		/// <inheritdoc/>
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
@@ -500,7 +500,7 @@ namespace Impunity.Connection
 
 		// The methods below are the raw wire-level live-state API: ids and pre-serialized property blobs. Application
 		// code normally uses the typed wrappers on ClientEntityManager (CreateChannel<T>, SubscribeToChannel<T>, …),
-		// which build these arguments from your entity instances. See docs/DistributedEntities.md.
+		// which build these arguments from your entity instances. See docs/guides/DistributedEntities.md.
 
 		/// <summary>Creates a live state channel, with the channel entity's initial state and optional pre-populated child objects.</summary>
 		/// <param name="channelName">Unique channel name to create.</param>
