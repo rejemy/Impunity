@@ -16,7 +16,7 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 	private readonly ConnectionService tcpService = tcpService;
 
 
-    [HttpGet("/")]
+	[HttpGet("/")]
 	public ActionResult<ServerStatus> GetStatus()
 	{
 		return new ServerStatus
@@ -47,7 +47,7 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 				Is64Bit = Environment.Is64BitProcess,
 				AllocatedMemory = process.PrivateMemorySize64,
 				GCMode = System.Runtime.GCSettings.IsServerGC ? "Server" : "Workstation",
-				ProcessorCount = Environment.ProcessorCount			
+				ProcessorCount = Environment.ProcessorCount
 			}
 		};
 	}
@@ -62,26 +62,26 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 		var worldDatas = worldService.GetWorldDatas();
 		result.Worlds = new List<StandaloneServerWorldInfo>(worldDatas.Count);
 
-		
 
-		foreach(var worldData in worldDatas)
+
+		foreach (var worldData in worldDatas)
 		{
 			int currPlayers = tcpService.NumConnections();
 			currPlayers = currPlayers <= worldData.MaxPlayers ? currPlayers : worldData.MaxPlayers;
 
 			var gameMetadata = worldData.GameState.GetGameMetadata();
 
-            var info = new StandaloneServerWorldInfo
-            {
-                WorldId = worldData.ID,
-                WorldName = worldData.Name,
+			var info = new StandaloneServerWorldInfo
+			{
+				WorldId = worldData.ID,
+				WorldName = worldData.Name,
 				PasswordProtected = worldData.Password != null,
-                CurrentPlayers = currPlayers,
-                MaxPlayers = worldData.MaxPlayers,
+				CurrentPlayers = currPlayers,
+				MaxPlayers = worldData.MaxPlayers,
 				GameSummary = worldData.GetGameSummaryAsJson(),
 				DataFormatChecksum = gameMetadata.DataFormatChecksum
-            };
-            result.Worlds.Add(info);
+			};
+			result.Worlds.Add(info);
 		}
 
 		return result;
@@ -102,16 +102,16 @@ public class InfoController(InfoService infoService, WorldService worldService, 
 		var gameMetadata = worldData.GameState.GetGameMetadata();
 
 		var info = new StandaloneServerWorldInfo
-            {
-                WorldId = worldData.ID,
-                WorldName = worldData.Name,
-				PasswordProtected = worldData.Password != null,
-                CurrentPlayers = currPlayers,
-                MaxPlayers = worldData.MaxPlayers,
-				GameSummary = worldData.GetGameSummaryAsJson(),
-				DataFormatChecksum = gameMetadata.DataFormatChecksum
-            };
-		
+		{
+			WorldId = worldData.ID,
+			WorldName = worldData.Name,
+			PasswordProtected = worldData.Password != null,
+			CurrentPlayers = currPlayers,
+			MaxPlayers = worldData.MaxPlayers,
+			GameSummary = worldData.GetGameSummaryAsJson(),
+			DataFormatChecksum = gameMetadata.DataFormatChecksum
+		};
+
 		return info;
 
 	}

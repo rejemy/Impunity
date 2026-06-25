@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 using UnityEngine.Networking;
@@ -22,14 +22,14 @@ namespace Impunity.Networking
 		{
 			if (hostname.IndexOf(':') < 0)
 			{
-				hostname += ":"+ImpunityConstants.DefaultServerHttpPort;
+				hostname += ":" + ImpunityConstants.DefaultServerHttpPort;
 			}
-			string url = "http://"+hostname+"/worlds";
+			string url = "http://" + hostname + "/worlds";
 
 			UnityWebRequest request = UnityWebRequest.Get(url);
 			runner.StartCoroutine(SendRequest(request, () =>
 			{
-				if(request.error != null)
+				if (request.error != null)
 				{
 					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, request.error), null!);
 					return;
@@ -40,7 +40,7 @@ namespace Impunity.Networking
 					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, "Server didn't return a response"), null!);
 					return;
 				}
-				
+
 				try
 				{
 					BsonValue bsonReply = JsonSerializer.Deserialize(request.downloadHandler.text);
@@ -69,7 +69,7 @@ namespace Impunity.Networking
 
 					List<ServerInfo> hostedGames = new List<ServerInfo>();
 
-					foreach(var worldInfo in reply.Worlds)
+					foreach (var worldInfo in reply.Worlds)
 					{
 						if (reply.TCPPort == null)
 						{
@@ -109,7 +109,7 @@ namespace Impunity.Networking
 		}
 
 		static IEnumerator SendRequest(UnityWebRequest request, Action onCompleted)
-    	{
+		{
 			yield return request.SendWebRequest();
 			onCompleted();
 		}
@@ -125,7 +125,7 @@ namespace Impunity.Networking
 					return;
 				}
 
-				foreach(var world in worlds)
+				foreach (var world in worlds)
 				{
 					if (world.GameId == gameId)
 					{

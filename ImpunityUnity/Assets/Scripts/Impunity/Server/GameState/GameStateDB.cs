@@ -24,11 +24,11 @@ namespace Impunity.GameState
 
 		string RootDirectory;
 		string DBFilename;
-		
+
 		UltraLiteDatabase GameDB = null!;
 		CollectionData[] Collections = null!;
 
-		
+
 
 		private GameStateDB(string path)
 		{
@@ -160,9 +160,9 @@ namespace Impunity.GameState
 		}
 
 		public BsonDocument? LoadGameSummary()
-        {
+		{
 			return LoadGameSummary(RootDirectory);
-        }
+		}
 
 
 		/// <summary>Loads game metadata (schema version, collections, entity types) from the database. Creates a default if none exists.</summary>
@@ -185,7 +185,7 @@ namespace Impunity.GameState
 			metadataCollection.Upsert(metadata);
 		}
 
-		
+
 
 		// ------------ API -----------------
 
@@ -249,7 +249,7 @@ namespace Impunity.GameState
 				collection.Collection = GameDB.GetCollection<BsonDocument>(collection.Name);
 				Collections[collectionInfo.Index] = collection;
 				collectionNames.Add(collection.Name);
-				
+
 			}
 		}
 
@@ -264,7 +264,7 @@ namespace Impunity.GameState
 			{
 				return Collections[collectionId].Collection.Insert(doc);
 			}
-			catch(UltraLiteException e)
+			catch (UltraLiteException e)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Insert error: " + e.Message);
 			}
@@ -439,7 +439,7 @@ namespace Impunity.GameState
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
 			var propertyRows = collection.Collection.Find(Query.EQ("ch", channelName));
-			if(propertyRows == null)
+			if (propertyRows == null)
 			{
 				return null;
 			}
@@ -449,7 +449,7 @@ namespace Impunity.GameState
 			LiveChannelData channelData = null!;
 			Dictionary<string, LiveEntityData> loadedEntities = null!;
 
-			foreach(BsonDocument entDoc in propertyRows)
+			foreach (BsonDocument entDoc in propertyRows)
 			{
 				if (channelData == null)
 				{
@@ -486,7 +486,7 @@ namespace Impunity.GameState
 				{
 					// property record
 					string entityId = rowId.Substring(0, sepIndex);
-					string propertyName = rowId.Substring(sepIndex+1);
+					string propertyName = rowId.Substring(sepIndex + 1);
 
 					LiveEntityData? entData;
 					if (entityId == channelName)
@@ -504,7 +504,7 @@ namespace Impunity.GameState
 						loadedEntities[entityId] = entData;
 					}
 
-					if(entData.Properties == null)
+					if (entData.Properties == null)
 					{
 						entData.Properties = new List<LiveEntityPersistedPropertyData>();
 					}

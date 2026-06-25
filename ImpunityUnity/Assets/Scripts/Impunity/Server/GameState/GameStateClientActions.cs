@@ -130,7 +130,7 @@ namespace Impunity.GameState
 		public override bool IsDBOperation() { return false; }
 
 		public NoOpAction() { }
-		
+
 		public NoOpAction(ImpunityCallback? onComplete)
 		{
 			OnCompleteCallback = onComplete;
@@ -306,7 +306,7 @@ namespace Impunity.GameState
 			BsonDocument resultBody = BsonReader.Deserialize(messageBytes);
 
 			BsonMapper mapper = ImpunityUtil.GetBsonMapper();
-			
+
 			BsonValue errorVal = resultBody["e"];
 			if (!errorVal.IsNull)
 			{

@@ -155,7 +155,7 @@ namespace Impunity.GameState
 		public ImpunityCallback? OnCompleteCallback;
 
 		public void SetGuaranteed(bool guaranteed) { this.Guaranteed = guaranteed; }
-		
+
 		public override bool HasCallback()
 		{
 			return OnCompleteCallback != null;

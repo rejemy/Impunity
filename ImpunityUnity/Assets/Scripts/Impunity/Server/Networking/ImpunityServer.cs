@@ -105,7 +105,7 @@ namespace Impunity.Networking
 				{
 					ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 				}
-				
+
 				GameServer = NetworkServer.GetGameStateServer(establish.GameId);
 				if (GameServer == null)
 				{
@@ -185,7 +185,7 @@ namespace Impunity.Networking
 
 				return;
 			}
-			
+
 		}
 
 		/// <summary>Queues an action result to be sent back to the client. Called on the game server thread.</summary>
@@ -266,9 +266,9 @@ namespace Impunity.Networking
 		public IPEndPoint TCPEndpoint { get; private set; } = null!;
 
 		/// <summary>Number of currently connected clients.</summary>
-		public int NumConnections { get {return ClientsByConnectionId.Count; }}
+		public int NumConnections { get { return ClientsByConnectionId.Count; } }
 
-		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer>{gameState}, options)
+		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer> { gameState }, options)
 		{
 		}
 
@@ -279,12 +279,12 @@ namespace Impunity.Networking
 
 			Options = options ?? new ImpunityOptions();
 
-			TCPServer =  new ImpunityTCPServer(Options);
+			TCPServer = new ImpunityTCPServer(Options);
 			TCPServer.OnClientConnected = ClientConnected;
-			
+
 			PendingWrite = new BlockingCollection<GameStateActionBase>();
 
-			foreach(GameStateServer game in gameStates)
+			foreach (GameStateServer game in gameStates)
 			{
 				GameServers.Add(game.GameId, game);
 
@@ -292,7 +292,7 @@ namespace Impunity.Networking
 
 				game.AddListener(this);
 			}
-			
+
 		}
 
 		// Called on live thread
@@ -397,7 +397,7 @@ namespace Impunity.Networking
 				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, action.Guaranteed, action.GetResult());
 			}
 
-			if(action.CloseConnectionOnComplete)
+			if (action.CloseConnectionOnComplete)
 			{
 				clientInfo.ProcessCloseConnection();
 			}
@@ -426,7 +426,7 @@ namespace Impunity.Networking
 			PendingWrite.Add(action);
 		}
 
-		
+
 
 		/// <summary>Shuts down the server: disposes TCP, stops the writer thread, and removes game state listeners.</summary>
 		public void Dispose()
@@ -437,7 +437,7 @@ namespace Impunity.Networking
 			PendingWrite?.CompleteAdding();
 			NetworkWriterThread?.Join();
 
-			foreach(GameStateServer game in GameServers.Values)
+			foreach (GameStateServer game in GameServers.Values)
 			{
 				game.RemoveListener(this);
 			}

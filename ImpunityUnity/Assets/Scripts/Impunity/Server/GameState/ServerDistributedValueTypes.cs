@@ -26,7 +26,7 @@ namespace Impunity.GameState
 			// For non-nullable custom, null actually means "uninitialized default value,
 			// whatever that is for that type. Send 0 length indicates default.
 			if (Value.Array == null)
-            {
+			{
 				w.Write((byte)0);
 				return;
 			}
@@ -319,7 +319,7 @@ namespace Impunity.GameState
 			}
 
 			BsonArray array = new BsonArray();
-			foreach(T i in Value)
+			foreach (T i in Value)
 			{
 				array.Add(i.AsBsonValue());
 			}
@@ -336,7 +336,7 @@ namespace Impunity.GameState
 			}
 
 			Value = new T[array.Count];
-			for(int i=0; i < array.Count; i++)
+			for (int i = 0; i < array.Count; i++)
 			{
 				Value[i].FromBsonValue(array[i]);
 			}
@@ -485,7 +485,7 @@ namespace Impunity.GameState
 	{
 		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
 
-		private Dictionary<int,T>? Value;
+		private Dictionary<int, T>? Value;
 
 		public long LastModifiedTime { get; set; }
 
@@ -581,7 +581,7 @@ namespace Impunity.GameState
 			}
 
 			BsonDocument dict = new BsonDocument();
-			foreach(var pair in Value)
+			foreach (var pair in Value)
 			{
 				dict[ImpunityUtil.KeyIntToString(pair.Key)] = pair.Value.AsBsonValue();
 			}
@@ -600,7 +600,7 @@ namespace Impunity.GameState
 
 			Value = new Dictionary<int, T>();
 
-			foreach(var pair in dict)
+			foreach (var pair in dict)
 			{
 				T val = default(T);
 				val.FromBsonValue(pair.Value);
@@ -735,7 +735,7 @@ namespace Impunity.GameState
 
 	/// <summary>Factory for creating <see cref="IStandardDistributableValueType"/> instances (scalars, arrays, queues, dictionaries) from runtime type codes.</summary>
 	public class DistributedValueFactory
-    {
+	{
 		/// <summary>Returns the D* struct type corresponding to the given value type enum.</summary>
 		public static Type GetDistributableType(GameStateEntityPropertyValueType type)
 		{

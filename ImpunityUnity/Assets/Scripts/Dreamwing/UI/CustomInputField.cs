@@ -507,11 +507,11 @@ namespace Dreamwing.UI
 			}
 
 #if UNITY_EDITOR
-            if (!Application.isPlaying)
-            {
-                SendOnValueChangedAndUpdateLabel();
-                return;
-            }
+			if (!Application.isPlaying)
+			{
+				SendOnValueChangedAndUpdateLabel();
+				return;
+			}
 #endif
 
 			if (m_Keyboard != null)
@@ -1036,9 +1036,9 @@ namespace Dreamwing.UI
 		private bool hasSelection { get { return caretPositionInternal != caretSelectPositionInternal; } }
 
 #if UNITY_EDITOR
-        [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-        [Obsolete("caretSelectPosition has been deprecated. Use selectionFocusPosition instead (UnityUpgradable) -> selectionFocusPosition", true)]
-        public int caretSelectPosition { get { return selectionFocusPosition; } protected set { selectionFocusPosition = value; } }
+		[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+		[Obsolete("caretSelectPosition has been deprecated. Use selectionFocusPosition instead (UnityUpgradable) -> selectionFocusPosition", true)]
+		public int caretSelectPosition { get { return selectionFocusPosition; } protected set { selectionFocusPosition = value; } }
 #endif
 
 		/// <summary>
@@ -1095,29 +1095,29 @@ namespace Dreamwing.UI
 		}
 
 #if UNITY_EDITOR
-        // Remember: This is NOT related to text validation!
-        // This is Unity's own OnValidate method which is invoked when changing values in the Inspector.
-        protected override void OnValidate()
-        {
-            base.OnValidate();
-            EnforceContentType();
-            EnforceTextHOverflow();
+		// Remember: This is NOT related to text validation!
+		// This is Unity's own OnValidate method which is invoked when changing values in the Inspector.
+		protected override void OnValidate()
+		{
+			base.OnValidate();
+			EnforceContentType();
+			EnforceTextHOverflow();
 
-            m_CharacterLimit = Math.Max(0, m_CharacterLimit);
+			m_CharacterLimit = Math.Max(0, m_CharacterLimit);
 
-            //This can be invoked before OnEnabled is called. So we shouldn't be accessing other objects, before OnEnable is called.
-            if (!IsActive())
-                return;
+			//This can be invoked before OnEnabled is called. So we shouldn't be accessing other objects, before OnEnable is called.
+			if (!IsActive())
+				return;
 
-            // fix case 1040277
-            ClampPos(ref m_CaretPosition);
-            ClampPos(ref m_CaretSelectPosition);
+			// fix case 1040277
+			ClampPos(ref m_CaretPosition);
+			ClampPos(ref m_CaretSelectPosition);
 
 
-            UpdateLabel();
-            if (m_AllowInput)
-                SetCaretActive();
-        }
+			UpdateLabel();
+			if (m_AllowInput)
+				SetCaretActive();
+		}
 
 #endif // if UNITY_EDITOR
 
@@ -2727,8 +2727,8 @@ namespace Dreamwing.UI
 		private void MarkGeometryAsDirty()
 		{
 #if UNITY_EDITOR
-            if (!Application.isPlaying || UnityEditor.PrefabUtility.IsPartOfPrefabAsset(gameObject))
-                return;
+			if (!Application.isPlaying || UnityEditor.PrefabUtility.IsPartOfPrefabAsset(gameObject))
+				return;
 #endif
 
 			CanvasUpdateRegistry.RegisterCanvasElementForGraphicRebuild(this);
@@ -2763,8 +2763,8 @@ namespace Dreamwing.UI
 		private void UpdateGeometry()
 		{
 #if UNITY_EDITOR
-            if (!Application.isPlaying)
-                return;
+			if (!Application.isPlaying)
+				return;
 #endif
 			// No need to draw a cursor on mobile as its handled by the devices keyboard.
 			if (!InPlaceEditing() && !shouldHideMobileInput)

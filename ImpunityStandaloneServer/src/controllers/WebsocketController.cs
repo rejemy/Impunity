@@ -31,15 +31,15 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
 	public string ConnectionId { get; private set; } = "";
 
-    public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
+	public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 	public ImpunityServerErrorCallback? OnNetworkError { get; set; }
 	public ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
 
 
 
-    [Route("/ws")]
-    public async Task Connect()
-    {
+	[Route("/ws")]
+	public async Task Connect()
+	{
 		if (HttpContext.Connection.RemoteIpAddress == null)
 		{
 			throw new Exception("Null connection address");
@@ -47,29 +47,29 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
 		RemoteIPAddress = HttpContext.Connection.RemoteIpAddress;
 
-        if (HttpContext.WebSockets.IsWebSocketRequest)
-        {
-            Socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
+		if (HttpContext.WebSockets.IsWebSocketRequest)
+		{
+			Socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
 
 			this.ConnectionId = "ws_" + Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 			Connections.NetworkServer.ClientConnected(this);
 
 			await Listen();
-        }
-        else
-        {
-            HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-        }
-    }
+		}
+		else
+		{
+			HttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+		}
+	}
 
-    public async Task Listen()
-    {
-        using(Socket)
+	public async Task Listen()
+	{
+		using (Socket)
 		{
 			await ReadLoop();
 		}
 		Socket = null;
-    }
+	}
 
 	private async Task ReadLoop()
 	{
@@ -127,7 +127,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
 				bytesBuffered = 0;
 			}
-			catch(OperationCanceledException)
+			catch (OperationCanceledException)
 			{
 				if (firstMessage)
 				{
@@ -135,7 +135,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 				}
 				break;
 			}
-			catch(Exception ex)
+			catch (Exception ex)
 			{
 				Logger.LogError("Exception in websocket read: {ex}", ex.ToString());
 
@@ -172,26 +172,26 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 		OnDisconnected();
 	}
 
-    public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
-    {
+	public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
+	{
 		var socket = Socket;
 		if (socket == null)
 		{
 			return Task.CompletedTask;
 		}
 
-        return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
-    }
+		return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
+	}
 
-    public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
-    {
-        return SendGuaranteedMessageAsync(messageBytes);
-    }
+	public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
+	{
+		return SendGuaranteedMessageAsync(messageBytes);
+	}
 
-    public void Disconnect()
-    {
-        ReadCancelSource.Cancel();
-    }
+	public void Disconnect()
+	{
+		ReadCancelSource.Cancel();
+	}
 
 	private void OnDisconnected()
 	{
@@ -205,13 +205,13 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 		}
 	}
 
-    public void Dispose()
-    {
-        if(Socket != null)
+	public void Dispose()
+	{
+		if (Socket != null)
 		{
 			Socket.Dispose();
 			Socket = null;
 		}
 		ReadCancelSource.Dispose();
-    }
+	}
 }

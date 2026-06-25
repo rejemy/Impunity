@@ -32,11 +32,11 @@ namespace Impunity.Networking
 
 		private TcpClient? ClientTCPSocket;
 		private Thread? ClientTCPSocketThread;
-		private NetworkStream ?TCPSocketStream;
+		private NetworkStream? TCPSocketStream;
 
 		private UdpClient? ClientUDPSocket;
 		private Thread? ClientUDPSocketThread;
-	
+
 		private ImpunityCallback? OnConnectCallback;
 
 
@@ -61,7 +61,7 @@ namespace Impunity.Networking
 		private ImpunityTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
 		{
 			ServerEndpoint = serverEndpoint;
-			
+
 			InternalInit(options);
 		}
 
@@ -149,7 +149,7 @@ namespace Impunity.Networking
 
 				// Open Udp socket on the same port as the TCP connection
 				OpenUdpClient();
-				
+
 				connected = true;
 				OnConnectCallback?.Invoke(null);
 				OnConnectCallback = null;
@@ -218,7 +218,7 @@ namespace Impunity.Networking
 			catch (Exception e)
 			{
 				if (!connected)
-                {
+				{
 					OnConnectCallback?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, e));
 					OnConnectCallback = null;
 				}
@@ -258,7 +258,7 @@ namespace Impunity.Networking
 			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
 			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
 
-			if(ClientTCPSocket == null)
+			if (ClientTCPSocket == null)
 			{
 				return;
 			}
@@ -269,7 +269,7 @@ namespace Impunity.Networking
 				IPEndPoint localEndpoint = (IPEndPoint)ClientTCPSocket.Client.LocalEndPoint;
 				ImpunityLogger.LogInformation("Client listening for udp on " + localEndpoint.ToString());
 				ClientUDPSocket = new UdpClient(localEndpoint);
-				
+
 				// See if we can reach the server and vice versa
 				SendUdpPing();
 
@@ -293,7 +293,7 @@ namespace Impunity.Networking
 						var packetBody = new ArraySegment<byte>(packet, SessionDataPacket.Length, packet.Length - SessionDataPacket.Length);
 						OnSessionDataPacket(packetBody);
 					}
-					else if(ImpunityUtil.StartsWith(packet, PingPacket))
+					else if (ImpunityUtil.StartsWith(packet, PingPacket))
 					{
 						OnPingPacket();
 					}
@@ -347,7 +347,7 @@ namespace Impunity.Networking
 				ImpunityLogger.LogError("Exception sending UDP packet", e);
 			}
 		}
-		
+
 
 		private void SendUdpPing()
 		{
@@ -380,7 +380,7 @@ namespace Impunity.Networking
 				SendGuaranteedMessage(messageBytes);
 				return;
 			}
-			
+
 			byte[] buffer = new byte[messageBytes.Count + SessionDataPacket.Length];
 			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
 			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);

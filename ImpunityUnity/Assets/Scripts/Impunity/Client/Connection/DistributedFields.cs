@@ -7,13 +7,13 @@ using UltraLiteDB;
 
 namespace Impunity.Connection
 {
-	
+
 	/// <summary>Base interface for all client-side distributed field types. Provides binary serialization for wire protocol and read/write lifecycle.</summary>
 	public interface IDistributedField
 	{
 		/// <summary>Gets field value as a BsonValue</summary>
 		BsonValue GetAsBsonValue();
-		
+
 		/// <summary>Sets field from a BsonValue</summary>
 		void SetFromBsonValue(BsonValue val);
 
@@ -213,12 +213,12 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedTemporalValue<T,S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedTemporalValue<T, S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised on initial load with the current value and its age (time since last server modification).</summary>
-		public event Action<T,TimeSpan> OnInitialized;
+		public event Action<T, TimeSpan> OnInitialized;
 		/// <summary>Raised when the value changes, providing old and new values.</summary>
-		public event Action<T,T> OnChanged;
+		public event Action<T, T> OnChanged;
 
 		private static readonly S Serializer = default!;
 
@@ -279,9 +279,9 @@ namespace Impunity.Connection
 
 		/// <summary>Returns the last server-confirmed value. Pending local changes are not reflected here unless the entity is client-authoritative.</summary>
 		public readonly T Get()
-        {
+		{
 			return CurrentValue;
-        }
+		}
 
 		/// <summary>Sets the value with no cooldown lock. See <see cref="Set(T, TimeSpan, bool)"/> for the locking overload.</summary>
 		public bool Set(T newValue, bool force = false)
@@ -377,7 +377,7 @@ namespace Impunity.Connection
 			CurrentValue = newValue;
 
 			InvokeOnChanged(oldValue, CurrentValue);
-			
+
 			return true;
 		}
 
@@ -432,7 +432,7 @@ namespace Impunity.Connection
 			{
 				OnInitialized?.Invoke(newValue, age);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnInitialized method", e);
 			}
@@ -479,7 +479,7 @@ namespace Impunity.Connection
 		public readonly GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Value; }
 		public readonly GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator T(DistributedTemporalValue<T,S> d) => d.CurrentValue;
+		public static implicit operator T(DistributedTemporalValue<T, S> d) => d.CurrentValue;
 	}
 
 
@@ -788,14 +788,14 @@ namespace Impunity.Connection
 			}
 
 			BsonArray array = new BsonArray();
-			foreach(var val in CurrentValue)
+			foreach (var val in CurrentValue)
 			{
 				array.Add(Serializer.ToBsonValue(val));
 			}
 
 			return array;
 		}
-		
+
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
@@ -806,7 +806,7 @@ namespace Impunity.Connection
 			BsonArray source = val.AsArray!;
 			List<T> list = new List<T>(source.Count);
 
-			foreach(var item in source)
+			foreach (var item in source)
 			{
 				list.Add(Serializer.FromBsonValue(item));
 			}
@@ -824,7 +824,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The element type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedQueue<T,S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedQueue<T, S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a new element is enqueued.</summary>
 		public event Action<T> OnChanged;
@@ -884,7 +884,7 @@ namespace Impunity.Connection
 			NewCapacity = capacity;
 			NewValue = new Queue<T>();
 			Changes = new Queue<T>();
-			
+
 			foreach (T val in initialValues)
 			{
 				AddToNew(val);
@@ -904,7 +904,7 @@ namespace Impunity.Connection
 
 		private void AddToCurrent(T value)
 		{
-			if(CurrentValue.Count == CurrentCapacity)
+			if (CurrentValue.Count == CurrentCapacity)
 			{
 				CurrentValue.Dequeue();
 			}
@@ -1069,7 +1069,7 @@ namespace Impunity.Connection
 			{
 				OnChanged?.Invoke(newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
 			}
@@ -1081,7 +1081,7 @@ namespace Impunity.Connection
 			{
 				OnReplaced?.Invoke(oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
@@ -1117,15 +1117,15 @@ namespace Impunity.Connection
 			doc["Capacity"] = CurrentCapacity;
 
 			BsonArray array = new BsonArray();
-			foreach(var val in CurrentValue)
+			foreach (var val in CurrentValue)
 			{
 				array.Add(Serializer.ToBsonValue(val));
 			}
 			doc["Queue"] = array;
-			
+
 			return doc;
 		}
-		
+
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
@@ -1139,7 +1139,7 @@ namespace Impunity.Connection
 
 			List<T> list = new List<T>(source.Count);
 
-			foreach(var item in source)
+			foreach (var item in source)
 			{
 				list.Add(Serializer.FromBsonValue(item));
 			}
@@ -1150,7 +1150,7 @@ namespace Impunity.Connection
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Queue; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator Queue<T>(DistributedQueue<T,S> d) => d.CurrentValue;
+		public static implicit operator Queue<T>(DistributedQueue<T, S> d) => d.CurrentValue;
 	}
 
 	/// <summary>
@@ -1158,16 +1158,16 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedIntDictionary<T,S> : IDistributedField, IReadOnlyDictionary<int,T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedIntDictionary<T, S> : IDistributedField, IReadOnlyDictionary<int, T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
-		public event Action<int,T,T> OnChanged;
+		public event Action<int, T, T> OnChanged;
 		/// <summary>Raised when the entire dictionary is replaced.</summary>
-		public event Action<Dictionary<int,T>,Dictionary<int,T>> OnReplaced;
+		public event Action<Dictionary<int, T>, Dictionary<int, T>> OnReplaced;
 
 		private static readonly S Serializer = default!;
 
-		Dictionary<int,T> CurrentValue;
+		Dictionary<int, T> CurrentValue;
 
 		Dictionary<int, T>? NewValue;
 		Dictionary<int, T> Changes;
@@ -1207,7 +1207,7 @@ namespace Impunity.Connection
 
 			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
-				Dictionary<int,T> oldValue = CurrentValue;
+				Dictionary<int, T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				InvokeOnReplaced(oldValue, CurrentValue);
@@ -1216,7 +1216,7 @@ namespace Impunity.Connection
 
 
 		/// <summary>Replaces the entire dictionary contents. Marks the field dirty for full sync.</summary>
-		public void Replace(IReadOnlyDictionary<int,T> initialValues)
+		public void Replace(IReadOnlyDictionary<int, T> initialValues)
 		{
 			NewValue = new Dictionary<int, T>(initialValues);
 			Changes = new Dictionary<int, T>();
@@ -1225,7 +1225,7 @@ namespace Impunity.Connection
 
 			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
-				Dictionary<int,T> oldValue = CurrentValue;
+				Dictionary<int, T> oldValue = CurrentValue;
 				CurrentValue = NewValue;
 
 				InvokeOnReplaced(oldValue, CurrentValue);
@@ -1384,19 +1384,19 @@ namespace Impunity.Connection
 			{
 				OnChanged?.Invoke(key, oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
 			}
 		}
 
-		private readonly void InvokeOnReplaced(Dictionary<int,T> oldValue, Dictionary<int,T> newValue)
+		private readonly void InvokeOnReplaced(Dictionary<int, T> oldValue, Dictionary<int, T> newValue)
 		{
 			try
 			{
 				OnReplaced?.Invoke(oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
@@ -1442,14 +1442,14 @@ namespace Impunity.Connection
 			}
 
 			BsonDocument dict = new BsonDocument();
-			foreach(var val in CurrentValue)
+			foreach (var val in CurrentValue)
 			{
 				dict[val.Key.ToString()] = Serializer.ToBsonValue(val.Value);
 			}
-			
+
 			return dict;
 		}
-		
+
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
@@ -1458,9 +1458,9 @@ namespace Impunity.Connection
 				return;
 			}
 			BsonDocument source = val.AsDocument!;
-			Dictionary<int,T> dict = new Dictionary<int, T>();
+			Dictionary<int, T> dict = new Dictionary<int, T>();
 
-			foreach(var item in source)
+			foreach (var item in source)
 			{
 				dict[int.Parse(item.Key)] = Serializer.FromBsonValue(item.Value);
 			}
@@ -1470,7 +1470,7 @@ namespace Impunity.Connection
 
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.IntDictionary; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
-		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T,S> d) => d.CurrentValue;
+		public static implicit operator Dictionary<int, T>(DistributedIntDictionary<T, S> d) => d.CurrentValue;
 	}
 
 	/// <summary>
@@ -1478,12 +1478,12 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedStringDictionary<T,S> : IDistributedField, IReadOnlyDictionary<string,T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedStringDictionary<T, S> : IDistributedField, IReadOnlyDictionary<string, T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
-		public event Action<string,T,T> OnChanged;
+		public event Action<string, T, T> OnChanged;
 		/// <summary>Raised when the entire dictionary is replaced.</summary>
-		public event Action<Dictionary<string,T>,Dictionary<string,T>> OnReplaced;
+		public event Action<Dictionary<string, T>, Dictionary<string, T>> OnReplaced;
 
 		private static readonly S Serializer = default!;
 
@@ -1704,19 +1704,19 @@ namespace Impunity.Connection
 			{
 				OnChanged?.Invoke(key, oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnChanged handler method", e);
 			}
 		}
 
-		private readonly void InvokeOnReplaced(Dictionary<string,T> oldValue, Dictionary<string,T> newValue)
+		private readonly void InvokeOnReplaced(Dictionary<string, T> oldValue, Dictionary<string, T> newValue)
 		{
 			try
 			{
 				OnReplaced?.Invoke(oldValue, newValue);
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
 			}
@@ -1762,14 +1762,14 @@ namespace Impunity.Connection
 			}
 
 			BsonDocument dict = new BsonDocument();
-			foreach(var val in CurrentValue)
+			foreach (var val in CurrentValue)
 			{
 				dict[val.Key] = Serializer.ToBsonValue(val.Value);
 			}
-			
+
 			return dict;
 		}
-		
+
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
@@ -1778,9 +1778,9 @@ namespace Impunity.Connection
 				return;
 			}
 			BsonDocument source = val.AsDocument!;
-			Dictionary<string,T> dict = new Dictionary<string, T>();
+			Dictionary<string, T> dict = new Dictionary<string, T>();
 
-			foreach(var item in source)
+			foreach (var item in source)
 			{
 				dict[item.Key] = Serializer.FromBsonValue(item.Value);
 			}
@@ -1791,7 +1791,7 @@ namespace Impunity.Connection
 		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.StringDictionary; }
 		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
 
-		public static implicit operator Dictionary<string, T>(DistributedStringDictionary<T,S> d) => d.CurrentValue;
+		public static implicit operator Dictionary<string, T>(DistributedStringDictionary<T, S> d) => d.CurrentValue;
 	}
 
 }

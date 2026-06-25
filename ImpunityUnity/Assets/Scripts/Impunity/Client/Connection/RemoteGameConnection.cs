@@ -82,7 +82,7 @@ namespace Impunity.Connection
 			return new RemoteGameConnection(ImpunityTCPClient.MakeTCPClient(hostname, port, options), gameId, gamePassword, format, options, em);
 		}
 
-				/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
+		/// <summary>Creates a TCP remote connection to the given hostname and port.</summary>
 		public static RemoteGameConnection MakeWebsocketRemoteConnection(string hostname, int port, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options = null, ClientEntityManager? em = null)
 		{
 			if (options == null)
@@ -125,7 +125,7 @@ namespace Impunity.Connection
 			NetworkClient.Dispose();
 		}
 
-		
+
 #if !UNITY_WEBGL
 		private void NetworkWriterThreadMain()
 		{
@@ -223,7 +223,7 @@ namespace Impunity.Connection
 			{
 				NetworkClient.SendUnguaranteedMessage(encodedMessage);
 			}
-			
+
 
 			action.Cleanup();
 		}
@@ -237,7 +237,7 @@ namespace Impunity.Connection
 
 			// Reply message
 			if (msg.MessageType == (ushort)ServerActionType.CLIENT_REPLY)
-            {
+			{
 				HandleReplyMessage(msg.MessageId, new ArraySegment<byte>(messageBytes.Array, bodyOffset, messageBytes.Array.Length - bodyOffset));
 				return;
 			}
@@ -291,7 +291,7 @@ namespace Impunity.Connection
 
 
 		public override void DoAction(GameStateActionBase action)
-        {
+		{
 			action.SentAt = DateTimeOffset.UtcNow;
 			PendingSend.Add(action);
 

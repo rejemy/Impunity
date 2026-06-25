@@ -312,7 +312,7 @@ namespace Impunity.Connection
 		}
 
 		public static Task UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
-        {
+		{
 			var t = new ImpunityTaskCompletionSource();
 			manager.UnsubscribeFromChannel(channel, t.OnComplete);
 			return t.Task;

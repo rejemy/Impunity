@@ -35,8 +35,8 @@ public sealed class ImpunityConsoleFormatter : ConsoleFormatter, IDisposable
 		TextWriter textWriter)
 	{
 		string message = logEntry.Formatter.Invoke(logEntry.State, logEntry.Exception);
-		
-		switch(logEntry.LogLevel)
+
+		switch (logEntry.LogLevel)
 		{
 			case LogLevel.Trace:
 				textWriter.Write("[Trace] ");

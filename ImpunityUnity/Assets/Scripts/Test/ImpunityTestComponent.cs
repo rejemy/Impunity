@@ -94,14 +94,14 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		//yield return StandaloneServerTCPConnectionTest(new IPEndPoint(IPAddress.Parse("127.0.0.1"), 29654), "world1");
 		yield return StandaloneServerWebsocketConnectionTest("localhost", 29653, "world1");
-		
+
 		TestsDone = true;
 		ImpunityLogger.LogInformation("Tests complete");
 	}
 
 	IEnumerator ComboTest()
 	{
-		
+
 		yield return Setup();
 
 		yield return LocalConnectionTest();
@@ -109,14 +109,14 @@ public class ImpunityTestComponent : MonoBehaviour
 		yield return Setup();
 
 		yield return TCPConnectionTest();
-		
+
 		yield return Setup();
 
 		yield return TCPConnectionFailTest();
 
 		yield return Setup();
 
-		AsyncTests().ContinueWith((t)=>
+		AsyncTests().ContinueWith((t) =>
 		{
 			TestsDone = true;
 			ImpunityLogger.LogInformation("Tests complete");
@@ -124,7 +124,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	IEnumerator Setup()
-    {
+	{
 		Cleanup();
 
 		yield return new WaitForSeconds(0.1f);
@@ -138,7 +138,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task SetupAsync()
-    {
+	{
 		Cleanup();
 
 		await Task.Delay(100);
@@ -152,7 +152,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	void Cleanup(bool deleteFolder = true)
-    {
+	{
 		LocalGame?.Dispose();
 		LocalGame = null;
 
@@ -215,7 +215,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		Finder.Start();
 
 		while (!FoundServer)
-        {
+		{
 			yield return null;
 		}
 		ImpunityLogger.LogInformation("Found TCP server at " + ServerEndpoint.ToString());
@@ -308,7 +308,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	IEnumerator GenericConnectionTest(BaseGameConnection connection)
-    {
+	{
 		connection.OnBroadcastMessage = (messageType, message, sentBy) =>
 		{
 			ImpunityLogger.LogInformation("Got broadcast message " + message.AsString + " from " + sentBy);
@@ -429,7 +429,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task AsyncTests()
-    {
+	{
 		ImpunityLogger.LogInformation("Starting async tests");
 
 		await AsyncConnectionTest();
@@ -451,11 +451,11 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task AsyncConnectionTest()
-    {
+	{
 		ImpunityLogger.LogInformation("Running async local connection test");
 
 		try
-        {
+		{
 			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
 
 			BsonDocument char1 = new BsonDocument();
@@ -469,10 +469,10 @@ public class ImpunityTestComponent : MonoBehaviour
 
 			ImpunityLogger.LogInformation("characters found " + chars.Count);
 		}
-		catch(Exception e)
-        {
+		catch (Exception e)
+		{
 			ImpunityLogger.LogError("Got exception in async test: " + e.Message);
-        }
+		}
 
 		LocalGame.Dispose();
 		LocalGame = null;
@@ -481,7 +481,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task LiveDataTest()
-    {
+	{
 		ImpunityLogger.LogInformation("Running live data test");
 
 		try
@@ -529,7 +529,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task LiveBroadcastTests(BaseGameConnection c1, BaseGameConnection c2)
-    {
+	{
 		ImpunityLogger.LogInformation("Doing broadcast test");
 
 		bool gotMessage = false;
@@ -583,7 +583,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		}
 
 		TaskCompletionSource<bool> waitComplete = new TaskCompletionSource<bool>();
-		
+
 		await Task.Delay(20);
 
 		c2.WaitForLock("waitLock", (err, lockResult) =>
@@ -596,10 +596,10 @@ public class ImpunityTestComponent : MonoBehaviour
 			{
 				ImpunityLogger.LogInformation("Got wait lock result " + lockResult.ToString());
 			}
-			
+
 			waitComplete.SetResult(true);
 		});
-		
+
 		await Task.Delay(20);
 
 		bool waitUnlocked = await c1.UnlockAsync("waitLock");
@@ -615,9 +615,9 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	void Connection1ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
-    {
+	{
 		ImpunityLogger.LogInformation("Got new object on connection 1 in channel " + channel.Name + ": " + obj.DistributedEntityId + " newly created: " + newlyCreated);
-    }
+	}
 
 	void Connection2ObjectCreated(IDistributedEntity obj, IDistributedChannel channel, bool newlyCreated)
 	{
@@ -625,7 +625,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	async Task LiveChannelTests(BaseGameConnection c1, BaseGameConnection c2)
-    {
+	{
 		ImpunityLogger.LogInformation("Doing live channel tests");
 
 		c1.EntityManager.OnDistributedObjectCreated = Connection1ObjectCreated;
@@ -634,7 +634,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		TestZone c1channelInitializer = new TestZone();
 		c1channelInitializer.Chat.Init(10);
 		c1channelInitializer.Chat.Add("hey dudes");
-		c1channelInitializer.Grid.Replace(new int[] { 1,2 });
+		c1channelInitializer.Grid.Replace(new int[] { 1, 2 });
 
 		TestZone c1channel = await c1.EntityManager.SubscribeToChannelAsync("testZone", c1channelInitializer);
 		ImpunityLogger.LogInformation("C1 Made channel " + c1channel.DistributedEntityId);
@@ -644,12 +644,12 @@ public class ImpunityTestComponent : MonoBehaviour
 		c1player1.MovementState.Set(new CustomMovementStateData
 		{
 			StartPos = new Vector3(1, 2, 3),
-			Velocity = new Vector3(1,0,-1)
+			Velocity = new Vector3(1, 0, -1)
 		});
 
 		c1player1 = await c1.EntityManager.CreateObjectAsync(c1player1, c1channel, false);
 		ImpunityLogger.LogInformation("C1 Made player: " + c1player1.DistributedEntityId);
-		
+
 		await Task.Delay(100);
 
 		TestZone c2channel = await c2.EntityManager.SubscribeToChannelAsync<TestZone>("testZone", null);
@@ -692,7 +692,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		WaitingForCount = 6;
 
 		c1player1.Position.Set(new Vector3(5.0f, 5.0f, 5.0f));
-		c1player1.BigData.Set(new BsonDataRecord {Thingy1 = "stuff", Thingy2 = 10, Thingy3 = 0.1f});
+		c1player1.BigData.Set(new BsonDataRecord { Thingy1 = "stuff", Thingy2 = 10, Thingy3 = 0.1f });
 		c2player2.Direction.Set(new Vector3(1.0f, 1.0f, 1.0f));
 
 		if (!await WaitForCount("Didn't get direction and/or position change callback"))
@@ -733,7 +733,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		ImpunityLogger.LogInformation("Deletes happened");
 
-		
+
 		await c2player2.TryLockAsync();
 
 		bool deleted = await c1.DeleteEntityAsync(c2player2.DistributedEntityId, null);
@@ -773,11 +773,11 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		List<IDistributedObject> zoneObjects = new List<IDistributedObject>();
 
-		for(int i=1; i<=5; i++)
+		for (int i = 1; i <= 5; i++)
 		{
 			var zonePlayer = new TestPlayer();
-			zonePlayer.UniqueName = "player_"+i;
-			zonePlayer.Direction.Set(new Vector3(1,1,i));
+			zonePlayer.UniqueName = "player_" + i;
+			zonePlayer.Direction.Set(new Vector3(1, 1, i));
 			zoneObjects.Add(zonePlayer);
 		}
 
@@ -800,7 +800,7 @@ public class ImpunityTestComponent : MonoBehaviour
 		await c2channelFromCreate.UnsubscribeAsync();
 
 		ImpunityLogger.LogInformation("Live channel tests complete");
-    }
+	}
 
 	async Task SetupLivePersistedDataTest()
 	{
@@ -911,7 +911,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	{
 		ImpunityLogger.LogInformation("Starting verifying persisted zone and objects");
 
-		
+
 		Task<PersistedTestZone> c1Zone1T = c1.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", new PersistedTestZone { IsPersisted = true });
 		Task<PersistedTestZone> c2Zone1T = c2.EntityManager.SubscribeToChannelAsync<PersistedTestZone>("zone1", new PersistedTestZone { IsPersisted = true });
 
@@ -927,7 +927,7 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		Vector2Int expectedPos = new Vector2Int(10, -2);
 
-		foreach(var ent in c1Zone1.DistributedObjects.Values)
+		foreach (var ent in c1Zone1.DistributedObjects.Values)
 		{
 			ZonePersistedObject c1zobj = (ZonePersistedObject)ent;
 			ZonePersistedObject c2zobj = (ZonePersistedObject)c2Zone1.DistributedObjects[c1zobj.DistributedEntityId];
@@ -965,16 +965,16 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	void OnNetworkError(ImpunityErrorResponse err)
-    {
+	{
 		ImpunityLogger.LogError("Got network error: " + err.Message);
-    }
+	}
 
 	void OnServerFound(ServerInfo serverInfo)
 	{
 
 		string gameName = "new game";
 		if (serverInfo.GameSummary != null)
-        {
+		{
 			gameName = serverInfo.GameSummary["name"];
 		}
 		ImpunityLogger.LogInformation("Found a server: " + gameName);
@@ -992,9 +992,9 @@ public class ImpunityTestComponent : MonoBehaviour
 		Finder?.Update();
 		RemoteGame?.Update();
 
-		if(TestsDone)
-        {
-			
+		if (TestsDone)
+		{
+
 			ImpunityLogger.LogInformation("Done with tests");
 
 			Cleanup();
@@ -1005,7 +1005,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	void OnApplicationQuit()
-    {
+	{
 		ImpunityLogger.LogInformation("Shutting down");
 
 		Cleanup();
@@ -1013,7 +1013,7 @@ public class ImpunityTestComponent : MonoBehaviour
 	}
 
 	void Quit()
-    {
+	{
 #if UNITY_EDITOR
 		EditorApplication.ExitPlaymode();
 #else

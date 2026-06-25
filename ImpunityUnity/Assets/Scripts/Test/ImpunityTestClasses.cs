@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 using System.Collections.Generic;
 
@@ -116,7 +116,7 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 		return new CustomMovementStateData();
 	}
 
-	public GameStateEntityPropertyValueType ValueType { get { return GameStateEntityPropertyValueType.CustomSmallNullable; }}
+	public GameStateEntityPropertyValueType ValueType { get { return GameStateEntityPropertyValueType.CustomSmallNullable; } }
 }
 
 [DistributedEntity(TestEntityTypes.EMPTY_OBJ)]

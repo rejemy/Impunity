@@ -56,7 +56,7 @@ namespace Impunity
 	{
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
 		private static BsonMapper? Mapper = null;
-		
+
 		private static TemporaryBuffer? SmallBufferPool;
 		private static object SmallBufferLock = new object();
 

@@ -28,7 +28,7 @@ public class WorldData
 	public readonly GameStateServer GameState;
 
 
-    public WorldData(string id, string baseDir, string name, string? password, int maxPlayers, ImpunityOptions options)
+	public WorldData(string id, string baseDir, string name, string? password, int maxPlayers, ImpunityOptions options)
 	{
 		ID = id;
 		BaseDirectory = baseDir;
@@ -52,7 +52,7 @@ public class WorldData
 public class WorldService
 {
 	private readonly Regex WorldIdPattern = new("^[a-z0-9_]+$");
-	private readonly ReadOnlyDictionary<string,WorldData> Worlds;
+	private readonly ReadOnlyDictionary<string, WorldData> Worlds;
 
 	public WorldService(string datapath, List<WorldConfig> worlds, ImpunityOptions options)
 	{
@@ -86,7 +86,7 @@ public class WorldService
 			Directory.CreateDirectory(worldpath);
 
 			int maxPlayers = config.max_players <= 0 ? 16 : config.max_players;
-			
+
 			WorldData world = new WorldData(config.id, worldpath, config.name, config.password, maxPlayers, options);
 
 			worldsLoaded.Add(config.id, world);
@@ -102,7 +102,7 @@ public class WorldService
 			return null;
 		}
 
-		if(Worlds.TryGetValue(id, out WorldData? worldData))
+		if (Worlds.TryGetValue(id, out WorldData? worldData))
 		{
 			return worldData;
 		}
@@ -115,7 +115,7 @@ public class WorldService
 		{
 			return new List<WorldData>();
 		}
-		
+
 		return new List<WorldData>(Worlds.Values);
 	}
 
@@ -125,15 +125,15 @@ public class WorldService
 		{
 			return new List<GameStateServer>();
 		}
-		
+
 		return new List<GameStateServer>(Worlds.Select(x => x.Value.GameState));
 	}
 
 	public static string HashPassword(string pass)
-    {
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(pass));
-        return Convert.ToBase64String(hash);
-    }
+	{
+		byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(pass));
+		return Convert.ToBase64String(hash);
+	}
 
 	public void Stop()
 	{

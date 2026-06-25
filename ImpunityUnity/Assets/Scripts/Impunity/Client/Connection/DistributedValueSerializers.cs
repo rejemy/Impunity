@@ -441,7 +441,7 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.String; }
 	}
 
-	
+
 
 	/// <summary>Binary serializer for nullable byte array blobs. Prefixed with a boolean null indicator and ushort length.</summary>
 	public readonly struct BlobSerializer : IDistributableValueSerializer<ArraySegment<byte>>
@@ -701,7 +701,7 @@ namespace Impunity.Connection
 			}
 		}
 
-				/// <summary>Converts value to BsonValue</summary>
+		/// <summary>Converts value to BsonValue</summary>
 		public BsonValue ToBsonValue(T value)
 		{
 			return ImpunityUtil.GetBsonMapper().SerializeObject(value);

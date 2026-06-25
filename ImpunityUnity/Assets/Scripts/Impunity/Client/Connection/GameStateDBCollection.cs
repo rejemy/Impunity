@@ -13,17 +13,17 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="DTYPE">The document type to store and retrieve.</typeparam>
 	public class GameStateDBCollection<DTYPE>
-    {
+	{
 		/// <summary>The BSON mapper used for object-to-document conversion.</summary>
 		public BsonMapper Mapper;
-        BaseGameConnection Connection;
-        int CollectionId;
+		BaseGameConnection Connection;
+		int CollectionId;
 
 		/// <summary>Creates a typed collection wrapper for the given collection ID on the specified connection.</summary>
-        public GameStateDBCollection(BaseGameConnection connection, int collectionId, BsonMapper? mapper = null)
-        {
-            Connection = connection;
-            CollectionId = collectionId;
+		public GameStateDBCollection(BaseGameConnection connection, int collectionId, BsonMapper? mapper = null)
+		{
+			Connection = connection;
+			CollectionId = collectionId;
 			Mapper = mapper ?? BsonMapper.Global;
 		}
 

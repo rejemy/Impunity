@@ -40,7 +40,7 @@ namespace Impunity.Connection
 		public abstract void Connect(ImpunityCallback onComplete);
 
 		/// <summary>Server-assigned connection identifier, available after successful connection.</summary>
-		public string ConnectionId {get; protected set;}
+		public string ConnectionId { get; protected set; }
 
 		/// <summary>Client-generated key used for reconnection identification.</summary>
 		public string ConnectionKey { get; set; }
@@ -64,7 +64,7 @@ namespace Impunity.Connection
 
 			ConnectionKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Substring(0, 8);
 			ConnectionId = "unconnected";
-			
+
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 		}
 
@@ -169,33 +169,33 @@ namespace Impunity.Connection
 		// ------- Server message handling
 
 		protected void OnServerMessage(ServerActionBase action)
-        {
+		{
 			CompletedActions.Enqueue(action);
 		}
 
 		/// <summary>Callback invoked on the main thread when a broadcast message is received from another client.</summary>
-		public BroadcastMessageHandler? OnBroadcastMessage {get; set;}
-		
+		public BroadcastMessageHandler? OnBroadcastMessage { get; set; }
+
 
 		// Server message handlers
 
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
-        {
+		{
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData);
 		}
 
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
-        {
+		{
 			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated);
 		}
 
 		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
-        {
+		{
 			EntityManager.HandleEntityUpdate(entityId, updateData, seq);
 		}
 
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
-        {
+		{
 			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
 		}
 
@@ -210,12 +210,12 @@ namespace Impunity.Connection
 		}
 
 		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
-        {
+		{
 			EntityManager.HandleEntityDelete(entityId, deleteData);
 		}
 
 		public void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy)
-        {
+		{
 			try
 			{
 				OnBroadcastMessage?.Invoke(messageType, messageBody, sentBy);
@@ -227,15 +227,15 @@ namespace Impunity.Connection
 		}
 
 		public void HandleNamedLockUnlocked(string lockName)
-        {
-			if(LockWaits.TryGetValue(lockName, out var onComplete))
+		{
+			if (LockWaits.TryGetValue(lockName, out var onComplete))
 			{
 				LockWaits.Remove(lockName);
 				try
 				{
 					onComplete.Invoke(null, LockWaitResult.Unlocked);
 				}
-				catch(Exception e)
+				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in WaitForLock callback", e);
 				}
@@ -322,13 +322,13 @@ namespace Impunity.Connection
 
 		/// <summary>Attempts to acquire a named lock without waiting. Returns true if acquired.</summary>
 		public void TryToLock(string lockName, ImpunityCallback<bool>? onComplete)
-        {
+		{
 			DoAction(new LockNamedLockAction(lockName, false, onComplete));
-        }
+		}
 
 		/// <summary>Attempts to acquire a named lock, waiting for it to become available if currently held.</summary>
 		public void WaitForLock(string lockName, ImpunityCallback<LockWaitResult>? onComplete)
-        {
+		{
 			DoAction(new LockNamedLockAction(lockName, true, (err, locked) =>
 			{
 				if (err != null)
@@ -343,9 +343,9 @@ namespace Impunity.Connection
 				{
 					LockWaits[lockName] = onComplete;
 				}
-				
+
 			}));
-        }
+		}
 
 		/// <summary>Releases a named lock.</summary>
 		public void Unlock(string lockName, ImpunityCallback<bool>? onComplete)
@@ -423,9 +423,9 @@ namespace Impunity.Connection
 
 		/// <summary>Sends a typed broadcast message to all connected clients.</summary>
 		public void SendBroadcastMessage(int messageType, BsonValue msgBody)
-        {
+		{
 			DoAction(new SendBroadcastMessageAction(messageType, msgBody));
-        }
+		}
 
 	}
 

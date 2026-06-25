@@ -9,7 +9,7 @@ namespace Impunity.GameState
 
 	/// <summary>Server-side interface representing a connection to a client. Implemented by network proxy and local proxy.</summary>
 	public interface IServerSideConnectionProxy
-    {
+	{
 		/// <summary>Unique identifier for this connection.</summary>
 		string ConnectionId { get; }
 		/// <summary>Client-provided key for reconnection.</summary>
@@ -67,7 +67,7 @@ namespace Impunity.GameState
 	}
 
 	// Tells the live game a connection opened
-    public class ConnectionOpenedAction : LocalGameStateAction
+	public class ConnectionOpenedAction : LocalGameStateAction
 	{
 		protected override void DoAction(GameStateServer game)
 		{
@@ -125,9 +125,9 @@ namespace Impunity.GameState
 
 			GameId = gameId;
 			GamePasswordHash = gamePassword != null ? ImpunityUtil.HashPassword(gamePassword) : null;
-			
+
 			Listeners = new ConcurrentDictionary<int, IGameStateListener>();
-			
+
 			DB = gameDatabase;
 			Live = new GameStateLive(this);
 
@@ -160,7 +160,7 @@ namespace Impunity.GameState
 			var db = GameStateDB.Open(path, options);
 			if (db == null)
 			{
-				throw new Exception("Unable to open game "+ gameId);
+				throw new Exception("Unable to open game " + gameId);
 			}
 			return new GameStateServer(gameId, gamePassword, db, options);
 		}
@@ -171,7 +171,7 @@ namespace Impunity.GameState
 			var db = GameStateDB.Create(path, summary, options);
 			if (db == null)
 			{
-				throw new Exception("Unable to create game "+ gameId);
+				throw new Exception("Unable to create game " + gameId);
 			}
 			return new GameStateServer(gameId, gamePassword, db, options);
 		}
@@ -182,7 +182,7 @@ namespace Impunity.GameState
 			var db = GameStateDB.OpenOrCreate(path, summary, options);
 			if (db == null)
 			{
-				throw new Exception("Unable to open or create game "+ gameId);
+				throw new Exception("Unable to open or create game " + gameId);
 			}
 			return new GameStateServer(gameId, gamePassword, db, options);
 		}
@@ -238,7 +238,7 @@ namespace Impunity.GameState
 
 			EstablishConnectResult result = new EstablishConnectResult();
 			result.ConnectionId = proxy.ConnectionId;
-			
+
 			return result;
 		}
 
@@ -279,7 +279,7 @@ namespace Impunity.GameState
 			Metadata.DataFormatChecksum = format.DataChecksum;
 			Metadata.Collections = format.Collections;
 			Metadata.EntityTypes = format.EntityTypes;
-			
+
 			UpdateDBFormatAction dbUpdateAction = new UpdateDBFormatAction(format.Collections, Metadata);
 			QueueAction(dbUpdateAction);
 
@@ -303,9 +303,9 @@ namespace Impunity.GameState
 
 		// Called from various threads
 		public BsonDocument? GetGameSummary()
-        {
+		{
 			return Summary;
-        }
+		}
 
 		// Called on Live thread
 		public void SetGameSummary(BsonDocument summary)
@@ -419,7 +419,7 @@ namespace Impunity.GameState
 					{
 						action.InvokeOnCompleteCallback();
 					}
-					catch(Exception e)
+					catch (Exception e)
 					{
 						ImpunityLogger.LogError("Exception in game action onCompleteHandler", e);
 					}
@@ -526,10 +526,10 @@ namespace Impunity.GameState
 
 		/// <summary>Routes an action to the appropriate worker thread (DB or Live) based on <see cref="GameStateActionBase.IsDBOperation"/>. Immediate actions run inline.</summary>
 		public void QueueAction(GameStateActionBase action)
-        {
+		{
 			if (action.IsImmediate())
 			{
-				
+
 				action.Run(this);
 				SendActionResults(action);
 			}
@@ -551,7 +551,7 @@ namespace Impunity.GameState
 
 		// Called by connection threads
 		internal void ConnectionOpened(IServerSideConnectionProxy connectionProxy)
-        {
+		{
 			ConnectionOpenedAction action = new ConnectionOpenedAction();
 			action.Origin = connectionProxy;
 			action.ResultsExpected = false;

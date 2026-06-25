@@ -137,7 +137,7 @@ namespace Impunity
 	/// <summary>A fatal server exception that should terminate the connection.</summary>
 	public class ImpunityServerFatalException : ImpunityServerException
 	{
-		public ImpunityServerFatalException(ImpunityErrorCode errorCode, string message) : base(errorCode, message) {}
+		public ImpunityServerFatalException(ImpunityErrorCode errorCode, string message) : base(errorCode, message) { }
 	}
 
 
@@ -149,7 +149,8 @@ namespace Impunity
 
 		/// <summary>The error code identifying the type of failure.</summary>
 		[BsonIgnore]
-		public ImpunityErrorCode ErrorCode {
+		public ImpunityErrorCode ErrorCode
+		{
 			get { return (ImpunityErrorCode)ErrorInt; }
 			set { ErrorInt = (int)value; }
 		}
@@ -162,12 +163,12 @@ namespace Impunity
 		[BsonField("stk")]
 		public string? Stacktrace { get; private set; }
 
-		public ImpunityErrorResponse() {}
+		public ImpunityErrorResponse() { }
 
 		/// <summary>Creates an error response from an exception. Uses <see cref="ImpunityErrorCode.InternalServerError"/> unless the exception is an <see cref="ImpunityServerException"/>.</summary>
 		public ImpunityErrorResponse(Exception e)
 		{
-			if(e is ImpunityServerException ise)
+			if (e is ImpunityServerException ise)
 			{
 				ErrorCode = ise.ErrorCode;
 			}
@@ -219,23 +220,23 @@ namespace Impunity
 		public ImpuntyErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
 		{
 			ErrorId = err.ErrorCode;
-			ServerStacktrace = err.Stacktrace;	
+			ServerStacktrace = err.Stacktrace;
 		}
 
 		public override string ToString()
-        {
+		{
 			return "Error " + ErrorId + ": " + Message + "\n" + ServerStacktrace;
-        }
+		}
 	}
 
 	/// <summary>Internal listener for game state changes, used by the network layer to broadcast updates.</summary>
 	internal interface IGameStateListener
-    {
+	{
 		/// <summary>Called when the game's metadata (schema, version) changes.</summary>
 		void OnGameMetadataChanged(GameStateServer game);
 		/// <summary>Called when the game's summary (player count, etc.) changes.</summary>
 		void OnGameSummaryChanged(GameStateServer game);
-    }
+	}
 
 	/// <summary>Defines the schema of a game's state: its version, collections, and entity types. Used at connection time to verify client/server compatibility.</summary>
 	public class GameStateFormat
@@ -391,7 +392,7 @@ namespace Impunity
 
 		public GameStateEntityPropertyDef()
 		{
-			
+
 		}
 
 		public GameStateEntityPropertyDef(int index, string name, byte fieldType, byte propValueType, string? persistedAs, bool isTemporal)
@@ -407,7 +408,7 @@ namespace Impunity
 
 	/// <summary>Schema definition for a distributed entity type, including its properties.</summary>
 	public class GameStateEntityTypeDef
-    {
+	{
 		[BsonField("id")]
 		public int Index;
 
@@ -429,16 +430,16 @@ namespace Impunity
 		public bool PasswordProtected { get; set; }
 		public int CurrentPlayers { get; set; }
 		public int MaxPlayers { get; set; }
-		public string? GameSummary {get; set;} = null!;
-		public int GameVersion {get; set;}
-		public string DataFormatChecksum { get; set;} = null!;
+		public string? GameSummary { get; set; } = null!;
+		public int GameVersion { get; set; }
+		public string DataFormatChecksum { get; set; } = null!;
 	}
 
 	/// <summary>Top-level response from the standalone server HTTP discovery API, listing all available worlds.</summary>
 	public class StandaloneServerWorldsInfo
 	{
 		public string ImpunityVersion { get; set; } = null!;
-		public string GameType {get; set;} = null!;
+		public string GameType { get; set; } = null!;
 		public int? TCPPort { get; set; }
 		public List<StandaloneServerWorldInfo> Worlds { get; set; } = null!;
 	}

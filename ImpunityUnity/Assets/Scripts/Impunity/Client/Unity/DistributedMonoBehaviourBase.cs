@@ -102,7 +102,7 @@ namespace Impunity.Unity
 		/// <summary>Initializes this entity's distributed field instances. The base implementation does nothing; the
 		/// source generator overrides it to construct each field and wire it to this entity. Invoked from the base
 		/// constructor.</summary>
-		public virtual void InitializeDistributedFields() {}
+		public virtual void InitializeDistributedFields() { }
 
 		/// <summary>Fires a one-shot event on this entity. The server relays it to every client subscribed to the
 		/// entity's channel, including this one. Events carry no entity state and are not persisted.</summary>
@@ -150,7 +150,7 @@ namespace Impunity.Unity
 				{
 					onComplete?.Invoke(err, LockWaitResult.Error);
 				}
-				else if(lockResult)
+				else if (lockResult)
 				{
 					onComplete?.Invoke(err, LockWaitResult.Locked);
 				}
@@ -205,13 +205,13 @@ namespace Impunity.Unity
 		}
 		/// <summary>Raised by <see cref="OnUnlocked"/> when the entity's lock is released.</summary>
 		public event Action? OnUnlockedEvent;
-		
+
 		/// <summary>Called once the entity has been created locally and its initial property values from the server
 		/// have been applied — i.e. the entity is ready to use. For a channel received with existing members, this fires
 		/// on the channel before its child objects are created.</summary>
 		public virtual void OnFullyInitialized()
 		{
-			OnFullyInitializedEvent?.Invoke();	
+			OnFullyInitializedEvent?.Invoke();
 		}
 		/// <summary>Raised by <see cref="OnFullyInitialized"/> when the entity is fully initialized.</summary>
 		public event Action? OnFullyInitializedEvent;
@@ -224,7 +224,7 @@ namespace Impunity.Unity
 			OnEventTriggeredEvent?.Invoke(eventType, eventData);
 		}
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
-		public event Action<int,BsonValue>? OnEventTriggeredEvent;
+		public event Action<int, BsonValue>? OnEventTriggeredEvent;
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
 		/// <param name="deleteData">Optional BSON payload supplied to <see cref="Delete"/> by the deleter, or null.</param>
@@ -300,13 +300,13 @@ namespace Impunity.Unity
 			OnObjectAddedEvent?.Invoke(entity, newlyCreated);
 		}
 		/// <summary>Raised by <see cref="OnObjectAdded"/> when an object is added to this channel.</summary>
-		public event Action<IDistributedObject,bool>? OnObjectAddedEvent;
+		public event Action<IDistributedObject, bool>? OnObjectAddedEvent;
 
 		/// <summary>Called when an object is removed from this channel. The base implementation removes it from
 		/// <see cref="DistributedObjects"/>.</summary>
 		/// <param name="entity">The object removed from the channel.</param>
 		public virtual void OnObjectRemoved(IDistributedObject entity)
-        {
+		{
 			DistributedObjects.Remove(entity.DistributedEntityId);
 			OnObjectRemovedEvent?.Invoke(entity);
 		}

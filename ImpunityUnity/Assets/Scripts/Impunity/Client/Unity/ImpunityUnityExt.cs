@@ -256,7 +256,7 @@ namespace Impunity.Unity
 	{
 
 		public static ImpunityYield<BsonValue> InsertDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
-        {
+		{
 			ImpunityYield<BsonValue> action = new ImpunityYield<BsonValue>();
 			collection.InsertDocument(doc, action.OnComplete);
 			return action;
@@ -316,7 +316,7 @@ namespace Impunity.Unity
 		}
 
 		public static ImpunityYield<T> SubscribeToChannelYield<T>(this ClientEntityManager manager, string channelName, T createIfNeeded) where T : class, IDistributedChannel
-        {
+		{
 			var t = new ImpunityYield<T>();
 			manager.SubscribeToChannel<T>(channelName, createIfNeeded, t.OnComplete);
 			return t;

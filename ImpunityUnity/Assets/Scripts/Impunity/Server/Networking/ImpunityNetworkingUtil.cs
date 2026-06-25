@@ -90,7 +90,7 @@ namespace Impunity.Networking
 		{
 			// Skip 4 bytes for length prefix
 			writer.Position = 4;
-			
+
 			writer.Write(messageType);
 			writer.Write(messageId);
 			writer.Write(flags);
@@ -105,9 +105,9 @@ namespace Impunity.Networking
 			int totalLength = writer.Position;
 
 			if (totalLength >= ImpunityConstants.MaxMessageSize)
-            {
+			{
 				throw new Exception("Tried to send a message that's too large! Length: " + totalLength);
-            }
+			}
 
 			// Go back and write total length at start of buffer
 			writer.Position = 0;

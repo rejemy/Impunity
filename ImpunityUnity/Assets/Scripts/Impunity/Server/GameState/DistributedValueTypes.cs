@@ -578,7 +578,7 @@ namespace Impunity.GameState
 		public void FromBsonValue(BsonValue value) { Value = value.AsString; }
 	}
 
-	
+
 
 	public struct DBlob : IStandardDistributableValueType, IEquatable<DBlob>
 	{

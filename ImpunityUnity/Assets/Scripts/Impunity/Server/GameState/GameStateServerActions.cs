@@ -69,7 +69,7 @@ namespace Impunity.GameState
 
 				case ServerActionType.BROADCAST_MESSAGE:
 					return typeof(BroadcastMessageAction);
-				
+
 				case ServerActionType.NAMED_LOCK_UNLOCKED_MESSAGE:
 					return typeof(NamedLockUnlockedMessageAction);
 			}
@@ -78,7 +78,7 @@ namespace Impunity.GameState
 		}
 	}
 
-	
+
 
 	/// <summary>Server push: a channel was created or the client subscribed to it. Includes the channel entity and all child objects.</summary>
 	public class ChannelCreateMessageAction : ServerActionBase
@@ -325,7 +325,7 @@ namespace Impunity.GameState
 		public int EntityType;
 		public byte InstanceFlags;
 		public List<LiveEntityPersistedPropertyData>? Properties;
-		
+
 
 
 		public override ushort GetActionType() { throw new Exception("Not supported"); }
@@ -429,7 +429,7 @@ namespace Impunity.GameState
 
 		public LiveChannelData(string channelName) : base(channelName)
 		{
-			
+
 		}
 	}
 

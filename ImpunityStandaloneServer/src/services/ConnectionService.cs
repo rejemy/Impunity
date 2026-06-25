@@ -11,10 +11,13 @@ public class ConnectionService
 	private readonly WorldService Worlds;
 	public readonly ImpunityServer NetworkServer;
 
-	public int Port { get
+	public int Port
 	{
-		return NetworkServer.Options.ServerPort;
-	}}
+		get
+		{
+			return NetworkServer.Options.ServerPort;
+		}
+	}
 
 	public ConnectionService(WorldService worldService, ImpunityOptions options)
 	{

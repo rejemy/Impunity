@@ -14,7 +14,7 @@ namespace Dreamwing.UI
 		public static bool GetRelativeMousePositionForDrag(PointerEventData eventData, ref Vector2 position)
 		{
 #if UNITY_EDITOR
-            position = eventData.position;
+			position = eventData.position;
 #else
 			int pressDisplayIndex = eventData.pointerPressRaycast.displayIndex;
 			var relativePosition = RelativeMouseAtScaled(eventData.position);

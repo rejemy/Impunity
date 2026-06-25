@@ -17,7 +17,7 @@ namespace Impunity.Connection
 
 		private static int NextLocalConnectionId = 1;
 
-        private GameStateServer State;
+		private GameStateServer State;
 
 
 		public LocalGameConnection(GameStateServer gameState, GameStateFormat format, ClientEntityManager? em = null)
@@ -36,7 +36,7 @@ namespace Impunity.Connection
 
 			int id = NextLocalConnectionId++;
 			ConnectionId = "local_" + id;
-			
+
 			EstablishConnection(null, null, LocalFormat, onComplete);
 		}
 
@@ -44,7 +44,7 @@ namespace Impunity.Connection
 		public void OnGameMetadataChanged(GameStateServer game)
 		{
 			// Doesn't need to do anything
-        }
+		}
 
 		// Called on Live thread
 		public void OnGameSummaryChanged(GameStateServer game)
@@ -60,7 +60,7 @@ namespace Impunity.Connection
 
 		// Called on background thread
 		public void ReportActionResult(GameStateActionBase action)
-        {
+		{
 			if (!action.ResultsExpected)
 			{
 				return;
@@ -76,18 +76,18 @@ namespace Impunity.Connection
 
 		// Called on background thread, this is a message to us, the local client
 		public void SendMessageToClient(ServerActionBase message)
-        {
+		{
 			OnServerMessage(message);
 		}
 
 		public override void DoAction(GameStateActionBase action)
-        {
+		{
 			action.Origin = this;
 			action.ResultsExpected = action.HasCallback();
 			action.SentAt = DateTimeOffset.UtcNow;
-			
+
 			State.QueueAction(action);
-        }
+		}
 
 		public void CloseConnectionRequest()
 		{

@@ -173,7 +173,7 @@ namespace Impunity.Connection
 		/// <param name="eventData">The BSON payload supplied by the sender.</param>
 		void OnEventTriggered(int eventType, BsonValue eventData);
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
-		event Action<int,BsonValue>? OnEventTriggeredEvent;
+		event Action<int, BsonValue>? OnEventTriggeredEvent;
 
 		// When an object is specifically deleted
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
@@ -247,7 +247,7 @@ namespace Impunity.Connection
 		/// already existed and is part of the initial snapshot delivered on subscribe.</param>
 		void OnObjectAdded(IDistributedObject entity, bool newlyCreated);
 		/// <summary>Raised by <see cref="OnObjectAdded"/> when an object is added to this channel.</summary>
-		event Action<IDistributedObject,bool>? OnObjectAddedEvent;
+		event Action<IDistributedObject, bool>? OnObjectAddedEvent;
 
 		/// <summary>Called when an object is removed from this channel. The base implementation removes it from
 		/// <see cref="DistributedObjects"/>.</summary>
@@ -326,7 +326,7 @@ namespace Impunity.Connection
 		/// <param name="fieldBitmask">Bit(s) of the changed field(s); each field's bit is <c>(1UL &lt;&lt; (fieldId - 1))</c>.</param>
 		/// <param name="guaranteed">True to require reliable delivery of this update; ORed with any existing guarantee for the pending batch.</param>
 		public void SetDirty(ulong fieldBitmask, bool guaranteed)
-        {
+		{
 			DirtyBits |= fieldBitmask;
 			DirtyGuaranteed |= guaranteed;
 			Manager?.SetDirty(this);
@@ -335,7 +335,7 @@ namespace Impunity.Connection
 		/// <summary>Clears all pending dirty bits and the guaranteed flag. Called by the manager after the entity's
 		/// changes have been serialized; not normally called by application code.</summary>
 		public void ClearDirty()
-        {
+		{
 			DirtyBits = 0ul;
 			DirtyGuaranteed = false;
 		}
@@ -343,7 +343,7 @@ namespace Impunity.Connection
 		/// <summary>Initializes this entity's distributed field instances. The base implementation does nothing; the
 		/// source generator overrides it to construct each field and wire it to this entity. Invoked from the base
 		/// constructor.</summary>
-		public virtual void InitializeDistributedFields() {}
+		public virtual void InitializeDistributedFields() { }
 
 		/// <summary>Fires a one-shot event on this entity. The server relays it to every client subscribed to the
 		/// entity's channel, including this one. Events carry no entity state and are not persisted.</summary>
@@ -391,7 +391,7 @@ namespace Impunity.Connection
 				{
 					onComplete?.Invoke(err, LockWaitResult.Error);
 				}
-				else if(lockResult)
+				else if (lockResult)
 				{
 					onComplete?.Invoke(err, LockWaitResult.Locked);
 				}
@@ -434,7 +434,7 @@ namespace Impunity.Connection
 			{
 				ImpunityLogger.LogError("Exception in OnUnlockedEvent:", ex);
 			}
-			
+
 			try
 			{
 				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
@@ -467,7 +467,7 @@ namespace Impunity.Connection
 			OnEventTriggeredEvent?.Invoke(eventType, eventData);
 		}
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
-		public event Action<int,BsonValue>? OnEventTriggeredEvent;
+		public event Action<int, BsonValue>? OnEventTriggeredEvent;
 
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
@@ -539,13 +539,13 @@ namespace Impunity.Connection
 			OnObjectAddedEvent?.Invoke(entity, newlyCreated);
 		}
 		/// <summary>Raised by <see cref="OnObjectAdded"/> when an object is added to this channel.</summary>
-		public event Action<IDistributedObject,bool>? OnObjectAddedEvent;
+		public event Action<IDistributedObject, bool>? OnObjectAddedEvent;
 
 		/// <summary>Called when an object is removed from this channel. The base implementation removes it from
 		/// <see cref="DistributedObjects"/>.</summary>
 		/// <param name="entity">The object removed from the channel.</param>
 		public virtual void OnObjectRemoved(IDistributedObject entity)
-        {
+		{
 			DistributedObjects.Remove(entity.DistributedEntityId);
 			OnObjectRemovedEvent?.Invoke(entity);
 		}

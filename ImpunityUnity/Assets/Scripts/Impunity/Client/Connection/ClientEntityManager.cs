@@ -159,7 +159,7 @@ namespace Impunity.Connection
 		/// Assign <see cref="Connection"/> and call <see cref="RegisterEntityTypes"/> before use; a connection normally
 		/// owns and wires up its own manager.</summary>
 		public ClientEntityManager()
-        {
+		{
 			SubscribedChannels = new Dictionary<string, IDistributedChannel>();
 			DistributedObjects = new Dictionary<uint, IDistributedEntity>();
 			DirtyObjects = new HashSet<IDistributedEntity>();
@@ -185,12 +185,12 @@ namespace Impunity.Connection
 		/// <returns>The wire format definitions to send to the server during the handshake, or null when
 		/// <paramref name="entityTypes"/> is null or empty.</returns>
 		public GameStateEntityTypeDef[]? RegisterEntityTypes(Type[] entityTypes)
-        {
+		{
 			if (entityTypes == null || entityTypes.Length == 0)
-            {
+			{
 				DistributedTypes = new DistributedTypeInfo[1];
 				return null;
-            }
+			}
 
 			List<DistributedTypeInfo> internalTypeInfoList = new List<DistributedTypeInfo>();
 
@@ -198,8 +198,8 @@ namespace Impunity.Connection
 
 
 			int i = 0;
-			foreach(Type entityType in entityTypes)
-            {
+			foreach (Type entityType in entityTypes)
+			{
 				GameStateEntityTypeDef entityData = RegisterEntityType(entityType, internalTypeInfoList);
 				convertedEntityTypes[i++] = entityData;
 			}
@@ -214,19 +214,19 @@ namespace Impunity.Connection
 			int maxEntityIndex = convertedEntityTypes[convertedEntityTypes.Length - 1].Index;
 
 			DistributedTypes = new DistributedTypeInfo[maxEntityIndex + 1];
-			foreach(DistributedTypeInfo dtinfo in internalTypeInfoList)
-            {
+			foreach (DistributedTypeInfo dtinfo in internalTypeInfoList)
+			{
 				if (DistributedTypes[dtinfo.DistributedTypeId] != null)
-                {
+				{
 					throw new Exception("More than one type using distributed id " + dtinfo.DistributedTypeId);
-                }
+				}
 
 				DistributedTypes[dtinfo.DistributedTypeId] = dtinfo;
 			}
 
 
 			return convertedEntityTypes;
-        }
+		}
 
 
 		/// <summary>Creates a distributed object in a channel. Serializes the object's initial properties and sends them
@@ -246,13 +246,13 @@ namespace Impunity.Connection
 				throw new Exception("ClientEntityManager has no connection");
 			}
 
-			if(distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
+			if (distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
 			{
 				throw new Exception("Object name cannot contain forward slash");
 			}
 
 			int entityTypeId = distObj.DistributedEntityType;
-	
+
 			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
 
 			byte instanceFlags = 0;
@@ -306,7 +306,7 @@ namespace Impunity.Connection
 		{
 			ObjectCreateData data = new ObjectCreateData();
 
-			if(distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
+			if (distObj.UniqueName != null && distObj.UniqueName.Contains("/"))
 			{
 				throw new Exception("Object name cannot contain forward slash");
 			}
@@ -409,7 +409,7 @@ namespace Impunity.Connection
 			{
 				objectCreateList = new List<ObjectCreateData>();
 
-				foreach(IDistributedObject distObj in channelObjects)
+				foreach (IDistributedObject distObj in channelObjects)
 				{
 					objectCreateList.Add(MakeObjectCreateData(distObj, channel));
 				}
@@ -445,10 +445,10 @@ namespace Impunity.Connection
 			}
 
 			if (SubscribedChannels.ContainsKey(channelName))
-            {
+			{
 				onComplete(null, (T)SubscribedChannels[channelName]);
 				return;
-            }
+			}
 
 			bool createIfMising = false;
 			int entityTypeId = 0;
@@ -505,14 +505,14 @@ namespace Impunity.Connection
 
 				IDistributedChannel newChannel = (IDistributedChannel)DistributedObjects.GetValueOrDefault(channelId);
 				if (newChannel == null)
-                {
+				{
 					// We didn't get the channel create before the action returned, shouldn't happen
 					throw new Exception("Didn't get channel create message for subscribed channel " + channelName + " id: " + channelId);
-                }
+				}
 
 				onComplete?.Invoke(null, (T)newChannel);
 			});
-        }
+		}
 
 		/// <summary>
 		/// Unsubscribes from a channel and removes it (and all its objects) from the manager.
@@ -622,9 +622,9 @@ namespace Impunity.Connection
 		// ---------------
 
 		private GameStateEntityTypeDef RegisterEntityType(Type entityType, List<DistributedTypeInfo> internalTypeInfoList)
-        {
+		{
 			if (!entityType.IsClass)
-            {
+			{
 				throw new Exception("Tried to register distributed entity " + entityType.Name + " that's not a class type");
 			}
 
@@ -638,10 +638,10 @@ namespace Impunity.Connection
 			}
 
 			entityData.Index = distAttr.EntityId;
-			if(entityData.Index <= 0)
-            {
+			if (entityData.Index <= 0)
+			{
 				throw new Exception("Entity ID must be positive indeger");
-            }
+			}
 
 			entityData.PersistedAs = distAttr.PersistAs?.Trim();
 			if (entityData.PersistedAs != null)
@@ -732,7 +732,7 @@ namespace Impunity.Connection
 					hasPersistedField = true;
 				}
 
-				MethodInfo? writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_"+ fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				MethodInfo? writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (writeMethod == null)
 				{
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
@@ -780,8 +780,8 @@ namespace Impunity.Connection
 				distributedFields.Add(dfield);
 			}
 
-			if(distributedFields.Count == 0)
-            {
+			if (distributedFields.Count == 0)
+			{
 				internalTypeInfoList.Add(internalTypeInfo);
 				return entityData;
 			}
@@ -795,7 +795,7 @@ namespace Impunity.Connection
 
 			int p = 0;
 			foreach (DistributedTypeFieldInfo dfield in distributedFields)
-            {
+			{
 				GameStateEntityPropertyDef propDef = new GameStateEntityPropertyDef(
 					dfield.FieldId,
 					dfield.FieldName,
@@ -867,17 +867,17 @@ namespace Impunity.Connection
 		}
 
 		private DistributedTypeInfo GetDistributedTypeInfo(int typeId)
-        {
+		{
 			if (typeId <= 0 || typeId >= DistributedTypes.Length)
-            {
+			{
 				throw new Exception("Invalid distributed type id: " + typeId);
-            }
+			}
 
 			DistributedTypeInfo typeInfo = DistributedTypes[typeId];
 			if (typeInfo == null)
-            {
+			{
 				throw new Exception("Unknown distributed type id: " + typeId);
-            }
+			}
 
 			return typeInfo;
 		}
@@ -909,24 +909,24 @@ namespace Impunity.Connection
 
 			IDistributedChannel channel;
 			if (channelType != 0)
-            {
+			{
 				DistributedTypeInfo typeInfo = GetDistributedTypeInfo(channelType);
 				if (typeInfo.IsChannel == false)
-                {
+				{
 					throw new Exception("Tried to create channel of type " + channelType + " but " + typeInfo.ObjectType.Name + " doesn't implement IDistributedChannel");
-                }
+				}
 
 				if (typeInfo.Factory != null)
-                {
+				{
 					channel = (IDistributedChannel)typeInfo.Factory();
 				}
 				else
-                {
+				{
 					channel = (IDistributedChannel)Activator.CreateInstance(typeInfo.ObjectType);
 				}
 			}
 			else
-            {
+			{
 				channel = new GenericDistributedChannel();
 			}
 
@@ -945,7 +945,7 @@ namespace Impunity.Connection
 			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
-			}			
+			}
 		}
 
 		/// <summary>Handles an object-create push from the server: instantiates the object, registers it, fires
@@ -1032,7 +1032,7 @@ namespace Impunity.Connection
 			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
-			}			
+			}
 		}
 
 		private void RegisterEntity(IDistributedEntity entity, uint entityId)
@@ -1069,23 +1069,23 @@ namespace Impunity.Connection
 			}
 		}
 
-			/// <summary>Handles an entity property-update push from the server, applying the delta to the entity's
-			/// distributed fields. Per-field sequence numbers discard stale out-of-order updates. Updates for entities
-			/// suppressed by an immediate unsubscribe are dropped; an update for an unknown entity is logged and ignored.
-			/// Invoked by the connection's server-message dispatch on the main thread; not called by application code.</summary>
-			/// <param name="entityId">The entity id the update applies to.</param>
-			/// <param name="updateData">The serialized delta of changed property values.</param>
-			/// <param name="seq">The server's outgoing sequence number for this update, used for stale-update detection.</param>
-			public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
+		/// <summary>Handles an entity property-update push from the server, applying the delta to the entity's
+		/// distributed fields. Per-field sequence numbers discard stale out-of-order updates. Updates for entities
+		/// suppressed by an immediate unsubscribe are dropped; an update for an unknown entity is logged and ignored.
+		/// Invoked by the connection's server-message dispatch on the main thread; not called by application code.</summary>
+		/// <param name="entityId">The entity id the update applies to.</param>
+		/// <param name="updateData">The serialized delta of changed property values.</param>
+		/// <param name="seq">The server's outgoing sequence number for this update, used for stale-update detection.</param>
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
 			if (entity == null)
-            {
+			{
 				ImpunityLogger.LogWarning("Got property update for entity we don't know about: " + entityId);
 				return;
-            }
+			}
 
 			SetPropertyBytes(entity, updateData, false, seq);
 		}
@@ -1139,7 +1139,7 @@ namespace Impunity.Connection
 			{
 				entity.OnLocked();
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnLocked: ", e);
 			}
@@ -1166,7 +1166,7 @@ namespace Impunity.Connection
 			{
 				entity.OnUnlocked();
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Exception in OnUnlocked: ", e);
 			}
@@ -1194,7 +1194,7 @@ namespace Impunity.Connection
 
 			if (entity is IDistributedChannel channel)
 			{
-				foreach(var member in channel.DistributedObjects.Values)
+				foreach (var member in channel.DistributedObjects.Values)
 				{
 					UnregisterEntity(member);
 
@@ -1214,7 +1214,7 @@ namespace Impunity.Connection
 				{
 					obj.Channel?.OnObjectRemoved(obj);
 				}
-				catch(Exception e)
+				catch (Exception e)
 				{
 					ImpunityLogger.LogError("Exception in channel's OnObjectRemoved: ", e);
 				}
@@ -1243,18 +1243,18 @@ namespace Impunity.Connection
 		/// Called by an entity's own <see cref="IDistributedEntity.SetDirty"/>; not normally called by application code directly.</summary>
 		/// <param name="entity">The entity with pending changes to flush on the next update.</param>
 		public void SetDirty(IDistributedEntity entity)
-        {
+		{
 			DirtyObjects.Add(entity);
 
 		}
 
 		/// <summary>Serializes and sends all dirty entity property changes to the server. Called each frame by <see cref="BaseGameConnection.Update"/>.</summary>
 		public void SendUpdates()
-        {
+		{
 			PropertyEncodingWriter.BaseStream.Position = 0;
-			
+
 			foreach (IDistributedEntity entity in DirtyObjects)
-            {
+			{
 				SendEntityUpdates(entity);
 			}
 
@@ -1273,14 +1273,14 @@ namespace Impunity.Connection
 		/// <returns>An <see cref="ArraySegment{T}"/> over the shared buffer holding the encoded property bytes, or a
 		/// default/null segment when there is nothing to send.</returns>
 		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, out bool guaranteed, bool allProperties = false)
-        {
+		{
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 
 			guaranteed = entity.DirtyGuaranteed;
 
 			ulong dirtyBits = allProperties ? ulong.MaxValue : entity.DirtyBits;
 			if (dirtyBits == 0)
-            {
+			{
 				return null;
 			}
 
@@ -1314,11 +1314,11 @@ namespace Impunity.Connection
 		/// <param name="initialRead">True to read full initial values; false to apply a delta update.</param>
 		/// <param name="seq">The update's sequence number for stale-update detection on delta reads; ignored (use 0) for initial reads.</param>
 		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead, ushort seq = 0)
-        {
+		{
 			if (propertyBytes == null || propertyBytes.Count == 0)
-            {
+			{
 				return;
-            }
+			}
 
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 			DistributedTypeFieldInfo[] fields = typeInfo.DistributedFields;
@@ -1342,7 +1342,7 @@ namespace Impunity.Connection
 
 				DistributedTypeFieldInfo fieldInfo = fields[propId];
 				if (fieldInfo == null)
-                {
+				{
 					throw new Exception("Invalid property id: " + propId);
 				}
 
@@ -1367,7 +1367,7 @@ namespace Impunity.Connection
 		}
 
 		private void SendEntityUpdates(IDistributedEntity entity)
-        {
+		{
 			if (Connection == null)
 			{
 				return;
@@ -1433,7 +1433,7 @@ namespace Impunity.Connection
 
 				if (fieldInfo.PersistedAs == null) continue;
 				BsonValue fieldValue = doc[fieldInfo.PersistedAs];
-				if(fieldValue == null || fieldValue.IsNull) continue;
+				if (fieldValue == null || fieldValue.IsNull) continue;
 
 				object[] parameters = new object[] { fieldValue };
 				fieldInfo.SetFromBsonMethod.Invoke(entity, parameters);

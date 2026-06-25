@@ -43,11 +43,11 @@ LogLevel aspLogLevel = ImpunityAspLogger.GetAspLogLevel(logLevel);
 using var loggerFactory = LoggerFactory.Create(loggingBuilder =>
 {
 	loggingBuilder.SetMinimumLevel(aspLogLevel);
-    loggingBuilder.AddConsole(options =>
+	loggingBuilder.AddConsole(options =>
 	{
 		options.FormatterName = "consoleformat";
 	});
-	loggingBuilder.AddConsoleFormatter<ImpunityConsoleFormatter,ImpunityConsoleFormatterOptions>(options => {});
+	loggingBuilder.AddConsoleFormatter<ImpunityConsoleFormatter, ImpunityConsoleFormatterOptions>(options => { });
 });
 
 ILogger serverLogger = loggerFactory.CreateLogger("ImpunityServer");
@@ -69,7 +69,7 @@ builder.Logging.AddConsole(options =>
 {
 	options.FormatterName = "consoleformat";
 });
-builder.Logging.AddConsoleFormatter<ImpunityConsoleFormatter,ImpunityConsoleFormatterOptions>(options => {});
+builder.Logging.AddConsoleFormatter<ImpunityConsoleFormatter, ImpunityConsoleFormatterOptions>(options => { });
 builder.Logging.AddFilter((provider, category, logLevel) =>
 {
 	if (category == null)
@@ -89,9 +89,9 @@ builder.Logging.AddFilter((provider, category, logLevel) =>
 
 ImpunityOptions impOptions = new()
 {
-    DBPassword = null,
-    RemoteUpgradeAllowed = true,
-    ServerPort = config.tcp_port,
+	DBPassword = null,
+	RemoteUpgradeAllowed = true,
+	ServerPort = config.tcp_port,
 	GameTypeCode = config.game_type_code
 };
 
@@ -110,9 +110,9 @@ builder.Services.AddSingleton(new InfoService(impOptions));
 builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();
 
 builder.Services.AddControllers().AddJsonOptions(options =>
-    {
-        options.JsonSerializerOptions.WriteIndented = true;
-    });
+	{
+		options.JsonSerializerOptions.WriteIndented = true;
+	});
 
 builder.Environment.ApplicationName = "ImpunityStandaloneServer";
 
@@ -123,8 +123,8 @@ if (config.server_hostname != null)
 		options.AddDefaultPolicy(
 			policy =>
 			{
-				policy.WithOrigins("http://"+config.server_hostname,
-									"https://"+config.server_hostname);
+				policy.WithOrigins("http://" + config.server_hostname,
+									"https://" + config.server_hostname);
 			});
 	});
 }
@@ -148,9 +148,9 @@ app.UseWebSockets(webSocketOptions);
 
 app.MapControllers();
 
-app.Lifetime.ApplicationStarted.Register(()=>
+app.Lifetime.ApplicationStarted.Register(() =>
 {
-	serverLogger.LogInformation("Listening for HTTP on port {port}" , config.http_port);
+	serverLogger.LogInformation("Listening for HTTP on port {port}", config.http_port);
 });
 
 serverLogger.LogInformation("Impunity Standalone Server starting up");

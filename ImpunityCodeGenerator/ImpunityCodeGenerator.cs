@@ -45,7 +45,7 @@ namespace SourceGenerator
 	[Generator]
 	public class DistributedEntityGenerator : ISourceGenerator
 	{
-		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new []
+		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new[]
 			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor", "Assembly-CSharp-Editor" });
 
 		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new[]
@@ -55,7 +55,7 @@ namespace SourceGenerator
 
 		public static StringBuilder Output = new StringBuilder();
 		public static StringBuilder Info = new StringBuilder();
-		
+
 		public List<DistributedClassInfo> DistributedClasses = new List<DistributedClassInfo>();
 		public string? SourceBasePath;
 
@@ -87,9 +87,9 @@ namespace SourceGenerator
 			{
 				summary = gns.Identifier.Text;
 			}
-			
+
 			WriteInfo(indent + node.GetType().Name + " " + summary);
-			foreach(var child in node.ChildNodes())
+			foreach (var child in node.ChildNodes())
 			{
 				LogNode(child, indent + " ");
 			}
@@ -117,7 +117,7 @@ namespace SourceGenerator
 			Info.Clear();
 
 			//WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
-			
+
 			foreach (var syntaxTree in context.Compilation.SyntaxTrees)
 			{
 				ExamineSyntaxTree(context, syntaxTree);
@@ -147,7 +147,7 @@ namespace SourceGenerator
 
 		}
 
-		
+
 
 		private void WriteInfo()
 		{
@@ -170,7 +170,7 @@ namespace SourceGenerator
 				return;
 			}
 
-			if(path.Length < SourceBasePath.Length)
+			if (path.Length < SourceBasePath.Length)
 			{
 				SourceBasePath = path;
 			}
@@ -183,9 +183,9 @@ namespace SourceGenerator
 			Output.AppendLine("using System.Collections.Generic;");
 			Output.AppendLine("using System.IO;");
 			Output.AppendLine("using UltraLiteDB;");
-			
+
 			string? currentNamespace = null;
-			foreach(DistributedClassInfo classInfo in DistributedClasses)
+			foreach (DistributedClassInfo classInfo in DistributedClasses)
 			{
 				if (classInfo.Namespace != currentNamespace)
 				{
@@ -214,7 +214,7 @@ namespace SourceGenerator
 
 			GenerateClassFieldInitializer(classInfo);
 
-			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
+			foreach (DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
 				GenerateDistributedFieldCode(propInfo);
 			}
@@ -227,7 +227,7 @@ namespace SourceGenerator
 			Output.AppendLine("\t\tpublic override void InitializeDistributedFields()\n\t\t{");
 			Output.AppendLine("\t\tbase.InitializeDistributedFields();");
 
-			foreach(DistributedPropertyInfo propInfo in classInfo.Properties)
+			foreach (DistributedPropertyInfo propInfo in classInfo.Properties)
 			{
 				Output.AppendLine($"\t\t\t{propInfo.PropertyName}._imp_Initialize(this, {propInfo.PropertyId});");
 			}
@@ -275,20 +275,20 @@ namespace SourceGenerator
 			bool generated = false;
 
 			var classDeclarations = fileTree.GetRoot().DescendantNodes().OfType<ClassDeclarationSyntax>();
-			foreach(var cd in classDeclarations)
+			foreach (var cd in classDeclarations)
 			{
-				if(ExamineClassDeclaration(context, cd))
+				if (ExamineClassDeclaration(context, cd))
 				{
 					generated = true;
 				}
 			}
 
-			if(generated)
+			if (generated)
 			{
 				string sourcePath = Path.GetDirectoryName(fileTree.FilePath);
 				AddSourcePath(sourcePath);
 			}
-			
+
 
 		}
 
@@ -297,7 +297,7 @@ namespace SourceGenerator
 			bool generated = false;
 
 			var attributeLists = cd.ChildNodes().OfType<AttributeListSyntax>();
-			foreach(var attributeList in attributeLists)
+			foreach (var attributeList in attributeLists)
 			{
 				foreach (AttributeSyntax attribute in attributeList.ChildNodes())
 				{
@@ -368,7 +368,8 @@ namespace SourceGenerator
 			}
 
 			VariableDeclarationSyntax vd = fd.ChildNodes().OfType<VariableDeclarationSyntax>().First();
-			if (vd.Variables.Count != 1) {
+			if (vd.Variables.Count != 1)
+			{
 				var msg = new DiagnosticDescriptor("IMP2", "Multple variable declaration", "Declaring multiple variables per type not supported", "Mismatch", DiagnosticSeverity.Error, true);
 				context.ReportDiagnostic(Diagnostic.Create(msg, vd.GetLocation()));
 
@@ -389,29 +390,29 @@ namespace SourceGenerator
 			string fieldType = genericField.Identifier.Text;
 			if (!ValidDistributedFieldTypes.Contains(fieldType))
 			{
-				var msg = new DiagnosticDescriptor("IMP1", "Unknown Distributed Type", "Type " + fieldType+ " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
+				var msg = new DiagnosticDescriptor("IMP1", "Unknown Distributed Type", "Type " + fieldType + " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
 				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
-				
+
 				return;
 			}
 
 			TypeArgumentListSyntax genericArgsList = genericField.ChildNodes().OfType<TypeArgumentListSyntax>().First();
 			if (genericArgsList == null)
 			{
-				var msg = new DiagnosticDescriptor("IMP1", "Generic types not defined", "Type " + fieldType+ " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
+				var msg = new DiagnosticDescriptor("IMP1", "Generic types not defined", "Type " + fieldType + " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
 				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
-				
+
 				return;
 			}
 
 			var dTypeIdentifier = genericArgsList.Arguments.First();
 
-            DistributedPropertyInfo propInfo = new DistributedPropertyInfo(varDef.Identifier.ToString(),
-                                                    fieldType, dTypeIdentifier.ToString(), distributedPropertyId);
+			DistributedPropertyInfo propInfo = new DistributedPropertyInfo(varDef.Identifier.ToString(),
+													fieldType, dTypeIdentifier.ToString(), distributedPropertyId);
 
-            classInfo.Properties.Add(propInfo);
+			classInfo.Properties.Add(propInfo);
 
-			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId+", "+")");
+			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId + ", " + ")");
 		}
 
 		// determine the namespace the class/enum/struct is declared in, if any

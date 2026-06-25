@@ -24,5 +24,5 @@ public class InfoService
 		return string.Join(" ", Environment.GetCommandLineArgs());
 	}
 
-	
+
 }
