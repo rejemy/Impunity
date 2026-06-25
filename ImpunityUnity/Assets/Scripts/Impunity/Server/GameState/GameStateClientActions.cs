@@ -382,7 +382,7 @@ namespace Impunity.GameState
 		}
 	}
 
-	/// <summary>Inserts or replaces a document in a DB collection. Returns true if an existing document was updated (false if inserted).</summary>
+	/// <summary>Inserts or replaces a document in a DB collection. Returns true if the document was inserted as new, false if it replaced an existing one.</summary>
 	public class UpsertDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
@@ -442,7 +442,7 @@ namespace Impunity.GameState
 		[BsonField("d")]
 		public BsonDocument Doc = null!;
 
-		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INTO_DOCUMENT; }
+		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INSERT_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
 
 		public MergeInsertDocumentAction() { }

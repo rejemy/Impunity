@@ -347,6 +347,34 @@ public class ImpunityIntegrationTests
 	}
 
 	[UnityTest, Category("TCPConnection")]
+	public IEnumerator TCPMergeInsertCreatesMissingDocument()
+	{
+		CreateServer();
+		yield return StartTCPAndConnectRemote();
+
+		// Merge-insert against a non-existent _id must INSERT it. Over a remote connection this used to silently
+		// degrade to a plain merge-into (wrong action-type id), leaving nothing stored.
+		var doc = new BsonDocument { ["_id"] = "mi1", ["name"] = "Potion" };
+		var mergeYield = RemoteGame.MergeInsertDocumentYield(IntegrationTestCollections.ITEMS, doc);
+		yield return WaitForYield(mergeYield, RemoteGame);
+
+		var findYield = RemoteGame.FindDocumentByIdYield(IntegrationTestCollections.ITEMS, "mi1");
+		yield return WaitForYield(findYield, RemoteGame);
+		Assert.IsNotNull(findYield.Value, "MergeInsert should have inserted the missing document over a remote connection");
+		Assert.AreEqual("Potion", (string)findYield.Value["name"]);
+
+		// A second merge-insert into the same _id must MERGE the new field while preserving the original.
+		var patch = new BsonDocument { ["_id"] = "mi1", ["power"] = 7 };
+		var mergeYield2 = RemoteGame.MergeInsertDocumentYield(IntegrationTestCollections.ITEMS, patch);
+		yield return WaitForYield(mergeYield2, RemoteGame);
+
+		var findYield2 = RemoteGame.FindDocumentByIdYield(IntegrationTestCollections.ITEMS, "mi1");
+		yield return WaitForYield(findYield2, RemoteGame);
+		Assert.AreEqual("Potion", (string)findYield2.Value["name"], "Original field should survive the merge");
+		Assert.AreEqual(7, (int)findYield2.Value["power"], "New field should be merged in");
+	}
+
+	[UnityTest, Category("TCPConnection")]
 	public IEnumerator TCPConnectBadPassword()
 	{
 		// Create server WITH password

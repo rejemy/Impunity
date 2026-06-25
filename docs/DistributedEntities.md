@@ -2,7 +2,7 @@
 
 A guide to Impunity's real-time state replication system: distributed **entities**, the **channels** that contain them, and the **distributed fields** that sync their state between clients through the server.
 
-This document covers the essentials. It assumes you already have a working `GameStateServer` and a client `BaseGameConnection` (a `RemoteGameConnection` over TCP, or a `LocalGameConnection` in-process). See the project `CLAUDE.md` for the build/run layout and the wire protocol.
+This document covers the essentials. It assumes you already have a working `GameStateServer` and a client `BaseGameConnection` (a `RemoteGameConnection` over TCP, or a `LocalGameConnection` in-process) — see the companion guide [`Connections.md`](Connections.md) for how connections, the action system, and the database work. See the project `CLAUDE.md` for the build/run layout and the wire protocol.
 
 > **Conventions used here.** "Object" means a `DistributedObjectBase`/`IDistributedObject` instance; "channel" means a `DistributedChannelBase`/`IDistributedChannel`; "entity" means either. Code samples use the field/serializer types from `Impunity.Connection`.
 
@@ -50,7 +50,7 @@ Each client drives the system by calling `connection.Update()` once per frame. T
 
 ## 2. The annotation system: durable type and field ids
 
-Every distributed type and every distributed field is identified on the wire by a small **numeric id**, not by its name. This keeps updates compact, but it means the ids are a contract you must manage deliberately.
+Every distributed type and every distributed field is identified on the wire by a small **numeric id**, not by its name. This keeps updates compact, but it makes those numbers a **permanent contract**: once an id ships, it must never change or be reused — see [below](#why-these-ids-are-immutable).
 
 ### `[DistributedEntity(typeId)]`
 
@@ -61,7 +61,7 @@ Marks a class as a distributed entity type and assigns its **type id**.
 public partial class Player : DistributedObjectBase { … }
 ```
 
-- `typeId` must be a **positive integer**, unique across all entity types you register. **Id `0` is reserved** for the built-in untyped channel (`GenericDistributedChannel`).
+- `typeId` must be a **positive integer**, unique across all entity types you register, and **permanent** — once shipped it can never change or be reused (see [below](#why-these-ids-are-immutable)). **Id `0` is reserved** for the built-in untyped channel (`GenericDistributedChannel`).
 - Optional `FactoryMethod = "Name"` — the name of a `public static` parameterless method on the type returning an `IDistributedEntity`. The manager calls it to construct received instances instead of `Activator.CreateInstance`. Use it for types without a public default constructor or that need custom setup.
 - Optional `PersistAs = "key"` — marks the type **persisted** and gives it a database key. See [§9](#9-persistent-objects).
 - The class **must be `partial`** (the source generator adds a second part — see below) and must derive from one of the base classes in [§3](#3-declaring-an-entity-type).
@@ -75,24 +75,25 @@ Marks a field as replicated and assigns its **field id**.
 public DistributedValue<Vector3, Vector3Serializer> Position;
 ```
 
-- `fieldId` is a **byte in the range 1–63**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (fieldId - 1)`), so a type may have at most 63 distributed fields.
+- `fieldId` is a **byte in the range 1–63**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (fieldId - 1)`), so a type may have at most 63 distributed fields. Like the type id, a field id is **permanent** once shipped — never change or reuse it (see [below](#why-these-ids-are-immutable)).
 - Optional `PersistAs = "key"` — persists this field's value under the given key. The containing type must itself be persisted, and the field may not be temporal. See [§9](#9-persistent-objects).
 - A common convention (see the test entities) is a nested `enum DistributedPropIds : byte { … }` so the ids read meaningfully at the declaration site.
 
-### Why "durable": the two id systems
+### Why these ids are immutable
 
-There are **two** identity systems, and they have different lifetimes. Keeping them straight is the single most important thing to understand before you ship:
+The numeric ids and the `PersistAs` strings are both **permanent identity** — baked into the wire format and into saved data — so once a build ships they can never change. Keeping this straight is the single most important thing to understand before you ship:
 
-| Identity | Where used | Lifetime requirement |
+| Identity | What it identifies | Rule |
 |---|---|---|
-| **Numeric ids** (`[DistributedEntity(n)]`, `[Distributed(n)]`) | The wire protocol — exchanged in the connect handshake | Must agree between the client and server **build pair**. Because both are built from the same entity definitions, they agree by construction. Don't reuse a number for a different purpose within a build. |
-| **`PersistAs` string keys** | The database — persisted values are stored under these strings | **Durable across builds and storage.** Once data is written under `PersistAs = "pos"`, that key is how it is read back forever. Renaming it orphans the old data. |
+| **Numeric ids** (`[DistributedEntity(n)]`, `[Distributed(n)]`) | The wire identity of every type and field, exchanged on the connect handshake and carried in every update. The **type id is also written into the database** (the stored `t`) for persisted entities. | **Immutable forever.** Never change a number, and never reuse a retired one. The number *is* the identity — the class name, the field name, and the namespace are not — so the value must stay put even as the code around it moves. |
+| **`PersistAs` string keys** | The database key a persisted type and its persisted field values are stored under. | **Immutable forever** once data exists. Renaming a key orphans everything stored under the old one. |
 
 Practical consequences:
 
-- **You may renumber the numeric ids** (e.g. reorganize your `enum`) without losing persisted data, *as long as you rebuild client and server together and don't touch the `PersistAs` keys.* Persistence is keyed by the strings, not the numbers.
-- **Treat `PersistAs` keys as immutable** once data exists in production. Choose them deliberately; they are your durable schema.
-- Keys may not be empty and may not start with `_` (reserved).
+- **Never renumber, and never reuse, a numeric id** — for either a type or a field. The number is a permanent contract shared with saved data and with every other build on the wire; reusing an old number for a new purpose silently misreads existing data and mismatched peers.
+- **Renaming and reorganizing code is free** — and is the whole reason ids are numbers rather than names. You can rename a `[DistributedEntity]` class or a `[Distributed]` field, move it to a different namespace, or rename the `enum` that labels the ids, as long as the *values* never move.
+- **Treat `PersistAs` keys as equally immutable.** Choose them deliberately; they are your durable storage schema. Keys may not be empty and may not start with `_` (reserved).
+- **To retire a type or field, stop using its id but leave the number burned** — don't reassign it to something new.
 
 ### The source generator
 
@@ -420,7 +421,7 @@ Rules the server and manager enforce:
 - **Temporal fields cannot be persisted.**
 - A persisted object with no `UniqueName` gets a server-generated GUID as its database key.
 
-Only persisted fields are written; non-persisted fields are replicated live but never stored. When a persisted channel is loaded, its stored entities are recreated from the database and re-keyed by their `PersistAs` values — which is exactly why those keys are your [durable schema](#why-durable-the-two-id-systems).
+Only persisted fields are written; non-persisted fields are replicated live but never stored. When a persisted channel is loaded, its stored entities are recreated from the database and re-keyed by their `PersistAs` values — which is exactly why those keys are your [durable schema](#why-these-ids-are-immutable).
 
 ### Working with persisted state directly
 

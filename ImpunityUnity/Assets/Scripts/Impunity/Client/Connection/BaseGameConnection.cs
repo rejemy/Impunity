@@ -10,48 +10,89 @@ using Impunity.GameState;
 namespace Impunity.Connection
 {
 
-	/// <summary>Result of a <see cref="BaseGameConnection.WaitForLock"/> operation.</summary>
+	/// <summary>Outcome of a <see cref="BaseGameConnection.WaitForLock"/> request on a named lock.</summary>
 	public enum LockWaitResult
 	{
+		/// <summary>The request failed (an error response was returned).</summary>
 		Error,
+		/// <summary>The lock was free and is now held by this connection.</summary>
 		Locked,
+		/// <summary>
+		/// The lock was held by someone else and has since been released, so it is now <em>available</em>.
+		/// NOTE (flagged for review): this signals availability only — it does <em>not</em> re-acquire the lock.
+		/// Call <see cref="BaseGameConnection.TryToLock"/> again to claim it.
+		/// </summary>
 		Unlocked,
+		/// <summary>Reserved for a wait that times out. NOTE (flagged for review): no timeout is currently applied, so this value is never produced.</summary>
 		Timeout
 	}
-	/// <summary>Callback for receiving broadcast messages from other clients.</summary>
+	/// <summary>Handler for broadcast messages relayed from other clients.</summary>
+	/// <param name="messageType">Application-defined message category.</param>
+	/// <param name="messageBody">The message payload as a BSON value.</param>
+	/// <param name="sender">The connection id of the client that sent the broadcast.</param>
 	public delegate void BroadcastMessageHandler(int messageType, BsonValue messageBody, string sender);
 
 
 	/// <summary>
-	/// Base class for client-side game connections (remote or local). Provides the public API for database operations,
-	/// live state management (channels, entities, locks), and broadcast messaging. Call <see cref="Update"/> each frame
-	/// to process completed actions and server push messages on the main thread.
+	/// Shared base for the two client connection flavours — <see cref="RemoteGameConnection"/> (over a network
+	/// transport) and <see cref="LocalGameConnection"/> (an embedded in-process server). It exposes the whole
+	/// client-facing API: the document database (insert/find/list/…), live state (channels, entities, entity and named
+	/// locks, events), broadcast messaging, and server-time sync.
+	/// <para>
+	/// Almost every call is asynchronous and follows the same shape: it builds a <see cref="GameStateActionBase"/> and
+	/// hands it to <see cref="DoAction"/>, which the subclass routes to its server. The reply (or a server push) is
+	/// later dispatched to your callback on the main thread when you call <see cref="Update"/> — so callbacks always run
+	/// where it is safe to touch game/UI state, never on a socket or worker thread. Nothing is delivered between
+	/// <see cref="Update"/> calls.
+	/// </para>
+	/// <para>
+	/// The methods here are the low-level, byte-oriented surface. For ergonomic, strongly-typed access prefer the higher
+	/// layers built on top: <see cref="ClientEntityManager"/> and the distributed entity types for live state (see
+	/// <c>docs/DistributedEntities.md</c>), <see cref="GameStateDBCollection{DTYPE}"/> for typed documents, and the
+	/// <c>…Async</c>/<c>…Yield</c> extensions for await/coroutine styles.
+	/// </para>
 	/// </summary>
 	public abstract class BaseGameConnection : IServerMessageHandler, IDisposable
 	{
-		/// <summary>Manages client-side entity state, subscriptions, and dirty tracking.</summary>
+		/// <summary>Manages client-side entity state, subscriptions, and dirty tracking. The typed live-state API lives here.</summary>
 		public ClientEntityManager EntityManager { get; private set; }
+		/// <summary>This client's format (schema + entity types + checksum) sent to the server during the handshake.</summary>
 		protected GameStateFormatData LocalFormat;
+		/// <summary>Estimated server-minus-client clock delta in milliseconds, refreshed by clock sync. See <see cref="GetServerTime"/>.</summary>
 		protected long ServerMillisOffset;
 
+		/// <summary>Thread-safe inbox of completed actions and server pushes awaiting main-thread dispatch in <see cref="Update"/>.</summary>
 		protected ConcurrentQueue<GameStateActionBase> CompletedActions = new ConcurrentQueue<GameStateActionBase>();
 
-		/// <summary>Initiates the connection to the game server. Calls <paramref name="onComplete"/> with null on success.</summary>
+		/// <summary>Opens the connection (transport, handshake, clock sync). Implemented per transport.</summary>
+		/// <param name="onComplete">Invoked on the main thread with null on success, or an error response on failure.</param>
 		public abstract void Connect(ImpunityCallback onComplete);
 
-		/// <summary>Server-assigned connection identifier, available after successful connection.</summary>
+		/// <summary>Server-assigned connection identifier. Reads <c>"unconnected"</c> until the handshake completes.</summary>
 		public string ConnectionId { get; protected set; }
 
-		/// <summary>Client-generated key used for reconnection identification.</summary>
+		/// <summary>
+		/// Client-generated key identifying this client across reconnects. Defaults to a random value; set it before
+		/// <see cref="Connect"/> to reclaim per-connection server state (locks, ownership) after a reconnect.
+		/// </summary>
 		public string ConnectionKey { get; set; }
-		/// <summary>True after the connection handshake and clock sync have completed successfully.</summary>
+		/// <summary>True once the handshake and initial clock sync have completed successfully.</summary>
 		public bool Connected { get; private set; }
 
+		// Pending WaitForLock callbacks keyed by lock name, fired when a NamedLockUnlocked push arrives. One waiter per
+		// name per connection — a second WaitForLock for the same name replaces the first.
 		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
 
 		private long ClockSyncRateMs = 60 * 1000;
 		private long LastClockSync = 0;
 
+		/// <summary>
+		/// Initializes the connection's entity manager and format. Wires the manager to this connection, registers the
+		/// format's entity types (validating their ids), generates a random <see cref="ConnectionKey"/>, and builds the
+		/// <see cref="LocalFormat"/> (with checksum) used during the handshake.
+		/// </summary>
+		/// <param name="format">The game state format describing this client's schema and entity types.</param>
+		/// <param name="em">An existing entity manager to adopt, or null to create a fresh one.</param>
 		public BaseGameConnection(GameStateFormat format, ClientEntityManager? em)
 		{
 			if (em == null)
@@ -68,6 +109,15 @@ namespace Impunity.Connection
 			LocalFormat = new GameStateFormatData(format, entityTypes);
 		}
 
+		/// <summary>
+		/// Runs the connect handshake: sends the establish-connection action (game id, hashed password, format), and on
+		/// success records the server-assigned <see cref="ConnectionId"/>, performs the initial clock sync, and marks the
+		/// connection <see cref="Connected"/>. Called by subclasses from <see cref="Connect"/> once the transport is ready.
+		/// </summary>
+		/// <param name="gameId">The world to join, or null for a local connection.</param>
+		/// <param name="password">Plaintext world password; hashed before sending. Null/empty when unprotected.</param>
+		/// <param name="format">This client's format data, checked against the server for compatibility.</param>
+		/// <param name="onComplete">Invoked with null once connected, or with the first error encountered (handshake or clock sync).</param>
 		protected void EstablishConnection(string? gameId, string? password, GameStateFormatData format, ImpunityCallback onComplete)
 		{
 			void synced(ImpunityErrorResponse? err)
@@ -100,6 +150,9 @@ namespace Impunity.Connection
 			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onEstablished));
 		}
 
+		// Requests the server clock and stores the offset from local time. NOTE: the offset is computed purely as
+		// (serverTime - localTimeAtReply) and does not account for network latency, so it can be off by up to roughly
+		// the round-trip time. Re-run periodically from Update() to limit drift.
 		private void SyncServerTime(ImpunityCallback? onComplete = null)
 		{
 			LastClockSync = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -118,13 +171,24 @@ namespace Impunity.Connection
 			DoAction(new GetTimeAction(gotTime));
 		}
 
-		/// <summary>Returns the estimated current server time in Unix milliseconds, adjusted by the clock sync offset.</summary>
+		/// <summary>Estimated current server time in Unix milliseconds (local UTC plus the synced clock offset).</summary>
+		/// <returns>The approximate server wall-clock time. Accuracy is bounded by network latency (the offset ignores round-trip time) and clock drift between syncs.</returns>
 		public long GetServerTime()
 		{
 			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ServerMillisOffset;
 		}
 
-		/// <summary>Processes completed actions and server messages on the main thread. Also sends dirty entity updates and periodic clock syncs. Must be called each frame.</summary>
+		/// <summary>
+		/// Drives the connection for one frame; must be called regularly (typically once per frame). When connected it
+		/// flushes pending entity updates and runs a periodic clock sync, then dispatches every queued server message
+		/// and completed action — invoking your callbacks and entity push-handlers on the calling (main) thread.
+		/// </summary>
+		/// <remarks>
+		/// Outbound dirty entity state is flushed (<see cref="ClientEntityManager.SendUpdates"/>) <em>before</em> inbound
+		/// messages are processed. Exceptions thrown by your callbacks are caught and logged so one bad handler cannot
+		/// stall the queue. Subclasses may override to add transport-specific work (timeouts, WebGL send pumping) and
+		/// then call <c>base.Update()</c>.
+		/// </remarks>
 		public virtual void Update()
 		{
 			if (Connected)
@@ -161,59 +225,73 @@ namespace Impunity.Connection
 
 		}
 
+		/// <summary>Closes the connection and releases its resources. Implemented per transport.</summary>
 		public abstract void Dispose();
 
-		/// <summary>Sends an action to the server for execution. Subclasses route this to the appropriate transport.</summary>
+		/// <summary>Submits an action to the server for execution. Subclasses route it to their transport (serialize-and-send, or queue in-process).</summary>
+		/// <param name="action">The action to run; its result (if it has a callback) is delivered later via <see cref="Update"/>.</param>
 		public abstract void DoAction(GameStateActionBase action);
 
 		// ------- Server message handling
 
+		// Enqueues a server-originated message for main-thread dispatch in Update(). Called by subclasses from their
+		// receive path (socket thread for remote, server worker thread for local).
 		protected void OnServerMessage(ServerActionBase action)
 		{
 			CompletedActions.Enqueue(action);
 		}
 
-		/// <summary>Callback invoked on the main thread when a broadcast message is received from another client.</summary>
+		/// <summary>Invoked on the main thread (during <see cref="Update"/>) for each broadcast message received from another client. Set this to handle broadcasts.</summary>
 		public BroadcastMessageHandler? OnBroadcastMessage { get; set; }
 
 
-		// Server message handlers
+		// Server message handlers (IServerMessageHandler). These run on the main thread via Update() and forward live
+		// state pushes to the entity manager, which applies them to the typed entities. See ClientEntityManager and
+		// docs/DistributedEntities.md for what each does to entity state.
 
+		/// <inheritdoc/>
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
 		{
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData);
 		}
 
+		/// <inheritdoc/>
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
 		{
 			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated);
 		}
 
+		/// <inheritdoc/>
 		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
 		{
 			EntityManager.HandleEntityUpdate(entityId, updateData, seq);
 		}
 
+		/// <inheritdoc/>
 		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
 		{
 			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
 		}
 
+		/// <inheritdoc/>
 		public void HandleEntityLocked(uint entityId)
 		{
 			EntityManager.HandleEntityLocked(entityId);
 		}
 
+		/// <inheritdoc/>
 		public void HandleEntityUnlocked(uint entityId)
 		{
 			EntityManager.HandleEntityUnlocked(entityId);
 		}
 
+		/// <inheritdoc/>
 		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
 		{
 			EntityManager.HandleEntityDelete(entityId, deleteData);
 		}
 
+		/// <inheritdoc/>
 		public void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy)
 		{
 			try
@@ -226,6 +304,8 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <inheritdoc/>
+		/// <remarks>Fires the pending <see cref="WaitForLock"/> callback for this lock name with <see cref="LockWaitResult.Unlocked"/> (availability only — it does not re-acquire). Warns if no waiter was registered.</remarks>
 		public void HandleNamedLockUnlocked(string lockName)
 		{
 			if (LockWaits.TryGetValue(lockName, out var onComplete))
@@ -248,7 +328,22 @@ namespace Impunity.Connection
 
 		// -------- API Calls
 
-		/// <summary>Executes multiple database actions atomically in a single batch.</summary>
+		/// <summary>
+		/// Sends several database actions to the server in one request, run sequentially on the server's DB thread.
+		/// </summary>
+		/// <param name="actions">
+		/// The sub-actions to run, in order. Every one must be a database operation (<see cref="GameStateActionBase.IsDBOperation"/>);
+		/// the server rejects the whole request with <see cref="ImpunityErrorCode.ActionBadRequest"/> otherwise.
+		/// </param>
+		/// <param name="onComplete">
+		/// Invoked on the main thread with one <see cref="ActionResult"/> per sub-action, in order (inspect each for its own error/result).
+		/// </param>
+		/// <remarks>
+		/// This is a single round-trip batch, <em>not</em> an atomic transaction: sub-actions are applied one by one with
+		/// no rollback, so an early failure does not undo earlier successes. When any sub-action fails the top-level
+		/// result also carries an <see cref="ImpunityErrorCode.ActionCompoundFailure"/> error, while the per-action
+		/// results still report exactly which ones failed.
+		/// </remarks>
 		public void CompoundDatabaseAction(IEnumerable<GameStateActionBase> actions, ImpunityCallback<List<ActionResult>>? onComplete)
 		{
 			DoAction(new CompoundDatabaseAction(actions, onComplete));
@@ -256,13 +351,16 @@ namespace Impunity.Connection
 
 		// -------- Game Setup
 
-		/// <summary>Updates the game world's summary document on the server.</summary>
+		/// <summary>Replaces the game world's summary document on the server (the metadata surfaced in discovery — map, mode, player count, etc.).</summary>
+		/// <param name="summary">The new summary document.</param>
+		/// <param name="onComplete">Invoked on the main thread with null on success, or an error.</param>
 		public void SetGameSummary(BsonDocument summary, ImpunityCallback? onComplete)
 		{
 			DoAction(new SetGameSummaryAction(summary, onComplete));
 		}
 
 		/// <summary>Retrieves the game world's summary document from the server.</summary>
+		/// <param name="onComplete">Invoked on the main thread with the summary document (may be null if none has been set), or an error.</param>
 		public void GetGameSummary(ImpunityCallback<BsonDocument>? onComplete)
 		{
 			DoAction(new GetGameSummaryAction(onComplete));
@@ -270,63 +368,108 @@ namespace Impunity.Connection
 
 		// -------- DB actions
 
-		/// <summary>Inserts a document into a server DB collection. Returns the assigned ID.</summary>
+		/// <summary>Inserts a new document into a server database collection.</summary>
+		/// <param name="collectionId">Target collection id (a <see cref="GameStateCollection.Index"/>, ≥ 10).</param>
+		/// <param name="doc">The document to insert. If it has no <c>_id</c>, the server assigns one.</param>
+		/// <param name="onComplete">Invoked on the main thread with the assigned <c>_id</c>, or an error (e.g. duplicate id).</param>
 		public void InsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<BsonValue>? onComplete)
 		{
 			DoAction(new InsertDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Replaces an existing document in a server DB collection.</summary>
+		/// <summary>Replaces an existing document (matched by <c>_id</c>) in a server database collection.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">The replacement document; its <c>_id</c> selects the row.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if a matching document was found and replaced, <c>false</c> if none existed.</param>
 		public void UpdateDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new UpdateDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Inserts or replaces a document in a server DB collection.</summary>
+		/// <summary>Inserts a document, or replaces the existing one with the same <c>_id</c>.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">The document to insert or replace.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the document was inserted as new, or <c>false</c> if it replaced an existing one.</param>
 		public void UpsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new UpsertDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Merges fields into an existing document in a server DB collection.</summary>
+		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>), leaving its other fields intact.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">A partial document whose fields are copied over the stored document. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the target document existed and was merged, <c>false</c> if it was not found (nothing is inserted).</param>
 		public void MergeIntoDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new MergeIntoDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Merges fields into an existing document, or inserts as new if not found.</summary>
+		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>), or inserts <paramref name="doc"/> as a new document if none exists.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">A partial document to merge, or the full document to insert when absent. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Invoked with a success flag (true on insert of a new document; the merge path likewise reports success).</param>
 		public void MergeInsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new MergeInsertDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Retrieves a document from a server DB collection by ID.</summary>
+		/// <summary>Retrieves a single document from a server database collection by its <c>_id</c>.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="id">The <c>_id</c> of the document to fetch.</param>
+		/// <param name="onComplete">Invoked on the main thread with the document, or <c>null</c> if no document has that id.</param>
 		public void FindDocumentById(int collectionId, BsonValue id, ImpunityCallback<BsonDocument>? onComplete)
 		{
 			DoAction(new FindDocumentByIdAction(collectionId, id, onComplete));
 		}
 
-		/// <summary>Deletes a document from a server DB collection by ID.</summary>
+		/// <summary>Deletes a document from a server database collection by its <c>_id</c>.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="id">The <c>_id</c> of the document to delete.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if a matching document was found and deleted, <c>false</c> otherwise.</param>
 		public void DeleteDocument(int collectionId, BsonValue id, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new DeleteDocumentAction(collectionId, id, onComplete));
 		}
 
-		/// <summary>Lists all documents in a server DB collection.</summary>
+		/// <summary>Retrieves every document in a server database collection.</summary>
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="onComplete">Invoked on the main thread with the list of documents (empty when the collection has none), or an error.</param>
 		public void ListDocuments(int collectionId, ImpunityCallback<List<BsonDocument>>? onComplete)
 		{
 			DoAction(new ListDocumentsAction(collectionId, onComplete));
 		}
 
 		// -------- Live game
+		//
+		// "Named locks" are server-wide mutexes keyed by an arbitrary string, independent of any entity. A connection
+		// holds at most one instance of each named lock; the server releases all of a connection's named locks when it
+		// disconnects. (For locking a specific live entity instead, see TryToLockEntity / UnlockEntity below.)
 
-		/// <summary>Attempts to acquire a named lock without waiting. Returns true if acquired.</summary>
+		/// <summary>Tries to acquire a named lock without blocking.</summary>
+		/// <param name="lockName">The lock's name. Created on first use.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the lock is now held by this connection, <c>false</c> if another connection holds it.</param>
 		public void TryToLock(string lockName, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new LockNamedLockAction(lockName, false, onComplete));
 		}
 
-		/// <summary>Attempts to acquire a named lock, waiting for it to become available if currently held.</summary>
+		/// <summary>
+		/// Tries to acquire a named lock, and if it is currently held by someone else, defers the callback until the lock
+		/// is released rather than failing immediately.
+		/// </summary>
+		/// <param name="lockName">The lock's name.</param>
+		/// <param name="onComplete">
+		/// Invoked with <see cref="LockWaitResult.Locked"/> if acquired now; <see cref="LockWaitResult.Error"/> on failure;
+		/// or, when the lock was busy, later with <see cref="LockWaitResult.Unlocked"/> once it frees.
+		/// </param>
+		/// <remarks>
+		/// NOTE (flagged for review): the deferred <see cref="LockWaitResult.Unlocked"/> path signals availability only —
+		/// it does <em>not</em> re-acquire the lock for you; call <see cref="TryToLock"/> again to claim it (another
+		/// client may win the race in between). <see cref="LockWaitResult.Timeout"/> is never produced (no timeout is
+		/// applied), so a lock that never frees leaves the callback pending indefinitely. Only one waiter is tracked per
+		/// lock name per connection: a second <see cref="WaitForLock"/> for the same name before the first resolves
+		/// silently replaces the earlier callback.
+		/// </remarks>
 		public void WaitForLock(string lockName, ImpunityCallback<LockWaitResult>? onComplete)
 		{
 			DoAction(new LockNamedLockAction(lockName, true, (err, locked) =>
@@ -347,13 +490,26 @@ namespace Impunity.Connection
 			}));
 		}
 
-		/// <summary>Releases a named lock.</summary>
+		/// <summary>Releases a named lock held by this connection.</summary>
+		/// <param name="lockName">The lock's name.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if this connection held the lock and it was released, <c>false</c> if it did not hold it.</param>
 		public void Unlock(string lockName, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new UnlockNamedLockAction(lockName, onComplete));
 		}
 
-		/// <summary>Creates a live state channel with a root entity and optional child objects.</summary>
+		// The methods below are the raw wire-level live-state API: ids and pre-serialized property blobs. Application
+		// code normally uses the typed wrappers on ClientEntityManager (CreateChannel<T>, SubscribeToChannel<T>, …),
+		// which build these arguments from your entity instances. See docs/DistributedEntities.md.
+
+		/// <summary>Creates a live state channel, with the channel entity's initial state and optional pre-populated child objects.</summary>
+		/// <param name="channelName">Unique channel name to create.</param>
+		/// <param name="entityTypeId">The channel entity's distributed type id.</param>
+		/// <param name="instanceFlags">Instance flags (<see cref="ImpunityInstanceFlags"/>): persisted, client-authoritative, delete-on-disconnect.</param>
+		/// <param name="propBytes">Serialized initial field state for the channel entity.</param>
+		/// <param name="replace">If true, replace an existing channel of the same name; if false, fail when one exists.</param>
+		/// <param name="channelObjects">Optional child objects to create in the channel up front.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> on success, or an error (e.g. name already exists when <paramref name="replace"/> is false). Creating a channel does not subscribe you to it.</param>
 		public void CreateChannel(string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData>? channelObjects, ImpunityCallback<bool>? onComplete)
 		{
 			var action = new CreateChannelAction(channelName, entityTypeId, instanceFlags, propBytes, replace, onComplete);
@@ -364,7 +520,18 @@ namespace Impunity.Connection
 			DoAction(action);
 		}
 
-		/// <summary>Subscribes to a channel, loading it from DB if needed. Optionally creates the channel if it doesn't exist. Returns the channel entity ID.</summary>
+		/// <summary>
+		/// Subscribes this connection to a channel — loading it from the database if needed — and optionally creates it
+		/// when missing. After subscribing the server pushes the channel's current state and all subsequent updates.
+		/// (Method name is misspelled "Subcribe"; kept for API compatibility.)
+		/// </summary>
+		/// <param name="channelName">The channel to subscribe to.</param>
+		/// <param name="createIfMissing">If true, create the channel (using the entity type/flags/props below) when it does not already exist.</param>
+		/// <param name="entityTypeId">Channel entity type id, used only when creating.</param>
+		/// <param name="instanceFlags">Instance flags, used only when creating.</param>
+		/// <param name="propBytes">Serialized initial channel field state, used only when creating.</param>
+		/// <param name="channelObjects">Optional child objects to create alongside, used only when creating.</param>
+		/// <param name="onComplete">Invoked with the channel's entity id on success, or an error.</param>
 		public void SubcribeToChannel(string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData>? channelObjects, ImpunityCallback<uint>? onComplete)
 		{
 			var action = new SubscribeChannelAction(channelName, createIfMissing, entityTypeId, instanceFlags, propBytes, onComplete);
@@ -375,19 +542,33 @@ namespace Impunity.Connection
 			DoAction(action);
 		}
 
-		/// <summary>Unsubscribes from a channel. The client will stop receiving updates for entities in this channel.</summary>
+		/// <summary>Unsubscribes from a channel; the client stops receiving updates for it and its objects.</summary>
+		/// <param name="channelId">The channel's entity id (as returned by <see cref="SubcribeToChannel"/>).</param>
+		/// <param name="onComplete">Invoked with null once the server has acknowledged the unsubscribe, or an error.</param>
 		public void UnsubscribeFromChannel(uint channelId, ImpunityCallback onComplete)
 		{
 			DoAction(new UnsubscribeChannelAction(channelId, onComplete));
 		}
 
-		/// <summary>Creates a new entity object within a channel. Returns the assigned entity ID.</summary>
+		/// <summary>Creates a new entity object inside an existing channel.</summary>
+		/// <param name="entityTypeId">The object's distributed type id.</param>
+		/// <param name="instanceFlags">Instance flags (<see cref="ImpunityInstanceFlags"/>).</param>
+		/// <param name="channelId">The id of the channel to create the object in.</param>
+		/// <param name="propBytes">Serialized initial field state for the object.</param>
+		/// <param name="uniqueName">Optional name unique within the channel (must not contain '/'); doubles as the database key for persisted objects.</param>
+		/// <param name="replace">If true, replace an existing object with the same unique name.</param>
+		/// <param name="onComplete">Invoked with the assigned entity id on success, or an error (e.g. <see cref="ImpunityErrorCode.ActionUniqueNameExists"/>).</param>
 		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete)
 		{
 			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, onComplete));
 		}
 
-		/// <summary>Sends a property update for a live entity.</summary>
+		/// <summary>Sends a serialized property delta for a live entity to the server, which validates and relays it to other subscribers.</summary>
+		/// <param name="entityId">The entity to update.</param>
+		/// <param name="updateData">The serialized changed-fields blob.</param>
+		/// <param name="guaranteed">If true, send reliably (TCP); if false, allow best-effort delivery (UDP) for high-frequency updates.</param>
+		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
+		/// <param name="onComplete">Optional completion callback; updates are typically fire-and-forget.</param>
 		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
@@ -395,25 +576,36 @@ namespace Impunity.Connection
 			DoAction(action);
 		}
 
-		/// <summary>Deletes a live entity by ID.</summary>
+		/// <summary>Deletes a live entity by id. Deleting a channel also deletes its member objects.</summary>
+		/// <param name="entityId">The entity to delete.</param>
+		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification (e.g. a reason).</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the entity was deleted, or an error (e.g. blocked by another connection's lock).</param>
 		public void DeleteEntity(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete));
 		}
 
-		/// <summary>Fires a one-shot event on an entity, broadcast to all channel subscribers.</summary>
+		/// <summary>Fires a one-shot, fire-and-forget event on an entity. The server relays it to every subscriber of the entity's channel, including the sender.</summary>
+		/// <param name="entityId">The entity to raise the event on.</param>
+		/// <param name="eventType">Application-defined event category.</param>
+		/// <param name="eventData">The event payload.</param>
+		/// <param name="onComplete">Optional completion callback.</param>
 		public void TriggerEntityEvent(uint entityId, int eventType, BsonValue eventData, ImpunityCallback? onComplete)
 		{
 			DoAction(new EventEntityAction(entityId, eventType, eventData, onComplete));
 		}
 
-		/// <summary>Attempts to acquire an exclusive lock on an entity.</summary>
+		/// <summary>Tries to acquire an exclusive lock on a specific live entity for this connection. While held, the server rejects other connections' updates and deletes to that entity.</summary>
+		/// <param name="entityId">The entity to lock.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the lock is held by this connection (including if it already held it), <c>false</c> if another connection holds it.</param>
 		public void TryToLockEntity(uint entityId, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new LockEntityAction(entityId, onComplete));
 		}
 
-		/// <summary>Releases an exclusive lock on an entity.</summary>
+		/// <summary>Releases this connection's exclusive lock on a live entity.</summary>
+		/// <param name="entityId">The entity to unlock.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if this connection held the lock and it was released, <c>false</c> otherwise.</param>
 		public void UnlockEntity(uint entityId, ImpunityCallback<bool>? onComplete)
 		{
 			DoAction(new UnlockEntityAction(entityId, onComplete));
@@ -421,7 +613,9 @@ namespace Impunity.Connection
 
 		// -------- Broadcast
 
-		/// <summary>Sends a typed broadcast message to all connected clients.</summary>
+		/// <summary>Sends a typed broadcast message to all connected clients (delivered to their <see cref="OnBroadcastMessage"/>). Fire-and-forget — no completion callback or reply.</summary>
+		/// <param name="messageType">Application-defined message category.</param>
+		/// <param name="msgBody">The message payload.</param>
 		public void SendBroadcastMessage(int messageType, BsonValue msgBody)
 		{
 			DoAction(new SendBroadcastMessageAction(messageType, msgBody));

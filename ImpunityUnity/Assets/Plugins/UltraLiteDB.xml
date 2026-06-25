@@ -93,7 +93,7 @@
             <summary>
             Creates an index on the specified field if it doesn't already exist. Indexes existing documents in the collection.
             </summary>
-            <param name="field">Document field name (case sensitive). Use dot notation for nested fields (e.g. "Address.City").</param>
+            <param name="field">Document field name (case sensitive). Must be a top-level field; nested paths are not supported.</param>
             <param name="unique">If true, duplicate values in this field are rejected.</param>
             <returns>True if the index was created; false if it already existed.</returns>
         </member>
@@ -719,6 +719,26 @@
             Calculates the BSON byte size for a single key-value element (type byte + key CString + value bytes + variant header).
             </summary>
         </member>
+        <member name="T:UltraLiteDB.JsonMember">
+            <summary>
+            A single member of a JSON object as produced by <see cref="M:UltraLiteDB.JsonReader.DeserializeMembers"/>:
+            the key, its value, and the source line/column where the key begins. Unlike a parsed
+            <see cref="T:UltraLiteDB.BsonDocument"/>, members are reported in source order and duplicates are not merged,
+            so callers can detect and locate repeated keys.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.JsonMember.Key">
+            <summary>The member key.</summary>
+        </member>
+        <member name="P:UltraLiteDB.JsonMember.Value">
+            <summary>The member value.</summary>
+        </member>
+        <member name="P:UltraLiteDB.JsonMember.Line">
+            <summary>1-based source line where the key token starts.</summary>
+        </member>
+        <member name="P:UltraLiteDB.JsonMember.Column">
+            <summary>1-based source column where the key token starts.</summary>
+        </member>
         <member name="T:UltraLiteDB.JsonReader">
             <summary>
             Reads and deserializes JSON text into <see cref="T:UltraLiteDB.BsonValue"/> instances using a
@@ -759,6 +779,18 @@
             Expects the input to start with an opening bracket (<c>[</c>).
             </summary>
             <returns>An <see cref="T:System.Collections.Generic.IEnumerable`1"/> of the array elements.</returns>
+        </member>
+        <member name="M:UltraLiteDB.JsonReader.DeserializeMembers">
+            <summary>
+            Deserializes a JSON object from the input, yielding each member lazily as a
+            <see cref="T:UltraLiteDB.JsonMember"/> in source order. Unlike <see cref="M:UltraLiteDB.JsonReader.Deserialize"/> (which builds a
+            <see cref="T:UltraLiteDB.BsonDocument"/> and merges duplicate keys), this yields every member — including
+            duplicates — each tagged with the source line/column of its key, enabling duplicate-key
+            detection and precise error reporting. Expects the input to start with an opening brace
+            (<c>{</c>); an empty input yields no members.
+            </summary>
+            <returns>An <see cref="T:System.Collections.Generic.IEnumerable`1"/> of the object's members.</returns>
+            <exception cref="T:UltraLiteDB.UltraLiteException">Thrown when the JSON is malformed.</exception>
         </member>
         <member name="M:UltraLiteDB.JsonReader.ReadValue(UltraLiteDB.Token)">
             <summary>
@@ -1311,7 +1343,7 @@
             Reads all existing documents to populate the new index. Maximum 16 indexes per collection.
             </summary>
             <param name="collection">The collection name.</param>
-            <param name="field">The field expression to index (supports dot notation).</param>
+            <param name="field">The top-level document field name to index.</param>
             <param name="unique">If true, enforces unique values for this index.</param>
         </member>
         <member name="M:UltraLiteDB.UltraLiteEngine.DropIndex(System.String,System.String)">
@@ -1929,7 +1961,7 @@
             <summary>The field name this query operates on.</summary>
         </member>
         <member name="P:UltraLiteDB.Query.Expression">
-            <summary>Parsed field expression used for evaluating document values during full scan.</summary>
+            <summary>Single top-level field extractor used to read the document value during full scan.</summary>
         </member>
         <member name="P:UltraLiteDB.Query.UseIndex">
             <summary>True if this query will use an index for execution.</summary>
@@ -2456,7 +2488,7 @@
             </summary>
         </member>
         <member name="F:UltraLiteDB.CollectionIndex.IndexPattern">
-            <summary>Regex pattern for valid index field names (supports dot notation, up to 60 segments).</summary>
+            <summary>Regex pattern for valid index field name characters (up to 60 characters).</summary>
         </member>
         <member name="F:UltraLiteDB.CollectionIndex.INDEX_PER_COLLECTION">
             <summary>
@@ -2470,7 +2502,7 @@
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Field">
             <summary>
-            The indexed field name (supports dot notation for nested fields).
+            The indexed field name (a top-level document field).
             </summary>
         </member>
         <member name="P:UltraLiteDB.CollectionIndex.Unique">
@@ -2785,12 +2817,12 @@
         </member>
         <member name="P:UltraLiteDB.BsonMapper.TrimWhitespace">
             <summary>
-            When <c>true</c>, applies <see cref="M:System.String.Trim"/> to string values during serialization. Default is <c>true</c>.
+            When <c>true</c>, applies <see cref="M:System.String.Trim"/> to string values during serialization. Default is <c>false</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.EmptyStringToNull">
             <summary>
-            When <c>true</c>, empty strings are converted to <see cref="F:UltraLiteDB.BsonValue.Null"/> during serialization. Default is <c>true</c>.
+            When <c>true</c>, empty strings are converted to <see cref="F:UltraLiteDB.BsonValue.Null"/> during serialization. Default is <c>false</c>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.BsonMapper.IncludeFields">
@@ -3877,6 +3909,12 @@
             Represent a single string token
             </summary>
         </member>
+        <member name="P:UltraLiteDB.Token.Line">
+            <summary>1-based source line where this token starts (0 if not tracked).</summary>
+        </member>
+        <member name="P:UltraLiteDB.Token.Column">
+            <summary>1-based source column where this token starts (0 if not tracked).</summary>
+        </member>
         <member name="M:UltraLiteDB.Token.Expect(UltraLiteDB.TokenType)">
             <summary>
             Expect if token is type (if not, throw UnexpectedToken)
@@ -3897,6 +3935,12 @@
             Streaming lexer that converts a <see cref="T:System.IO.TextReader"/> into a sequence of <see cref="T:UltraLiteDB.Token"/>s.
             Used by JSON parsing and BSON expression evaluation. Not thread-safe.
             </summary>
+        </member>
+        <member name="P:UltraLiteDB.Tokenizer.Line">
+            <summary>1-based line of the current character.</summary>
+        </member>
+        <member name="P:UltraLiteDB.Tokenizer.Column">
+            <summary>1-based column of the current character.</summary>
         </member>
         <member name="M:UltraLiteDB.Tokenizer.CheckEOF">
             <summary>
@@ -3958,6 +4002,12 @@
             Base exception type for all UltraLiteDB errors. Each error has a numeric <see cref="P:UltraLiteDB.UltraLiteException.ErrorCode"/>
             and static factory methods for common failure scenarios (index violations, lock timeouts, etc.).
             </summary>
+        </member>
+        <member name="P:UltraLiteDB.UltraLiteException.SourceLine">
+            <summary>1-based source line of the offending token (JSON parse errors), if known.</summary>
+        </member>
+        <member name="P:UltraLiteDB.UltraLiteException.SourceColumn">
+            <summary>1-based source column of the offending token (JSON parse errors), if known.</summary>
         </member>
     </members>
 </doc>

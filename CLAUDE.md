@@ -30,6 +30,10 @@ All projects use `dotnet build -c Release`. The Unity project is opened via Unit
 ## Architecture
 
 > In-depth manual for the distributed entity/channel system (annotations & ids, client↔server flow, subscriptions, persistence, client-authoritative, locks, temporal fields, local-only setters): [`docs/DistributedEntities.md`](docs/DistributedEntities.md).
+>
+> Companion manual for the connection & database model (local vs. remote connections, the connect handshake, the action request/reply system, the `Update()` loop, the document database, named locks, broadcasts): [`docs/Connections.md`](docs/Connections.md).
+>
+> Draft/WIP guide to schema versioning & migration (version+checksum guard, adopt-when-safe, standalone-server constraints; large "not yet implemented" + "open questions" sections — the data-migration system is mostly unbuilt): [`docs/SchemaMigration.md`](docs/SchemaMigration.md).
 
 - **Wire protocol**: 4-byte length prefix + 12-byte header + BSON body over TCP
 - **Serialization**: UltraLiteDB's `BsonMapper` for documents; custom binary serializers (readonly structs) for distributed field types
