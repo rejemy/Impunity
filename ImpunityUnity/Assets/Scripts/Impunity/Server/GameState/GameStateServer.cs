@@ -119,6 +119,15 @@ namespace Impunity.GameState
 		}
 	}
 
+	// Internal action queued by the idle-cleanup timer to reap idle channels on the live thread.
+	internal class IdleChannelCleanupAction : LocalGameStateAction
+	{
+		protected override void DoAction(GameStateServer game)
+		{
+			game.CheckIdleChannels();
+		}
+	}
+
 	/// <summary>Core server-side game state manager. Owns the database, live state, and two worker threads (DB and Live). Actions are queued and processed on the appropriate thread.</summary>
 	public class GameStateServer
 	{
@@ -153,6 +162,9 @@ namespace Impunity.GameState
 		private bool MigrationAborting;
 		private IServerSideConnectionProxy? MigrationAbortCloseProxy;
 		private Timer? MigrationTimer;
+		private Timer? IdleCleanupTimer;
+		// Running total of channels reaped by the idle-cleanup pass. Written only on the live thread; int reads are atomic.
+		private volatile int ChannelsReapedTotal;
 
 		BlockingCollection<GameStateActionBase> DBActionQueue;
 		Thread DBWorkerThread;
@@ -200,6 +212,8 @@ namespace Impunity.GameState
 			LiveWorkerThread.IsBackground = false;
 			LiveWorkerThread.Name = "Live state worker";
 			LiveWorkerThread.Start();
+
+			StartIdleCleanupTimer();
 		}
 
 		/// <summary>Opens an existing game world from the database at the given path.</summary>
@@ -413,6 +427,7 @@ namespace Impunity.GameState
 			Running = false;
 
 			StopMigrationTimer();
+			StopIdleCleanupTimer();
 
 			DBActionQueue.CompleteAdding();
 			LiveActionQueue.CompleteAdding();
@@ -1010,6 +1025,51 @@ namespace Impunity.GameState
 			{
 				// Server is shutting down (queue closed); ignore.
 			}
+		}
+
+		private void StartIdleCleanupTimer()
+		{
+			StopIdleCleanupTimer();
+
+			int period = Options.IdleChannelTimeoutMillis;
+			if (period <= 0)
+			{
+				return;
+			}
+
+			int interval = Math.Max(1000, period / 2);
+			IdleCleanupTimer = new Timer(IdleCleanupTimerTick, null, interval, interval);
+		}
+
+		private void StopIdleCleanupTimer()
+		{
+			Timer? timer = IdleCleanupTimer;
+			IdleCleanupTimer = null;
+			timer?.Dispose();
+		}
+
+		private void IdleCleanupTimerTick(object? state)
+		{
+			try
+			{
+				QueueAction(new IdleChannelCleanupAction());
+			}
+			catch (Exception)
+			{
+				// Server is shutting down (queue closed); ignore.
+			}
+		}
+
+		// Runs on the live thread (via IdleChannelCleanupAction) to reap channels idle past the timeout.
+		internal void CheckIdleChannels()
+		{
+			ChannelsReapedTotal += Live.CleanupIdleChannels(GetServerTime(), Options.IdleChannelTimeoutMillis);
+		}
+
+		/// <summary>Total number of idle channels reaped from live memory since this server started. Useful for monitoring and tests.</summary>
+		public int GetReapedChannelCount()
+		{
+			return ChannelsReapedTotal;
 		}
 
 		// Constructor-time recovery for a migration interrupted by a crash/kill.

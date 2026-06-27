@@ -59,6 +59,12 @@ namespace Impunity
 		/// released (an in-progress migration is rolled back from its backup). Reset on every migration operation.
 		/// </summary>
 		public int MigrationIdleTimeoutMillis = 5 * 60 * 1000;
+		/// <summary>
+		/// How long, in milliseconds, a channel may have zero subscribers before it is reaped from live memory.
+		/// Persisted channels keep their database data and reload on the next subscribe; ephemeral channels are
+		/// gone for good. 0 or negative disables idle-channel cleanup.
+		/// </summary>
+		public int IdleChannelTimeoutMillis = 5 * 60 * 1000;
 	}
 
 	/// <summary>Flags describing how a game state entity instance behaves.</summary>

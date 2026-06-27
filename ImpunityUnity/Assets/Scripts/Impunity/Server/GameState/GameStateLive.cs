@@ -71,11 +71,15 @@ namespace Impunity.GameState
 			}
 			ephemerals.Clear();
 
-			foreach (GameStateChannel channel in Subscriptions.Values)
+			// Swap-and-null before iterating so the back-removal in RemoveListener ->
+			// RemoveSubscribedChannel doesn't mutate Subscriptions mid-iteration.
+			Dictionary<uint, GameStateChannel> subs = Subscriptions;
+			Subscriptions = null!;
+			foreach (GameStateChannel channel in subs.Values)
 			{
 				channel.RemoveListener(this);
 			}
-			Subscriptions.Clear();
+			subs.Clear();
 		}
 
 		public void SendMessageViaConnection(ServerActionBase message)
@@ -120,7 +124,10 @@ namespace Impunity.GameState
 
 		public void RemoveSubscribedChannel(GameStateChannel channel)
 		{
-			Subscriptions.Remove(channel.Id);
+			if (Subscriptions != null)
+			{
+				Subscriptions.Remove(channel.Id);
+			}
 		}
 
 	}
@@ -480,12 +487,19 @@ namespace Impunity.GameState
 		public override string ChannelName { get { return Name!; } }
 		Dictionary<string, GameStateObject> UniqueNames;
 
+		/// <summary>Server time (ms) since this channel last had zero subscribers, used by the idle reaper. 0 means it currently has subscribers (active).</summary>
+		public long IdleSinceMillis;
+		/// <summary>Number of connections currently subscribed to this channel.</summary>
+		public int ListenerCount { get { return Listeners.Count; } }
+
 		public GameStateChannel(GameStateLive liveData, GameStateEntityType? typeInfo, byte instanceFlags, string name)
 			: base(liveData, typeInfo, instanceFlags, name)
 		{
 			Members = new Dictionary<uint, GameStateObject>();
 			Listeners = new Dictionary<string, GameStateReplicant>();
 			UniqueNames = new Dictionary<string, GameStateObject>();
+			// Created with no subscribers, so it is idle from birth until someone subscribes.
+			IdleSinceMillis = GameStateServer.GetServerTime();
 		}
 
 		public void AddListener(GameStateReplicant replicant, bool sendCreate)
@@ -497,6 +511,8 @@ namespace Impunity.GameState
 			}
 
 			Listeners.Add(replicant.Id, replicant);
+			replicant.AddSubscribedChannel(this);
+			IdleSinceMillis = 0;
 
 			if (!sendCreate || InLoadingState)
 			{
@@ -524,6 +540,11 @@ namespace Impunity.GameState
 		public void RemoveListener(GameStateReplicant replicant)
 		{
 			Listeners.Remove(replicant.Id);
+			replicant.RemoveSubscribedChannel(this);
+			if (Listeners.Count == 0)
+			{
+				IdleSinceMillis = GameStateServer.GetServerTime();
+			}
 		}
 
 		public bool HasUniqueName(string name)
@@ -630,6 +651,13 @@ namespace Impunity.GameState
 			{
 				member.Cleanup();
 				LiveData.UnregisterEntity(member);
+			}
+
+			// Drop this channel from each remaining listener's subscription map so destroying a
+			// channel that still has listeners leaves no dangling references.
+			foreach (GameStateReplicant listener in Listeners.Values)
+			{
+				listener.RemoveSubscribedChannel(this);
 			}
 
 			Members.Clear();
@@ -1075,6 +1103,44 @@ namespace Impunity.GameState
 			{
 				NamedEntities.Remove(entity.Name);
 			}
+		}
+
+		/// <summary>Reaps channels that have had zero subscribers for at least <paramref name="thresholdMillis"/>.
+		/// Removes each idle channel and all of its member objects from live memory; persisted channels keep
+		/// their database rows and reload lazily on the next subscribe. Runs on the live worker thread, so it
+		/// cannot race with client operations. Returns the number of channels reaped.</summary>
+		public int CleanupIdleChannels(long nowMillis, long thresholdMillis)
+		{
+			List<GameStateChannel>? toReap = null;
+			foreach (GameStateEntity entity in AllEntities.Values)
+			{
+				if (entity is GameStateChannel ch
+					&& !ch.InLoadingState
+					&& !ch.IsLocked()
+					&& ch.ListenerCount == 0
+					&& nowMillis - ch.IdleSinceMillis >= thresholdMillis)
+				{
+					// Collect first; destroying mutates AllEntities so we can't reap during iteration.
+					if (toReap == null)
+					{
+						toReap = new List<GameStateChannel>();
+					}
+					toReap.Add(ch);
+				}
+			}
+
+			if (toReap == null)
+			{
+				return 0;
+			}
+
+			foreach (GameStateChannel ch in toReap)
+			{
+				DestroyEntity(ch, null);
+			}
+
+			ImpunityLogger.LogInformation("Reaped " + toReap.Count + " idle channel(s)");
+			return toReap.Count;
 		}
 
 		public GameStateEntityType GetEntityType(int typeId)
