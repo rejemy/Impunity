@@ -86,14 +86,116 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		/*
-		public static Task EnsureFormatAsync(this BaseGameConnection connection, GameStateFormat format)
+		// -------- Data migration (see docs/guides/SchemaMigration.md)
+
+		/// <summary>
+		/// Connects, and if the server offers a data migration, asks <paramref name="shouldMigrate"/> whether to proceed
+		/// (e.g. show the user a dialog). On yes it runs <paramref name="migrate"/> and commits; on no it declines and
+		/// leaves the world untouched. When no migration is needed this is just a connect. The decision always goes
+		/// through your callback — a migration is never run automatically.
+		/// </summary>
+		public static async Task EnsureFormatAsync(this BaseGameConnection connection, Func<MigrationRequest, Task<bool>> shouldMigrate, Func<MigrationContext, Task> migrate)
+		{
+			await connection.ConnectAsync();
+
+			MigrationRequest? request = connection.PendingMigration;
+			if (request == null)
+			{
+				return;
+			}
+
+			bool proceed = await shouldMigrate(request);
+			if (proceed)
+			{
+				await connection.RunMigrationAsync(migrate);
+			}
+			else
+			{
+				await connection.DeclineMigrationAsync();
+			}
+		}
+
+		/// <summary>
+		/// Runs an offered migration: begins it (snapshotting the world), invokes <paramref name="migrate"/> with a
+		/// <see cref="MigrationContext"/>, then commits. If the delegate throws, the migration is aborted (rolling the
+		/// world back) and the exception is rethrown. Requires <see cref="BaseGameConnection.PendingMigration"/> to be set.
+		/// </summary>
+		public static async Task RunMigrationAsync(this BaseGameConnection connection, Func<MigrationContext, Task> migrate)
+		{
+			MigrationRequest? request = connection.PendingMigration;
+			if (request == null)
+			{
+				throw new InvalidOperationException("No migration was offered for this connection (check PendingMigration after connecting)");
+			}
+
+			await connection.BeginMigrationAsync();
+
+			MigrationContext context = new MigrationContext(connection, request.FromVersion, request.ToVersion);
+			try
+			{
+				await migrate(context);
+			}
+			catch
+			{
+				try { await connection.AbortMigrationAsync(); }
+				catch { /* best effort; the server also rolls back if we disconnect */ }
+				throw;
+			}
+
+			await connection.CommitMigrationAsync();
+			connection.PendingMigration = null;
+		}
+
+		/// <summary>Declines an offered migration, releasing the world's reservation.</summary>
+		public static async Task DeclineMigrationAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.EnsureFormat(format, t.CompleteTask);
+			connection.DeclineMigration(t.OnComplete);
+			await t.Task;
+			connection.PendingMigration = null;
+		}
+
+		public static Task BeginMigrationAsync(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.BeginMigration(t.OnComplete);
 			return t.Task;
 		}
-		*/
+
+		public static Task CommitMigrationAsync(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.CommitMigration(t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task AbortMigrationAsync(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			connection.AbortMigration(t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<List<string>> MigrationGetCollectionsAsync(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource<List<string>>();
+			connection.MigrationGetCollections(t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<List<BsonDocument>> MigrationScanAsync(this BaseGameConnection connection, string collectionName, int skip, int limit)
+		{
+			var t = new ImpunityTaskCompletionSource<List<BsonDocument>>();
+			connection.MigrationScan(collectionName, skip, limit, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> MigrationWriteAsync(this BaseGameConnection connection, string collectionName, MigrationWriteOp op, BsonDocument? doc, BsonValue? id)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			connection.MigrationWrite(collectionName, op, doc, id, t.OnComplete);
+			return t.Task;
+		}
 
 		public static Task<BsonValue> InsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{

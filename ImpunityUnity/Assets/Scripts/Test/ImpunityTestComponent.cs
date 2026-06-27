@@ -489,7 +489,9 @@ public class ImpunityTestComponent : MonoBehaviour
 			LocalGame = new LocalGameConnection(GameServer, CurrFormat);
 
 			await LocalGame.ConnectAsync();
-			//await LocalGame.EnsureFormatAsync(CurrFormat);
+			// To migrate an older save instead of just connecting, use:
+			//   await LocalGame.EnsureFormatAsync(req => Task.FromResult(true), ctx => MyMigrations.Run(ctx));
+			// (see docs/guides/SchemaMigration.md)
 
 			TCPServer = new ImpunityServer(GameServer, Options);
 			TCPServer.Start();

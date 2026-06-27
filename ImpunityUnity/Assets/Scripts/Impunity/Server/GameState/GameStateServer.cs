@@ -71,6 +71,13 @@ namespace Impunity.GameState
 	{
 		protected override void DoAction(GameStateServer game)
 		{
+			// Idempotent: a local connection opens itself in Connect() and the server also opens it during the
+			// handshake, so guard against creating a second (leaked) replicant for the same connection.
+			if (Origin.ConnectionReplicant != null)
+			{
+				return;
+			}
+
 			GameStateReplicant replicant = new GameStateReplicant(Origin);
 			Origin.ConnectionReplicant = replicant;
 
@@ -83,9 +90,32 @@ namespace Impunity.GameState
 	{
 		protected override void DoAction(GameStateServer game)
 		{
+			// If the closing connection owns an offered/in-progress migration, release/roll it back.
+			game.OnConnectionClosedForMigration(Origin);
+
 			GameStateReplicant replicant = Origin.ConnectionReplicant;
 			game.Live.RemoveGameStateReplicant(replicant);
 			Origin.ConnectionReplicant = null!;
+		}
+	}
+
+	/// <summary>The migration state of a game world. Only one connection may own a migration at a time.</summary>
+	public enum MigrationPhase
+	{
+		/// <summary>No migration; the world is open to connections normally.</summary>
+		None,
+		/// <summary>A higher-version client has been offered a migration and the world is reserved for it. Nothing has been changed; the client must explicitly begin or decline.</summary>
+		Offered,
+		/// <summary>The owner has begun migrating; the database has been snapshotted and raw migration operations are allowed.</summary>
+		Migrating
+	}
+
+	// Internal action queued by the migration idle timer to run a timeout check on the live thread.
+	internal class MigrationTimeoutCheckAction : LocalGameStateAction
+	{
+		protected override void DoAction(GameStateServer game)
+		{
+			game.CheckMigrationTimeout();
 		}
 	}
 
@@ -108,6 +138,21 @@ namespace Impunity.GameState
 
 		/// <summary>When true, new connections are rejected (e.g., during shutdown or maintenance).</summary>
 		public bool NewConnectionsDisabled { get; private set; } = false;
+
+		// ----- Data migration state (see docs/guides/SchemaMigration.md). All fields guarded by MigrationLock.
+		// Transitions happen on the live thread; the lock exists so the DB thread (owner checks / activity touches) and
+		// the idle timer thread can read/update safely.
+		private readonly object MigrationLock = new object();
+		private MigrationPhase MigrationPhaseState = MigrationPhase.None;
+		private string? MigrationOwnerId;
+		private IServerSideConnectionProxy? MigrationOwnerProxy;
+		private GameStateFormatData? MigrationTargetFormat;
+		private int MigrationFromVersion;
+		private int MigrationToVersion;
+		private long MigrationLastActivityMillis;
+		private bool MigrationAborting;
+		private IServerSideConnectionProxy? MigrationAbortCloseProxy;
+		private Timer? MigrationTimer;
 
 		BlockingCollection<GameStateActionBase> DBActionQueue;
 		Thread DBWorkerThread;
@@ -133,6 +178,9 @@ namespace Impunity.GameState
 
 			Summary = DB.LoadGameSummary();
 			Metadata = DB.LoadMetadata();
+
+			// If a migration was interrupted (server crash/kill mid-migration), recover before serving anyone.
+			RecoverInterruptedMigration();
 
 			DB.SetFormat(Metadata.Collections);
 			Live.SetFormat(Metadata.EntityTypes);
@@ -209,7 +257,7 @@ namespace Impunity.GameState
 			Listeners.TryRemove(listener.GetHashCode(), out _);
 		}
 
-		/// <summary>Validates the client's format, upgrades if needed, and registers the connection. Called on the live thread. Throws on incompatibility.</summary>
+		/// <summary>Validates the client's format, upgrades or offers a migration if needed, and registers the connection. Called on the live thread. Throws on incompatibility.</summary>
 		public EstablishConnectResult EstablishConnection(IServerSideConnectionProxy proxy, GameStateFormatData format)
 		{
 			if (NewConnectionsDisabled)
@@ -217,15 +265,52 @@ namespace Impunity.GameState
 				throw new ImpunityServerFatalException(ImpunityErrorCode.ServerUnavailable, "Server is busy, try again later");
 			}
 
+			// While a migration is being offered or run, the world is reserved for its owner; turn everyone else away.
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState != MigrationPhase.None)
+				{
+					throw new ImpunityServerFatalException(ImpunityErrorCode.ServerMigrationInProgress, "A migration is in progress, try again later");
+				}
+			}
+
+			EstablishConnectResult result = new EstablishConnectResult();
+			result.ConnectionId = proxy.ConnectionId;
+
 			if (!ValidateFormat(format))
 			{
 				if (Metadata.Version == 0)
 				{
+					// Brand-new world: there is nothing to migrate, just adopt the client's format.
 					UpdateFormat(format, proxy.IsRemote);
 				}
-				else if (Live.NumConnections == 0)
+				else if (format.Version > Metadata.Version)
 				{
-					// We're the only connection, safe to update format
+					// A higher-version client. We do NOT migrate automatically: offer it and let the client decide.
+					bool eligible = !proxy.IsRemote || Options.RemoteUpgradeAllowed;
+					if (!eligible)
+					{
+						throw new ImpunityServerFatalException(ImpunityErrorCode.ServerVersionIncompatible, "Client version doesn't match server version");
+					}
+
+					if (Live.HasOtherConnections(proxy))
+					{
+						// Migration is only offered into a world with no other clients; never evict the clients already playing.
+						throw new ImpunityServerFatalException(ImpunityErrorCode.ServerVersionIncompatible, "Client version doesn't match server version");
+					}
+
+					StartMigrationOffer(proxy, format);
+
+					result.MigrationRequired = true;
+					result.MigrationFromVersion = Metadata.Version;
+					result.MigrationToVersion = format.Version;
+
+					ConnectionOpened(proxy);
+					return result;
+				}
+				else if (!Live.HasOtherConnections(proxy))
+				{
+					// Only connection, same-or-lower version with a different checksum: adopt as before (downgrade rejected inside).
 					UpdateFormat(format, proxy.IsRemote);
 				}
 				else
@@ -235,9 +320,6 @@ namespace Impunity.GameState
 			}
 
 			ConnectionOpened(proxy);
-
-			EstablishConnectResult result = new EstablishConnectResult();
-			result.ConnectionId = proxy.ConnectionId;
 
 			return result;
 		}
@@ -329,6 +411,8 @@ namespace Impunity.GameState
 		public void Dispose()
 		{
 			Running = false;
+
+			StopMigrationTimer();
 
 			DBActionQueue.CompleteAdding();
 			LiveActionQueue.CompleteAdding();
@@ -527,6 +611,19 @@ namespace Impunity.GameState
 		/// <summary>Routes an action to the appropriate worker thread (DB or Live) based on <see cref="GameStateActionBase.IsDBOperation"/>. Immediate actions run inline.</summary>
 		public void QueueAction(GameStateActionBase action)
 		{
+			// While a migration is offered/running, restrict the owner to migration operations and reject everything else
+			// from client connections. Establish is exempt (handled inside EstablishConnection); clock sync is exempt
+			// (part of the handshake and the periodic resync). Internal actions have no Origin and pass through.
+			if (action.Origin != null && !(action is EstablishConnectionAction) && !(action is GetTimeAction))
+			{
+				CheckMigrationGate(action);
+				if (action.Error != null)
+				{
+					SendActionResults(action);
+					return;
+				}
+			}
+
 			if (action.IsImmediate())
 			{
 
@@ -574,6 +671,369 @@ namespace Impunity.GameState
 			action.Origin = connectionProxy;
 			action.ResultsExpected = false;
 			LiveActionQueue.Add(action);
+		}
+
+
+		// ============================ Data migration ============================
+		//
+		// See docs/guides/SchemaMigration.md. The world moves None -> Offered -> Migrating -> None. The offer is
+		// non-destructive (no backup, no marker); only an explicit begin snapshots the DB and unlocks raw migration ops.
+		// Transitions run on the live thread; cross-thread reads/writes are guarded by MigrationLock.
+
+		/// <summary>Reads the current migration phase.</summary>
+		public MigrationPhase GetMigrationPhase()
+		{
+			lock (MigrationLock)
+			{
+				return MigrationPhaseState;
+			}
+		}
+
+		/// <summary>True if the given connection currently owns an offered/in-progress migration.</summary>
+		public bool IsMigrationOwner(string connectionId)
+		{
+			lock (MigrationLock)
+			{
+				return MigrationPhaseState != MigrationPhase.None && MigrationOwnerId == connectionId;
+			}
+		}
+
+		/// <summary>Records migration activity, resetting the idle timeout. Called by migration operations.</summary>
+		public void TouchMigrationActivity()
+		{
+			lock (MigrationLock)
+			{
+				MigrationLastActivityMillis = GetServerTime();
+			}
+		}
+
+		/// <summary>Throws unless a migration is in progress and owned by the given connection. Used to gate raw migration DB operations.</summary>
+		public void EnsureMigratingOwner(IServerSideConnectionProxy origin)
+		{
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState != MigrationPhase.Migrating || MigrationOwnerId != origin.ConnectionId)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ServerMigrationInProgress, "No migration in progress for this connection");
+				}
+			}
+		}
+
+		// Enforces the per-phase whitelist of actions for the migration owner; sets action.Error if disallowed.
+		private void CheckMigrationGate(GameStateActionBase action)
+		{
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState == MigrationPhase.None)
+				{
+					return;
+				}
+
+				if (MigrationOwnerId != action.Origin.ConnectionId)
+				{
+					// Shouldn't normally happen (others can't connect during a migration), but be safe.
+					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerMigrationInProgress, "A migration is in progress");
+					return;
+				}
+
+				bool allowed;
+				if (MigrationPhaseState == MigrationPhase.Offered)
+				{
+					allowed = action is BeginMigrationAction || action is AbortMigrationAction;
+				}
+				else // Migrating
+				{
+					allowed = action is MigrationGetCollectionsAction
+						|| action is MigrationScanAction
+						|| action is MigrationWriteAction
+						|| action is CommitMigrationAction
+						|| action is AbortMigrationAction;
+				}
+
+				if (!allowed)
+				{
+					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerMigrationInProgress, "Only migration operations are allowed while a migration is in progress");
+				}
+			}
+		}
+
+		// Enters the (non-destructive) offered state, reserving the world for this connection.
+		private void StartMigrationOffer(IServerSideConnectionProxy proxy, GameStateFormatData format)
+		{
+			lock (MigrationLock)
+			{
+				MigrationPhaseState = MigrationPhase.Offered;
+				MigrationOwnerId = proxy.ConnectionId;
+				MigrationOwnerProxy = proxy;
+				MigrationTargetFormat = format;
+				MigrationFromVersion = Metadata.Version;
+				MigrationToVersion = format.Version;
+				MigrationLastActivityMillis = GetServerTime();
+				MigrationAborting = false;
+				MigrationAbortCloseProxy = null;
+			}
+
+			StartMigrationTimer();
+
+			ImpunityLogger.LogInformation("Migration offered to " + proxy.ConnectionId + " (v" + Metadata.Version + " -> v" + format.Version + ")");
+		}
+
+		/// <summary>Handles an explicit begin-migration request: transitions to Migrating and snapshots the database. The reply is deferred until the snapshot completes.</summary>
+		public void HandleBeginMigration(GameStateActionBase beginAction)
+		{
+			MigrationMarker marker;
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState != MigrationPhase.Offered || MigrationOwnerId != beginAction.Origin.ConnectionId)
+				{
+					beginAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerMigrationInProgress, "No migration offer for this connection");
+					return;
+				}
+
+				// Flip to Migrating now so a duplicate begin can't start a second backup.
+				MigrationPhaseState = MigrationPhase.Migrating;
+				MigrationLastActivityMillis = GetServerTime();
+				marker = new MigrationMarker(MigrationFromVersion, MigrationToVersion, MigrationOwnerId!, GetServerTime());
+			}
+
+			beginAction.AwaitingTask = true;
+			QueueAction(new MigrationBackupDBAction(marker, beginAction));
+		}
+
+		/// <summary>Called on the live thread after the backup DB action completes, to finish the begin-migration handshake.</summary>
+		public void FinishBeginMigration(GameStateActionBase beginAction, bool backupOk, ImpunityErrorResponse? backupError)
+		{
+			if (backupOk)
+			{
+				lock (MigrationLock)
+				{
+					MigrationLastActivityMillis = GetServerTime();
+				}
+				ImpunityLogger.LogInformation("Migration started for " + beginAction.Origin.ConnectionId);
+			}
+			else
+			{
+				ClearMigrationState();
+				beginAction.Error = backupError ?? new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, "Migration backup failed");
+			}
+
+			SendActionResults(beginAction);
+		}
+
+		/// <summary>Handles a commit request: stamps the new schema version then cleans up the snapshot/marker.</summary>
+		public void HandleCommitMigration(GameStateActionBase commitAction)
+		{
+			GameStateFormatData target;
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState != MigrationPhase.Migrating || MigrationOwnerId != commitAction.Origin.ConnectionId || MigrationAborting)
+				{
+					commitAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerMigrationInProgress, "No migration in progress for this connection");
+					return;
+				}
+				target = MigrationTargetFormat!;
+				MigrationLastActivityMillis = GetServerTime();
+			}
+
+			commitAction.AwaitingTask = true;
+
+			// Stamp the new version + collections (queues UpdateDBFormatAction on the DB thread)...
+			UpdateFormat(target, commitAction.Origin.IsRemote);
+			// ...then delete the snapshot + marker (FIFO after the metadata write) and finish.
+			QueueAction(new MigrationFinalizeDBAction(commitAction));
+		}
+
+		/// <summary>Called on the live thread after the finalize DB action completes.</summary>
+		public void FinishCommitMigration(GameStateActionBase commitAction)
+		{
+			ImpunityLogger.LogInformation("Migration committed (now v" + Metadata.Version + ")");
+			ClearMigrationState();
+			SendActionResults(commitAction);
+		}
+
+		/// <summary>Handles a client-initiated abort/decline.</summary>
+		public void HandleAbortMigration(GameStateActionBase abortAction)
+		{
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState == MigrationPhase.None || MigrationOwnerId != abortAction.Origin.ConnectionId)
+				{
+					abortAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerMigrationInProgress, "No migration to abort for this connection");
+					return;
+				}
+			}
+
+			DoAbortMigration(abortAction, false);
+		}
+
+		// Called when a connection closes; if it owns a migration, roll it back / release the offer.
+		internal void OnConnectionClosedForMigration(IServerSideConnectionProxy proxy)
+		{
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState == MigrationPhase.None || MigrationOwnerId != proxy.ConnectionId)
+				{
+					return;
+				}
+			}
+
+			ImpunityLogger.LogInformation("Migration owner disconnected; aborting migration");
+			DoAbortMigration(null, false);
+		}
+
+		// Live-thread timeout check, scheduled by the idle timer.
+		internal void CheckMigrationTimeout()
+		{
+			long now = GetServerTime();
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState == MigrationPhase.None || MigrationAborting)
+				{
+					return;
+				}
+				if (now - MigrationLastActivityMillis < Options.MigrationIdleTimeoutMillis)
+				{
+					return;
+				}
+			}
+
+			ImpunityLogger.LogWarning("Migration idle timeout; aborting migration");
+			DoAbortMigration(null, true);
+		}
+
+		// Common abort path. For an Offered migration this is purely in-memory; for a Migrating one it restores the
+		// snapshot on the DB thread and finishes in FinishAbortMigration.
+		private void DoAbortMigration(GameStateActionBase? abortAction, bool closeOwner)
+		{
+			MigrationPhase phase;
+			IServerSideConnectionProxy? ownerProxy;
+			GameStateCollection[] collections;
+			lock (MigrationLock)
+			{
+				if (MigrationPhaseState == MigrationPhase.None || MigrationAborting)
+				{
+					return;
+				}
+				phase = MigrationPhaseState;
+				ownerProxy = MigrationOwnerProxy;
+				collections = Metadata.Collections;
+				MigrationAborting = true;
+				MigrationAbortCloseProxy = closeOwner ? ownerProxy : null;
+			}
+
+			if (phase == MigrationPhase.Offered)
+			{
+				// Nothing was changed on disk; just release the reservation.
+				IServerSideConnectionProxy? toClose = MigrationAbortCloseProxy;
+				ClearMigrationState();
+				if (abortAction != null)
+				{
+					SendActionResults(abortAction);
+				}
+				if (toClose != null)
+				{
+					toClose.CloseConnectionRequest();
+				}
+			}
+			else // Migrating
+			{
+				if (abortAction != null)
+				{
+					abortAction.AwaitingTask = true;
+				}
+				QueueAction(new MigrationRestoreDBAction(collections, abortAction));
+			}
+		}
+
+		/// <summary>Called on the live thread after the restore DB action completes.</summary>
+		public void FinishAbortMigration(GameStateActionBase? abortAction)
+		{
+			IServerSideConnectionProxy? toClose = MigrationAbortCloseProxy;
+			ImpunityLogger.LogInformation("Migration aborted; world restored to v" + Metadata.Version);
+			ClearMigrationState();
+
+			if (abortAction != null)
+			{
+				SendActionResults(abortAction);
+			}
+			if (toClose != null)
+			{
+				toClose.CloseConnectionRequest();
+			}
+		}
+
+		private void ClearMigrationState()
+		{
+			lock (MigrationLock)
+			{
+				MigrationPhaseState = MigrationPhase.None;
+				MigrationOwnerId = null;
+				MigrationOwnerProxy = null;
+				MigrationTargetFormat = null;
+				MigrationFromVersion = 0;
+				MigrationToVersion = 0;
+				MigrationAborting = false;
+				MigrationAbortCloseProxy = null;
+			}
+
+			StopMigrationTimer();
+		}
+
+		private void StartMigrationTimer()
+		{
+			StopMigrationTimer();
+
+			int period = Options.MigrationIdleTimeoutMillis;
+			if (period <= 0)
+			{
+				return;
+			}
+
+			int interval = Math.Max(1000, period / 2);
+			MigrationTimer = new Timer(MigrationTimerTick, null, interval, interval);
+		}
+
+		private void StopMigrationTimer()
+		{
+			Timer? timer = MigrationTimer;
+			MigrationTimer = null;
+			timer?.Dispose();
+		}
+
+		private void MigrationTimerTick(object? state)
+		{
+			try
+			{
+				QueueAction(new MigrationTimeoutCheckAction());
+			}
+			catch (Exception)
+			{
+				// Server is shutting down (queue closed); ignore.
+			}
+		}
+
+		// Constructor-time recovery for a migration interrupted by a crash/kill.
+		private void RecoverInterruptedMigration()
+		{
+			MigrationMarker? marker = DB.ReadMigrationMarker();
+			if (marker == null)
+			{
+				return;
+			}
+
+			if (marker.ToVersion == Metadata.Version)
+			{
+				// The commit had already persisted the new version; only cleanup remains.
+				ImpunityLogger.LogInformation("Found completed migration marker (v" + marker.ToVersion + "); cleaning up");
+				DB.ClearMigrationFiles();
+			}
+			else
+			{
+				// Interrupted before commit: restore the pre-migration snapshot.
+				ImpunityLogger.LogWarning("Found interrupted migration (v" + marker.FromVersion + " -> v" + marker.ToVersion + "); restoring backup");
+				DB.RestoreFromMigrationBackup(Metadata.Collections);
+				Metadata = DB.LoadMetadata();
+			}
 		}
 
 

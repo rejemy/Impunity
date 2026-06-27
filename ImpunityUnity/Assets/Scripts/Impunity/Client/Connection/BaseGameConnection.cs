@@ -79,6 +79,15 @@ namespace Impunity.Connection
 		/// <summary>True once the handshake and initial clock sync have completed successfully.</summary>
 		public bool Connected { get; private set; }
 
+		/// <summary>
+		/// Set after <see cref="Connect"/> when this (higher-version) client has been offered a data migration: the world
+		/// is at an older schema version and has been reserved for this connection to migrate. Null when no migration is
+		/// needed. Nothing has been changed on the server yet — call <c>RunMigrationAsync</c> (e.g. after asking the
+		/// user) to perform it, or <see cref="DeclineMigration"/> to release the reservation. See
+		/// <c>docs/guides/SchemaMigration.md</c>.
+		/// </summary>
+		public MigrationRequest? PendingMigration { get; internal set; }
+
 		// Pending WaitForLock callbacks keyed by lock name, fired when a NamedLockUnlocked push arrives. One waiter per
 		// name per connection — a second WaitForLock for the same name replaces the first.
 		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
@@ -142,6 +151,11 @@ namespace Impunity.Connection
 
 
 				this.ConnectionId = result.ConnectionId;
+				if (result.MigrationRequired)
+				{
+					PendingMigration = new MigrationRequest(result.MigrationFromVersion, result.MigrationToVersion);
+					ImpunityLogger.LogInformation("Server offered a data migration: v" + result.MigrationFromVersion + " -> v" + result.MigrationToVersion);
+				}
 				ImpunityLogger.LogInformation("Connected with connection id " + this.ConnectionId);
 				SyncServerTime(synced);
 			}
@@ -364,6 +378,68 @@ namespace Impunity.Connection
 		public void GetGameSummary(ImpunityCallback<BsonDocument>? onComplete)
 		{
 			DoAction(new GetGameSummaryAction(onComplete));
+		}
+
+		// -------- Data migration
+		//
+		// These are the low-level building blocks of the migration flow. Most applications use the higher-level
+		// RunMigrationAsync / DeclineMigrationAsync / EnsureFormatAsync extensions and the MigrationContext helpers
+		// instead of calling these directly. See docs/guides/SchemaMigration.md.
+
+		/// <summary>Explicitly begins the migration the server offered (see <see cref="PendingMigration"/>): the server snapshots the world and unlocks raw migration operations.</summary>
+		/// <param name="onComplete">Invoked on the main thread with null once the snapshot is taken and migration may proceed, or an error (e.g. no migration was offered to this connection).</param>
+		public void BeginMigration(ImpunityCallback? onComplete)
+		{
+			DoAction(new BeginMigrationAction(onComplete));
+		}
+
+		/// <summary>Commits the migration: the server stamps the new schema version, discards the snapshot, and reopens the world. After this the connection is a normal client at the new version.</summary>
+		/// <param name="onComplete">Invoked on the main thread with null once the new version is committed, or an error (e.g. no migration is in progress for this connection).</param>
+		public void CommitMigration(ImpunityCallback? onComplete)
+		{
+			DoAction(new CommitMigrationAction(onComplete));
+		}
+
+		/// <summary>Aborts an in-progress migration, rolling the world back to its pre-migration snapshot.</summary>
+		/// <param name="onComplete">Invoked on the main thread with null once the world has been rolled back and reopened, or an error.</param>
+		public void AbortMigration(ImpunityCallback? onComplete)
+		{
+			DoAction(new AbortMigrationAction(onComplete));
+		}
+
+		/// <summary>Declines an offered migration, releasing the world's reservation. Equivalent to <see cref="AbortMigration"/> while only offered (nothing has been changed).</summary>
+		/// <param name="onComplete">Invoked on the main thread with null once the reservation is released, or an error.</param>
+		public void DeclineMigration(ImpunityCallback? onComplete)
+		{
+			DoAction(new AbortMigrationAction(onComplete));
+		}
+
+		/// <summary>Lists every collection name in the world, including old/renamed collections and the reserved live-entities collection. Valid only while this connection is migrating.</summary>
+		/// <param name="onComplete">Invoked on the main thread with the list of collection names, or an error (e.g. if no migration is in progress for this connection).</param>
+		public void MigrationGetCollections(ImpunityCallback<List<string>>? onComplete)
+		{
+			DoAction(new MigrationGetCollectionsAction(onComplete));
+		}
+
+		/// <summary>Reads a page of raw documents from a named collection. Valid only while this connection is migrating.</summary>
+		/// <param name="collectionName">The name of the collection to read from.</param>
+		/// <param name="skip">Number of documents to skip (for paging through large collections).</param>
+		/// <param name="limit">Maximum number of documents to return in this page.</param>
+		/// <param name="onComplete">Invoked on the main thread with the page of raw documents, or an error.</param>
+		public void MigrationScan(string collectionName, int skip, int limit, ImpunityCallback<List<BsonDocument>>? onComplete)
+		{
+			DoAction(new MigrationScanAction(collectionName, skip, limit, onComplete));
+		}
+
+		/// <summary>Performs a single raw write against a named collection. Valid only while this connection is migrating.</summary>
+		/// <param name="collectionName">The name of the collection to write to (created on demand for inserts/upserts).</param>
+		/// <param name="op">Which write to perform: insert, upsert, update, or delete.</param>
+		/// <param name="doc">The document to write (matched/keyed by its <c>_id</c>); required for insert/upsert/update, ignored for delete.</param>
+		/// <param name="id">The <c>_id</c> of the document to delete; used only for <see cref="MigrationWriteOp.Delete"/>.</param>
+		/// <param name="onComplete">Invoked on the main thread with the write's success flag, or an error.</param>
+		public void MigrationWrite(string collectionName, MigrationWriteOp op, BsonDocument? doc, BsonValue? id, ImpunityCallback<bool>? onComplete)
+		{
+			DoAction(new MigrationWriteAction(collectionName, op, doc, id, onComplete));
 		}
 
 		// -------- DB actions

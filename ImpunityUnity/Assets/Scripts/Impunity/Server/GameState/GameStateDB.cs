@@ -21,12 +21,21 @@ namespace Impunity.GameState
 		private const string GameDBFile = "Game.db";
 		private const string GameSummaryFile = "Summary.dat";
 		private const string MetadataCollection = "_metadata";
+		private const string MigrationBackupFile = "Game.db.migration.bak";
+		private const string MigrationMarkerFile = "migration.dat";
+
+		/// <summary>Name of the reserved internal collection that stores persisted live entities. Exposed for migration tooling.</summary>
+		public const string EntitiesCollectionName = "Entities";
 
 		string RootDirectory;
 		string DBFilename;
 
 		UltraLiteDatabase GameDB = null!;
 		CollectionData[] Collections = null!;
+
+		// Remembered so the database can close and reopen itself for migration backup/restore.
+		ImpunityOptions? Options;
+		GameStateCollection[]? CurrentCollections;
 
 
 
@@ -99,6 +108,8 @@ namespace Impunity.GameState
 		{
 			if (GameDB != null)
 				return;
+
+			Options = options;
 
 			GameDB = new UltraLiteDatabase(
 				new ConnectionString
@@ -212,6 +223,8 @@ namespace Impunity.GameState
 				return;
 			}
 
+			CurrentCollections = collections;
+
 			int highestIndex = collections[collections.Length - 1].Index;
 
 			Collections = new CollectionData[highestIndex + 1];
@@ -225,7 +238,7 @@ namespace Impunity.GameState
 			//collectionNames.Add(channelCollection.Name);
 
 			CollectionData entityCollection = new CollectionData();
-			entityCollection.Name = "Entities";
+			entityCollection.Name = EntitiesCollectionName;
 			entityCollection.Collection = GameDB.GetCollection<BsonDocument>(entityCollection.Name);
 			entityCollection.Collection.EnsureIndex("ch");
 			Collections[(int)ImpunityInternalCollectionIds.Entities] = entityCollection;
@@ -519,6 +532,151 @@ namespace Impunity.GameState
 			}
 
 			return channelData;
+		}
+
+		// ------------ Migration support -----------------
+		//
+		// These methods support the data-migration flow (see docs/guides/SchemaMigration.md). Backup/restore close and
+		// reopen the underlying file, which is safe because migration runs with the world exclusively locked. The
+		// name-addressed raw API lets migration code read old-shaped collections and write new ones without going
+		// through the index-based document API (UltraLiteDB keys collections by name, so a renamed collection is just a
+		// different name). All of these run on the DB worker thread.
+
+		private string BackupFilePath { get { return Path.Combine(RootDirectory, MigrationBackupFile); } }
+		private string MarkerFilePath { get { return Path.Combine(RootDirectory, MigrationMarkerFile); } }
+
+		// Closes the database, copies the live file to backupPath, then reopens and restores the current layout.
+		private void BackupTo(string backupPath)
+		{
+			GameStateCollection[]? collections = CurrentCollections;
+			ImpunityOptions? options = Options;
+
+			GameDB.Dispose();
+			GameDB = null!;
+
+			File.Copy(DBFilename, backupPath, true);
+
+			OpenDatabase(options);
+			if (collections != null)
+			{
+				SetFormat(collections);
+			}
+		}
+
+		// Closes the database, replaces the live file with backupPath, then reopens with the given layout.
+		private void RestoreFrom(string backupPath, GameStateCollection[] collections)
+		{
+			ImpunityOptions? options = Options;
+
+			GameDB.Dispose();
+			GameDB = null!;
+
+			File.Copy(backupPath, DBFilename, true);
+
+			OpenDatabase(options);
+			if (collections != null)
+			{
+				SetFormat(collections);
+			}
+		}
+
+		/// <summary>Snapshots the database and writes the migration marker. Called once when a migration begins. The marker is written <em>after</em> the snapshot so its presence guarantees a complete backup.</summary>
+		public void BackupForMigration(MigrationMarker marker)
+		{
+			BackupTo(BackupFilePath);
+
+			BsonDocument markerDoc = ImpunityUtil.GetBsonMapper().ToDocument(marker);
+			File.WriteAllBytes(MarkerFilePath, BsonSerializer.Serialize(markerDoc));
+		}
+
+		/// <summary>Reads the migration marker, or null if none is present (no migration was in progress at last shutdown).</summary>
+		public MigrationMarker? ReadMigrationMarker()
+		{
+			if (!File.Exists(MarkerFilePath))
+			{
+				return null;
+			}
+
+			try
+			{
+				byte[] bytes = File.ReadAllBytes(MarkerFilePath);
+				BsonDocument doc = BsonSerializer.Deserialize(bytes);
+				return ImpunityUtil.GetBsonMapper().ToObject<MigrationMarker>(doc);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Error reading migration marker: " + e.Message);
+				return null;
+			}
+		}
+
+		/// <summary>Rolls the database back to the pre-migration snapshot (if any) and clears the migration files.</summary>
+		public void RestoreFromMigrationBackup(GameStateCollection[] collections)
+		{
+			if (File.Exists(BackupFilePath))
+			{
+				RestoreFrom(BackupFilePath, collections);
+			}
+			ClearMigrationFiles();
+		}
+
+		/// <summary>Deletes the migration marker and backup snapshot, if present (used on commit and to clean up stray files).</summary>
+		public void ClearMigrationFiles()
+		{
+			if (File.Exists(MarkerFilePath))
+			{
+				File.Delete(MarkerFilePath);
+			}
+			if (File.Exists(BackupFilePath))
+			{
+				File.Delete(BackupFilePath);
+			}
+		}
+
+		/// <summary>Returns the names of all real collections, excluding the reserved metadata collection. For migration tooling.</summary>
+		public List<string> GetAllCollectionNames()
+		{
+			List<string> names = new List<string>();
+			foreach (string name in GameDB.GetCollectionNames())
+			{
+				if (name == MetadataCollection)
+				{
+					continue;
+				}
+				names.Add(name);
+			}
+			return names;
+		}
+
+		/// <summary>Returns a page of raw documents from a named collection. Page with skip/limit to stay under the wire message size. For migration tooling.</summary>
+		public List<BsonDocument> ScanCollectionByName(string name, int skip, int limit)
+		{
+			var collection = GameDB.GetCollection<BsonDocument>(name);
+			return new List<BsonDocument>(collection.Find(Query.All(), skip, limit));
+		}
+
+		/// <summary>Inserts a raw document into a named collection. Returns the document's _id. For migration tooling.</summary>
+		public BsonValue InsertByName(string name, BsonDocument doc)
+		{
+			return GameDB.GetCollection<BsonDocument>(name).Insert(doc);
+		}
+
+		/// <summary>Inserts or replaces a raw document (by _id) in a named collection. Returns true if inserted as new, false if it replaced an existing one. For migration tooling.</summary>
+		public bool UpsertByName(string name, BsonDocument doc)
+		{
+			return GameDB.GetCollection<BsonDocument>(name).Upsert(doc);
+		}
+
+		/// <summary>Replaces an existing raw document (by _id) in a named collection. Returns true if a matching document was found and replaced. For migration tooling.</summary>
+		public bool UpdateByName(string name, BsonDocument doc)
+		{
+			return GameDB.GetCollection<BsonDocument>(name).Update(doc);
+		}
+
+		/// <summary>Deletes a raw document by _id from a named collection. Returns true if a matching document was found and deleted. For migration tooling.</summary>
+		public bool DeleteByName(string name, BsonValue id)
+		{
+			return GameDB.GetCollection<BsonDocument>(name).Delete(id);
 		}
 	}
 

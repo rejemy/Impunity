@@ -33,7 +33,7 @@ All projects use `dotnet build -c Release`. The Unity project is opened via Unit
 >
 > Companion manual for the connection & database model (local vs. remote connections, the connect handshake, the action request/reply system, the `Update()` loop, the document database, named locks, broadcasts): [`docs/guides/Connections.md`](docs/guides/Connections.md).
 >
-> Draft/WIP guide to schema versioning & migration (version+checksum guard, adopt-when-safe, standalone-server constraints; large "not yet implemented" + "open questions" sections — the data-migration system is mostly unbuilt): [`docs/guides/SchemaMigration.md`](docs/guides/SchemaMigration.md).
+> Guide to schema versioning & migration (version+checksum guard, adopt-when-safe, and the implemented client-driven **data migration** flow: a higher-version client is *offered* a migration, runs it via raw name-addressed DB ops through `MigrationContext`, then commits — with server-side snapshot/restore, an ephemeral lock, idle timeout, and crash recovery): [`docs/guides/SchemaMigration.md`](docs/guides/SchemaMigration.md).
 
 - **Wire protocol**: 4-byte length prefix + 12-byte header + BSON body over TCP
 - **Serialization**: UltraLiteDB's `BsonMapper` for documents; custom binary serializers (readonly structs) for distributed field types

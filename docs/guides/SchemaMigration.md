@@ -1,9 +1,8 @@
 # Schema Migration & Versioning
 
-How Impunity guards a saved game against incompatible client versions, how it currently adopts a new schema, and what a full **data migration** story still needs.
+How Impunity guards a saved game against incompatible client versions, how it adopts a new schema, and how a higher-version client **migrates** an older save's data.
 
-> **⚠️ Status: partially implemented — this is a design-and-state-of-play document, not a finished feature.**
-> What works today is the *versioning guard*: client and server agree on a schema **version + checksum**, and the server will **adopt** a new schema when it is safe to do so. What does **not** exist yet is **data transformation** — nothing rewrites existing stored documents or persisted entities into a new shape, and there is no coordinated "lock the world and migrate" flow for multi-client / standalone hosting. Sections below are tagged **(implemented)** or **(not yet implemented)** so the two are never confused.
+> **Status: implemented.** The *versioning guard* (client and server agree on a schema **version + checksum**, and the server **adopts** a new schema when safe) and the **data migration** flow (a higher-version client is *offered* a migration, explicitly runs it through raw database operations, and commits, with the server snapshotting the world as a safety net) both exist. The flow is **client-driven**: Impunity coordinates (who may migrate, locking others out, snapshot/restore) but the game's own code performs every data transformation. See [§7](#7-the-migration-flow) for the built design.
 
 This guide builds on [`Connections.md`](Connections.md) (the handshake and the action system) and [`DistributedEntities.md`](DistributedEntities.md) (especially the *durable id* discussion in its §2). Read those first.
 
@@ -16,9 +15,9 @@ This guide builds on [`Connections.md`](Connections.md) (the handshake and the a
 3. [The connect-time guard](#3-the-connect-time-guard) — *(implemented)*
 4. [Adopting a new schema](#4-adopting-a-new-schema) — *(implemented)*
 5. [What survives a schema change](#5-what-survives-a-schema-change)
-6. [Standalone server mode: the hard case](#6-standalone-server-mode-the-hard-case)
-7. [The intended design](#7-the-intended-design-not-yet-built) — *(not yet built)*
-8. [Open questions](#8-open-questions)
+6. [Standalone server mode](#6-standalone-server-mode)
+7. [The migration flow](#7-the-migration-flow) — *(implemented)*
+8. [Notes & remaining sharp edges](#8-notes--remaining-sharp-edges)
 9. [Quick reference](#9-quick-reference)
 
 ---
@@ -55,23 +54,29 @@ The server stores the currently-adopted version and checksum in its `GameMetadat
 Every connection runs `GameStateServer.EstablishConnection` during its handshake. The relevant logic:
 
 ```
-if (NewConnectionsDisabled)          → fatal: ServerUnavailable
-if (!ValidateFormat(clientFormat))   → the client's version+checksum don't match the world's:
-       if   world is brand new (Metadata.Version == 0)   → adopt the client's format
-       elif this is the only connection (NumConnections == 0) → adopt the client's format
-       else                                              → fatal: ServerVersionIncompatible
+if (NewConnectionsDisabled)              → fatal: ServerUnavailable
+if (a migration is offered or running)   → fatal: ServerMigrationInProgress   (world reserved for its owner)
+if (!ValidateFormat(clientFormat)):      → version+checksum don't match the world's:
+    if   world is brand new (Version == 0)         → adopt the client's format
+    elif clientVersion > worldVersion:             → OFFER a migration (see §7), unless:
+            remote client and !RemoteUpgradeAllowed   → fatal: ServerVersionIncompatible
+            any other client is connected             → fatal: ServerVersionIncompatible
+    elif no other client is connected              → adopt the client's format
+    else                                           → fatal: ServerVersionIncompatible
 ConnectionOpened(...)
 ```
 
-`ValidateFormat` is a strict equality check on both version and checksum. So a connecting client is in one of three situations:
+`ValidateFormat` is a strict equality check on both version and checksum. So a connecting client is in one of these situations:
 
 | Situation | Result |
 |---|---|
 | Format matches the world | Connects normally. |
-| Format differs, and the world is empty (or brand new) | The world **adopts** the client's format ([§4](#4-adopting-a-new-schema)), then the client connects. |
-| Format differs, and other clients are already connected | Rejected with a fatal `ServerVersionIncompatible`. |
+| Format differs, world brand new (or same/lower version with no other clients) | The world **adopts** the client's format ([§4](#4-adopting-a-new-schema)), then the client connects. |
+| **Client version is *higher*, eligible, world has no other clients** | The client is **offered a migration** ([§7](#7-the-migration-flow)) — it connects, but must explicitly run or decline it. Nothing is changed yet. |
+| Client version higher but ineligible (remote without `RemoteUpgradeAllowed`) or other clients present | Rejected with a fatal `ServerVersionIncompatible`. |
+| A migration is already offered/running | Rejected with `ServerMigrationInProgress`. |
 
-This is the entire safety model today: **the first client into an empty world sets the schema; everyone after must match, or be turned away.** There is no negotiation and no partial compatibility.
+So: a matching client connects; a higher-version client into an empty world is offered a migration; everyone else is turned away. Existing clients are **never** evicted to make room for a migration.
 
 ---
 
@@ -90,9 +95,9 @@ When the guard decides adoption is safe it calls `GameStateServer.UpdateFormat`,
 - ✅ It records the new version/checksum and rebuilds the set of document collections (`GameStateDB.SetFormat`). New collections become available.
 - ❌ It does **not** transform a single byte of existing data. Old documents keep their old shape. A removed collection's documents are simply orphaned in the underlying file (no longer surfaced). A renamed collection appears as a new, empty one and orphans the old. Persisted live entities are untouched.
 
-So "adopt" today means "accept the new schema label and make room for new collections" — **not** "migrate the data." For additive changes (new collection, new field, new entity type) that is often fine, because old data is read through code that simply finds the new field absent. For destructive or transforming changes (rename, retype, split/merge a field) there is no support yet — see [§7](#7-the-intended-design-not-yet-built).
+So "adopt" means "accept the new schema label and make room for new collections" — **not** "migrate the data." For additive changes (new collection, new field, new entity type) that is often fine, because old data is read through code that simply finds the new field absent. For destructive or transforming changes (rename, retype, split/merge a field), use the **migration flow** ([§7](#7-the-migration-flow)), which adopts the new format only after the client has rewritten the data.
 
-> **Brand-new-world gotcha.** Because a fresh world has `Metadata.Version == 0`, the *very first* connection always triggers `UpdateFormat`. For a **remote** first client that means initializing a brand-new world **requires `RemoteUpgradeAllowed = true`** (otherwise the first client is rejected). This is exactly why the standalone server sets it — see [§6](#6-standalone-server-mode-the-hard-case). A local connection can always initialize a world.
+> **Brand-new-world gotcha.** Because a fresh world has `Metadata.Version == 0`, the *very first* connection always triggers `UpdateFormat`. For a **remote** first client that means initializing a brand-new world **requires `RemoteUpgradeAllowed = true`** (otherwise the first client is rejected). This is exactly why the standalone server sets it — see [§6](#6-standalone-server-mode). A local connection can always initialize a world.
 
 ---
 
@@ -110,78 +115,103 @@ As [`DistributedEntities.md`](DistributedEntities.md) §2 spells out, **numeric 
 
 ---
 
-## 6. Standalone server mode: the hard case
+## 6. Standalone server mode
 
-In a self-hosted/local setup the host *is* the authority and usually the first (local) connection, so it naturally sets the schema before anyone else joins. The **standalone server** breaks that assumption, and is where the unsolved problems live.
+In a self-hosted/local setup the host *is* the authority and usually the first (local) connection, so it naturally sets the schema before anyone else joins. The **standalone server** is the multi-client case where migration coordination matters most.
 
-How it works today (`ImpunityStandaloneServer`):
+How it works (`ImpunityStandaloneServer`):
 
-- At startup `WorldService` opens **every** configured world with `GameStateServer.OpenOrCreate` and keeps them running for the process lifetime.
-- `ConnectionService` hosts them all through one `ImpunityServer`, with `RemoteUpgradeAllowed = true` (set in `Program.cs`).
+- At startup `WorldService` opens **every** configured world with `GameStateServer.OpenOrCreate` and keeps them running for the process lifetime. Each world recovers from an interrupted migration on open (see [§7](#7-the-migration-flow)).
+- `ConnectionService` hosts them all through one `ImpunityServer`, with `RemoteUpgradeAllowed = true` (set in `Program.cs`) so any remote client may migrate. **Embedded** servers leave it `false`, so only the local (in-process) connection can.
 
-Put that together with the guard ([§3](#3-the-connect-time-guard)) and the picture is:
+Put that together with the guard ([§3](#3-the-connect-time-guard)):
 
-- A world is empty until the first client connects. **The first client to reach an empty world wins** — its format is adopted. Every later client must match it.
-- If a new-build client and an old-build client race for an empty (or freshly restarted) world, whichever lands first sets the schema and the other is rejected with `ServerVersionIncompatible`.
-- There is **no coordination primitive** to say "I am about to migrate this world; hold all other connections until I'm done." The pieces that *would* support it exist but are inert:
-  - `GameStateServer.NewConnectionsDisabled` is checked in `EstablishConnection` but is **never set anywhere** — there is no API to raise it.
-  - There is no "migrating" state on a world, no migration lock, and no way for a client to *request* exclusive migration access.
-
-So the requirement you described — *"one client must lock the game and do the migration before any other clients connect"* — is **not yet expressible.** The closest thing today is the accidental "first into an empty world wins," which is a race, not a lock. The intended flow that fixes this is [§7](#7-the-intended-design-not-yet-built).
+- A world is empty until the first client connects. A matching-version client just plays. A **higher-version** client into an empty world is **offered a migration** ([§7](#7-the-migration-flow)) and, while it holds that offer (or runs the migration), the world is reserved — every other connection is refused with `ServerMigrationInProgress`.
+- A higher-version client that arrives while **other clients are connected** is rejected with `ServerVersionIncompatible`; the running clients are never disturbed. The migrator must wait for the world to empty.
+- The coordination primitives that were once dormant are now live: the per-world migration state machine (`Open → Offered → Migrating → Open`) replaces the never-set `NewConnectionsDisabled` flag, and the ephemeral, connection-bound migration lock releases automatically on disconnect.
 
 ---
 
-## 7. The intended design (not yet built)
+## 7. The migration flow
 
-This is the target flow. **None of it is implemented yet** — it is recorded here so the build has a spec and so the open problems ([§8](#8-open-questions)) have context.
+Guiding principle: **Impunity is data-agnostic; the client owns migration.** The server cannot know whether or how stored data needs to change — only the game's own code does. So the server's job is purely to *coordinate* (decide who may migrate, keep everyone else out, snapshot/restore as a safety net), while the **client performs every transformation through raw database operations.** Migration is **explicit and user-driven**: connecting never starts one automatically.
 
-Guiding principle: **Impunity is data-agnostic; the client owns migration.** The server cannot know whether or how stored data needs to change — only the game's own code does. So the server's job is purely to *coordinate* (decide who migrates, keep everyone else out, and provide a safety net), while the **client performs every transformation through ordinary database operations.**
+### Two phases: offer, then migrate
 
-### The happy path
+A migration moves the world through three states (`MigrationPhase`): `Open → Offered(owner) → Migrating(owner) → Open`.
 
-1. A client built at version **Y** connects to a world whose stored version is **X < Y** (detected by the version/checksum guard, [§3](#3-the-connect-time-guard)).
-2. Instead of adopting the format immediately, the server grants that client an exclusive **migration lock** on the world and refuses all other connections (`ServerUnavailable`, "try again later") for the duration.
-3. Before any change, the server **snapshots the database** (the pre-migration backup) and records a persistent "migration in progress" marker (`from X`, `to Y`, owner, timestamp).
-4. The client's **migrations manager** runs **stepwise** transforms — X→X+1→X+2→…→Y — each step a batch of database operations that reads old-shaped data and writes new-shaped data. Stepwise means a save that skipped releases is carried forward one version at a time.
-5. When all steps succeed the client **commits**: the server stamps the new version/checksum (`UpdateFormat`, [§4](#4-adopting-a-new-schema)), discards the backup and marker, releases the lock, and reopens the world to everyone. The migrating client is now a normal connected client at version Y.
+1. **Offer (automatic, non-destructive).** A client built at version **Y** connects to a world at version **X < Y**. The guard ([§3](#3-the-connect-time-guard)) sees it is eligible (a local connection, or remote with `RemoteUpgradeAllowed`) and that no other client is connected, and puts the world in **Offered**: it reserves the world for this connection and replies with a successful connect carrying `MigrationRequired`/`from`/`to`. **Nothing is changed** — no snapshot, no marker, the DB is untouched. The client surfaces this as `BaseGameConnection.PendingMigration`; the game can now show a "migrate this save?" dialog. While offered, the only actions this connection may take are *begin* or *decline*; every other connection is refused with `ServerMigrationInProgress`.
 
-### Abort & recovery (the hard part — see [§8](#8-open-questions))
+2. **Migrate (explicit).** On the user's go-ahead the client sends **begin** (`RunMigrationAsync` → `BeginMigrationAction`). The world transitions to **Migrating**: the server **snapshots the database** (close → copy → reopen) and writes a persistent **marker** (`from`, `to`, owner, timestamp), then replies success. Now the client's migration delegate runs, issuing raw operations through a `MigrationContext` (see below). On success the client sends **commit** (`CommitMigrationAction`): the server stamps the new version/checksum (`UpdateFormat`, [§4](#4-adopting-a-new-schema)), discards the snapshot and marker, releases the world, and the *same connection becomes a normal client at version Y*.
 
-Because the migrating client does the work, the dangerous case is **it goes away mid-migration**, leaving the database half-converted. The safety net is the backup: on any abort the server **restores the pre-migration snapshot**, returning the world to a clean version X so the next eligible client can retry from scratch. (Restoring the whole DB means individual steps need not be resumable or idempotent — a retry simply starts over.) Three abort triggers:
+Declining (or just disconnecting) while only offered releases the reservation with zero on-disk footprint.
 
-- **The migrator disconnects.** The migration lock should be *ephemeral* (tied to the connection, released on disconnect — the mechanism that already cleans up [named locks](Connections.md#8-named-locks) and delete-on-disconnect entities). On release-without-commit the server restores the backup.
-- **The migrator stalls.** A connected-but-wedged client needs a **timeout** so the world isn't locked forever; on expiry the server aborts and restores. (Timeout policy is open — see [§8](#8-open-questions).)
-- **The server itself restarts mid-migration.** On startup it finds the marker plus a still-uncommitted version X and restores the backup before accepting connections.
+### The migration delegate and `MigrationContext`
 
-### What has to be built
+You register the migration logic as a **single delegate** `Func<MigrationContext, Task>` and drive it via the connection extensions:
 
-- **`EnsureFormat` / `EnsureFormatAsync`** on `BaseGameConnection` — the client entry point ("bring this world up to my format, migrating if needed"). It is already referenced (commented out in `GameConnectionAsyncExt.cs` and the legacy test) but does not exist; it is the natural driver of the whole dance, calling back into the client's migrations manager.
-- **A per-world migration state** (`Open → Migrating(owner, X→Y) → Open` on commit, or back to `Open` on abort) with an **ephemeral, exclusive lock**. `GameStateServer.NewConnectionsDisabled` is the existing-but-inert blunt instrument; this likely wants to be a richer per-world state than one global boolean.
-- **Backup / restore** of the UltraLiteDB file, plus the persistent in-progress marker for crash recovery, plus the **timeout**.
-- **The client-side migrations manager** — the registry of ordered version-to-version steps and the engine that runs them via DB operations.
-- **Access, from migration code, to pre-migration data** — including collections and persisted entities the *current* format may no longer declare ([§8](#8-open-questions)).
+```csharp
+// Show the user a dialog, then migrate if they agree (connects first):
+await connection.EnsureFormatAsync(
+    shouldMigrate: req => ui.AskAsync($"Upgrade save from v{req.FromVersion} to v{req.ToVersion}?"),
+    migrate: async ctx =>
+    {
+        // ctx.FromVersion / ctx.ToVersion let you branch across version gaps yourself.
+        foreach (var doc in await ctx.ListAsync("Items"))
+        {
+            doc["power"] = doc["power"].AsInt32 * 2;   // reshape old data
+            await ctx.UpsertAsync("Items", doc);
+        }
+    });
+```
+
+Or do it in explicit steps: `await connection.ConnectAsync();` then inspect `connection.PendingMigration`; call `connection.RunMigrationAsync(migrate)` to perform it or `connection.DeclineMigrationAsync()` to decline. Keep calling `connection.Update()` while it runs (migration replies are delivered there, like every other call).
+
+`MigrationContext` exposes raw, **name-addressed** access (UltraLiteDB keys collections by *name*, so a renamed collection is simply a different name — your delegate reads the old name and writes the new one):
+
+| Member | Purpose |
+|---|---|
+| `FromVersion` / `ToVersion` | The version range being migrated. |
+| `GetCollectionNamesAsync()` | Every collection present (including old/renamed ones and the live-entities collection). |
+| `ListAsync(name)` / `ScanPageAsync(name, skip, limit)` | Read raw documents (paged internally to stay under the wire size). |
+| `InsertAsync` / `UpsertAsync` / `UpdateAsync` / `DeleteAsync(name, …)` | Raw writes by `_id`. |
+| `ScanEntitiesAsync()` | Read persisted live entities as `MigrationEntityRow` (id, channel, type id, flags, property→BSON). |
+| `WriteEntityAsync(row)` / `DeleteEntityAsync(row)` | Write/remove a persisted live entity (metadata row + property rows). |
+
+Persisted live entities live in the reserved `"Entities"` collection with the row layout `_id`/`ch`/`t`/`f` (metadata) and `entityId/propertyName` → `v` (one row per persisted property). The `*Entity*` helpers group and rebuild that layout for you; the raw `*Async` calls can also reach it directly via `MigrationContext.EntitiesCollectionName`.
+
+### Abort & recovery
+
+Because the client does the work, the dangerous case is it going away mid-migration. The snapshot is the safety net: on any abort the server **restores the pre-migration snapshot**, returning the world to a clean version X so the next eligible client can retry from scratch (restoring the whole file means delegate code need not be resumable or idempotent). Triggers:
+
+- **The migrator disconnects.** The migration lock is *ephemeral* — bound to the connection and released on disconnect, the same lifecycle as [named locks](Connections.md#8-named-locks). If it had begun (snapshot taken), the server restores; if only offered, it just releases.
+- **The migrator stalls.** An idle/progress timer (`ImpunityOptions.MigrationIdleTimeoutMillis`, reset on every migration operation) aborts a connected-but-wedged migrator so the world isn't locked forever.
+- **The server restarts mid-migration.** On open it finds the marker: if `marker.ToVersion == Metadata.Version` the commit had already landed (just clean up), otherwise it restores the snapshot before accepting any connection. An interrupted *offer* leaves no marker, so there is nothing to recover.
+
+### Where it lives
+
+- Client: `BaseGameConnection.PendingMigration`, the `RunMigration`/`DeclineMigration` calls and their `…Async` / `EnsureFormatAsync` extensions, and `MigrationContext` / `MigrationEntityRow`.
+- Server: the `MigrationPhase` state machine and offer/begin/commit/abort handlers on `GameStateServer`; backup/restore, the marker, and the name-addressed raw API on `GameStateDB`.
 
 ---
 
-## 8. Open questions
+## 8. Notes & remaining sharp edges
 
-The design in [§7](#7-the-intended-design-not-yet-built) settles the big shape (client-driven, stepwise, connect-and-lock, snapshot-and-restore). These are the decisions still genuinely open — the working agenda.
+1. **Collection rename = copy old name → new name.** Because UltraLiteDB stores collections by name, "renaming" a collection in version Y points its index at a new, empty collection; the old data sits under the old name until a migration step copies it across. (A collection's numeric *index* is still recommended to be immutable like type/field ids, but migration no longer depends on it because it addresses collections by name.)
 
-1. **Timeout policy for a stalled migrator.** A flat wall-clock deadline is simple but risks killing a legitimately slow migration of a large save. A progress-based timer (reset on each completed step, or on any migration DB activity) tolerates long migrations while still catching a true hang. Disconnect detection already covers crashes; the timeout only needs to catch "connected but wedged." *Leaning: idle/progress-based with a generous bound.*
+2. **Numeric type/field ids remain immutable forever** ([§5](#5-what-survives-a-schema-change)). Migration does **not** relax this: a persisted entity's stored `t` and its property `PersistAs` keys are resolved against the current registry on reload. Changing a persisted field's serializer/value type changes the stored shape and is the migration step's responsibility to handle (read the old BSON, write the new).
 
-2. **How does migration code read pre-migration data?** The client is built at version Y, but it must read X-shaped data — including **collections or persisted entities the Y format no longer declares**. This implies collection indices must be **immutable** like type/field ids, and the migration engine needs raw access to *any* collection id (not just those in the current format). Do we expose an "all collections" view during migration, or have each step declare the (old) collection layout it operates on?
+3. **Same version, different checksum** is still treated as adopt-when-alone (no migration), per the versioning rule — migration is offered only when the client's *version* is strictly higher. Always bump the version when the schema changes.
 
-3. **Migrating persisted live entities, not just documents.** Document collections are easy to rewrite through the public DB API. Persisted *distributed entities* live in the reserved internal "Entities" collection (index 1) with an internal row layout (`_id`, `ch`, `t`, and `entityId/PersistAs` property rows). Migrating those via "ordinary database operations" needs either documented raw access to that collection or a dedicated migration API. Is live-entity migration in scope for v1, or do we start with document collections only?
+4. **Large collections** are paged by `ScanPageAsync` (and `ListAsync` loops it) to stay under the ~64 KB wire message size.
 
-4. **Backup mechanism specifics.** A file-copy snapshot of the single UltraLiteDB file before migration is the obvious approach; restore = close, replace the file, reopen (safe because the world is exclusively locked). Confirm that's acceptable versus per-step transactions, and decide where the snapshot + in-progress marker live on disk.
+5. **Stepwise vs. single delegate.** The engine runs your one delegate once with the full `From`/`To` range; if you ship many versions you branch on `ctx.FromVersion` yourself (e.g. a `switch` that falls through X→X+1→…→Y). There is no built-in per-version step registry.
 
-5. **Numeric id durability.** Today's rule is that numeric type ids and field ids are immutable forever ([§5](#5-what-survives-a-schema-change)). Keep that as the permanent contract (simplest — document and enforce it, e.g. reject id reuse at registration), or eventually allow an id-remap as part of a migration step? Same question for changing a persisted field's serializer / value type, which also changes the stored and wire shape.
+6. **Migration rewrites the database, not already-loaded live entities.** The persisted-entity helpers (and raw access to the `"Entities"` collection) operate on stored BSON. A persisted channel that is *already loaded into server memory* (channels stay loaded for the server process's lifetime, even after their last subscriber leaves) is **not** updated by those writes — a subsequent subscribe returns the cached in-memory copy, not the migrated DB value. This is a non-issue in the real flows, where migration runs against a freshly-opened world: a standalone server that restarted on the new build, or an embedded client that migrates at connect time before subscribing to anything (and the gate forbids the migrator from subscribing mid-migration anyway). The practical rule: **migrate before any channel is loaded.** A process that loaded a channel and then migrates in-place (without a restart) would need the world reopened for the change to surface.
 
 ---
 
 ## 9. Quick reference
-
-**Types & members that make up today's system**
 
 | Symbol | Role |
 |---|---|
@@ -189,15 +219,14 @@ The design in [§7](#7-the-intended-design-not-yet-built) settles the big shape 
 | `GameStateFormatData` (`Version`, `DataChecksum`, …) | Serializable format sent in the handshake |
 | `ImpunityUtil.MakeDataChecksum` | MD5 over the serialized format |
 | `GameMetadata` (`Version`, `DataFormatChecksum`) | The world's currently-adopted schema, persisted |
-| `GameStateServer.ValidateFormat` | Strict version+checksum equality check |
-| `GameStateServer.EstablishConnection` | The connect-time guard ([§3](#3-the-connect-time-guard)) |
-| `GameStateServer.UpdateFormat` | Adopts a new schema (metadata only) ([§4](#4-adopting-a-new-schema)) |
-| `ImpunityOptions.RemoteUpgradeAllowed` | Lets remote clients drive adoption/initialization |
-| `GameStateServer.NewConnectionsDisabled` | Dormant connection-pause flag (never set today) |
-| `ImpunityErrorCode.ServerVersionIncompatible` / `ServerUnavailable` | The two relevant rejection codes |
-
-**Dormant / planned hooks:** `BaseGameConnection.EnsureFormat` (referenced, not implemented), `NewConnectionsDisabled` (checked, never set).
-
----
-
-*This document describes work in progress. The behavior in §2–§6 reflects the current code (`GameStateServer`, `GameStateLive`, `GameStateDB`, `ImpunityUtil`, and `ImpunityStandaloneServer`); §7–§8 describe intent and are expected to change as the system is built out.*
+| `GameStateServer.EstablishConnection` | The connect-time guard + migration offer ([§3](#3-the-connect-time-guard)) |
+| `GameStateServer.UpdateFormat` | Stamps a new schema (metadata + collections) ([§4](#4-adopting-a-new-schema)) |
+| `MigrationPhase` (`None`/`Offered`/`Migrating`) | Per-world migration state machine |
+| `GameStateDB.BackupForMigration` / `RestoreFromMigrationBackup` / `ReadMigrationMarker` | Snapshot, restore, crash-recovery marker |
+| `GameStateDB.GetAllCollectionNames` / `ScanCollectionByName` / `UpsertByName` … | Name-addressed raw API used by migration |
+| `BaseGameConnection.PendingMigration` | The offered migration (from/to), set after connecting |
+| `EnsureFormatAsync` / `RunMigrationAsync` / `DeclineMigrationAsync` | Client entry points (extensions) |
+| `MigrationContext` / `MigrationEntityRow` | The toolkit handed to the migration delegate |
+| `ImpunityOptions.RemoteUpgradeAllowed` | Lets remote clients be offered migration / drive adoption |
+| `ImpunityOptions.MigrationIdleTimeoutMillis` | Idle timeout for an offered or running migration |
+| `ImpunityErrorCode.ServerVersionIncompatible` / `ServerMigrationInProgress` | Rejection codes (ineligible / world reserved) |

@@ -13,6 +13,13 @@ namespace Impunity.GameState
 		GET_SUMMARY = 102,
 		GET_TIME = 103,
 
+		BEGIN_MIGRATION = 110,
+		MIGRATION_GET_COLLECTIONS = 111,
+		MIGRATION_SCAN = 112,
+		MIGRATION_WRITE = 113,
+		COMMIT_MIGRATION = 114,
+		ABORT_MIGRATION = 115,
+
 		COMPOUND_DATABASE = 200,
 		INSERT_DOCUMENT = 201,
 		UPDATE_DOCUMENT = 202,
@@ -74,6 +81,19 @@ namespace Impunity.GameState
 					return typeof(GetGameSummaryAction);
 				case ClientActionType.GET_TIME:
 					return typeof(GetTimeAction);
+
+				case ClientActionType.BEGIN_MIGRATION:
+					return typeof(BeginMigrationAction);
+				case ClientActionType.MIGRATION_GET_COLLECTIONS:
+					return typeof(MigrationGetCollectionsAction);
+				case ClientActionType.MIGRATION_SCAN:
+					return typeof(MigrationScanAction);
+				case ClientActionType.MIGRATION_WRITE:
+					return typeof(MigrationWriteAction);
+				case ClientActionType.COMMIT_MIGRATION:
+					return typeof(CommitMigrationAction);
+				case ClientActionType.ABORT_MIGRATION:
+					return typeof(AbortMigrationAction);
 
 				case ClientActionType.INSERT_DOCUMENT:
 					return typeof(InsertDocumentAction);
@@ -153,6 +173,18 @@ namespace Impunity.GameState
 	{
 		[BsonField("cid")]
 		public string ConnectionId = null!;
+
+		/// <summary>True when this (higher-version) client has been offered a data migration. The world is reserved for it; the client must explicitly begin or decline. Nothing has been changed on the server yet.</summary>
+		[BsonField("mr")]
+		public bool MigrationRequired;
+
+		/// <summary>When <see cref="MigrationRequired"/>, the world's current (pre-migration) schema version.</summary>
+		[BsonField("mf")]
+		public int MigrationFromVersion;
+
+		/// <summary>When <see cref="MigrationRequired"/>, the schema version the client would migrate the world to (this client's version).</summary>
+		[BsonField("mt")]
+		public int MigrationToVersion;
 	}
 
 	/// <summary>Handshake action: validates game ID, password, and format version, then registers the connection. Returns the assigned connection ID.</summary>
@@ -249,6 +281,187 @@ namespace Impunity.GameState
 		protected override void DoAction(GameStateServer game)
 		{
 			Result = GameStateServer.GetServerTime();
+		}
+	}
+
+	// Migration operations
+	//
+	// These drive the data-migration flow (see docs/guides/SchemaMigration.md). A higher-version client is offered a
+	// migration during the handshake; it then explicitly begins, performs raw name-addressed reads/writes, and commits
+	// (or aborts). The server gates these so that only the migration owner may issue them, and only in the right phase.
+
+	/// <summary>The kind of raw write a <see cref="MigrationWriteAction"/> performs against a named collection.</summary>
+	public enum MigrationWriteOp : byte
+	{
+		Insert = 1,
+		Upsert = 2,
+		Update = 3,
+		Delete = 4
+	}
+
+	/// <summary>Explicitly begins the migration the server offered to this connection: snapshots the database, locks the world, and lets raw migration operations proceed. Live thread; replies once the snapshot is taken.</summary>
+	public class BeginMigrationAction : ClientActionResultlessBase
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.BEGIN_MIGRATION; }
+		public override bool IsDBOperation() { return false; }
+
+		public BeginMigrationAction() { }
+
+		public BeginMigrationAction(ImpunityCallback? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.HandleBeginMigration(this);
+		}
+	}
+
+	/// <summary>Returns the names of all real collections in the world (including the reserved live-entities collection), so migration code can discover old-shaped data. DB thread.</summary>
+	public class MigrationGetCollectionsAction : ClientActionResultBase<List<string>>
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.MIGRATION_GET_COLLECTIONS; }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationGetCollectionsAction() { }
+
+		public MigrationGetCollectionsAction(ImpunityCallback<List<string>>? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.EnsureMigratingOwner(Origin);
+			game.TouchMigrationActivity();
+			Result = game.DB.GetAllCollectionNames();
+		}
+	}
+
+	/// <summary>Returns a page of raw documents from a named collection. Page with skip/limit to stay under the wire size. DB thread.</summary>
+	public class MigrationScanAction : ClientActionResultBase<List<BsonDocument>>
+	{
+		[BsonField("n")]
+		public string Name = null!;
+
+		[BsonField("sk")]
+		public int Skip;
+
+		[BsonField("li")]
+		public int Limit;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.MIGRATION_SCAN; }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationScanAction() { }
+
+		public MigrationScanAction(string name, int skip, int limit, ImpunityCallback<List<BsonDocument>>? onComplete = null)
+		{
+			Name = name;
+			Skip = skip;
+			Limit = limit;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.EnsureMigratingOwner(Origin);
+			game.TouchMigrationActivity();
+			Result = game.DB.ScanCollectionByName(Name, Skip, Limit);
+		}
+	}
+
+	/// <summary>Performs a single raw write (insert/upsert/update/delete) against a named collection. DB thread.</summary>
+	public class MigrationWriteAction : ClientActionResultBase<bool>
+	{
+		[BsonField("n")]
+		public string Name = null!;
+
+		[BsonField("op")]
+		public byte Op;
+
+		[BsonField("d")]
+		public BsonDocument? Doc;
+
+		[BsonField("did")]
+		public BsonValue? Id;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.MIGRATION_WRITE; }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationWriteAction() { }
+
+		public MigrationWriteAction(string name, MigrationWriteOp op, BsonDocument? doc, BsonValue? id, ImpunityCallback<bool>? onComplete = null)
+		{
+			Name = name;
+			Op = (byte)op;
+			Doc = doc;
+			Id = id;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.EnsureMigratingOwner(Origin);
+			game.TouchMigrationActivity();
+
+			switch ((MigrationWriteOp)Op)
+			{
+				case MigrationWriteOp.Insert:
+					game.DB.InsertByName(Name, Doc!);
+					Result = true;
+					break;
+				case MigrationWriteOp.Upsert:
+					Result = game.DB.UpsertByName(Name, Doc!);
+					break;
+				case MigrationWriteOp.Update:
+					Result = game.DB.UpdateByName(Name, Doc!);
+					break;
+				case MigrationWriteOp.Delete:
+					Result = game.DB.DeleteByName(Name, Id!);
+					break;
+				default:
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Unknown migration write op: " + Op);
+			}
+		}
+	}
+
+	/// <summary>Commits the migration: stamps the new schema version, discards the snapshot, releases the world. Live thread; replies once committed.</summary>
+	public class CommitMigrationAction : ClientActionResultlessBase
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.COMMIT_MIGRATION; }
+		public override bool IsDBOperation() { return false; }
+
+		public CommitMigrationAction() { }
+
+		public CommitMigrationAction(ImpunityCallback? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.HandleCommitMigration(this);
+		}
+	}
+
+	/// <summary>Aborts an offered or in-progress migration for this connection: restores the snapshot if one was taken, then releases the world. Also used to decline an offer. Live thread.</summary>
+	public class AbortMigrationAction : ClientActionResultlessBase
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.ABORT_MIGRATION; }
+		public override bool IsDBOperation() { return false; }
+
+		public AbortMigrationAction() { }
+
+		public AbortMigrationAction(ImpunityCallback? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			game.HandleAbortMigration(this);
 		}
 	}
 

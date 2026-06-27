@@ -52,6 +52,13 @@ namespace Impunity
 		public string GameTypeCode = "IMP";
 		/// <summary>Timeout in milliseconds for client actions awaiting server response.</summary>
 		public int ActionTimeoutMillis = 5 * 1000;
+		/// <summary>
+		/// Idle timeout, in milliseconds, for a data migration. While a migration is being offered (a higher-version
+		/// client is deciding whether to migrate) or actively running, the world is reserved for the owning connection.
+		/// If no migration activity happens within this window the offer/migration is abandoned and the world is
+		/// released (an in-progress migration is rolled back from its backup). Reset on every migration operation.
+		/// </summary>
+		public int MigrationIdleTimeoutMillis = 5 * 60 * 1000;
 	}
 
 	/// <summary>Flags describing how a game state entity instance behaves.</summary>
@@ -94,6 +101,7 @@ namespace Impunity
 		ServerUnavailable = 2000, // New connections to the server are temporarily paused
 		ServerPasswordIncorrect = 2001, // Attempt to connect to password protected server with the wrong password
 		ServerVersionIncompatible = 2002, // Client is not the same version as the server
+		ServerMigrationInProgress = 2003, // A data migration is being offered or run on this world; other connections are refused
 
 		ActionInvalidParameter = 3000,
 		ActionBadRequest = 3001,
@@ -122,6 +130,41 @@ namespace Impunity
 		public GameStateEntityTypeDef[]? EntityTypes;
 	}
 
+	/// <summary>
+	/// On-disk marker written when a data migration actually begins (the database has been snapshotted). Its presence
+	/// after a restart means a migration was interrupted: if <see cref="ToVersion"/> equals the world's persisted
+	/// <see cref="GameMetadata.Version"/> the commit had already landed and only cleanup is needed, otherwise the
+	/// pre-migration snapshot must be restored. An offered-but-not-begun migration writes no marker.
+	/// </summary>
+	public class MigrationMarker
+	{
+		/// <summary>The world's schema version before the migration (the snapshot's version).</summary>
+		[BsonField("from")]
+		public int FromVersion;
+
+		/// <summary>The schema version the migration is upgrading the world to.</summary>
+		[BsonField("to")]
+		public int ToVersion;
+
+		/// <summary>Connection id of the client that owns the migration.</summary>
+		[BsonField("owner")]
+		public string Owner = null!;
+
+		/// <summary>Server Unix-millisecond timestamp when the migration began.</summary>
+		[BsonField("at")]
+		public long StartedAtMillis;
+
+		public MigrationMarker() { }
+
+		public MigrationMarker(int fromVersion, int toVersion, string owner, long startedAtMillis)
+		{
+			FromVersion = fromVersion;
+			ToVersion = toVersion;
+			Owner = owner;
+			StartedAtMillis = startedAtMillis;
+		}
+	}
+
 	/// <summary>Exception with an associated <see cref="ImpunityErrorCode"/>, used for server-side errors that should be reported to the client.</summary>
 	public class ImpunityServerException : Exception
 	{
@@ -144,8 +187,10 @@ namespace Impunity
 	/// <summary>Serializable error response sent from server to client. Contains an error code, message, and optional stack trace.</summary>
 	public class ImpunityErrorResponse
 	{
+		// Serialized form of ErrorCode. Must be public so the BsonMapper includes it on the wire; a protected/internal
+		// member is skipped, which would drop the error code from remote replies (leaving only the message).
 		[BsonField("err")]
-		protected int ErrorInt { get; private set; }
+		public int ErrorInt { get; private set; }
 
 		/// <summary>The error code identifying the type of failure.</summary>
 		[BsonIgnore]

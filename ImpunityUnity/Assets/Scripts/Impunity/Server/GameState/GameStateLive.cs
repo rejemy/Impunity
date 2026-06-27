@@ -1011,6 +1011,19 @@ namespace Impunity.GameState
 			return etype;
 		}
 
+		/// <summary>True if any connected replicant belongs to a connection other than <paramref name="self"/>. Used to decide whether a world is exclusively held by one connection (e.g. for migration).</summary>
+		public bool HasOtherConnections(IServerSideConnectionProxy self)
+		{
+			foreach (GameStateReplicant replica in ConnectedReplicas)
+			{
+				if (replica.ConnectionProxy != self)
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
 		public void AddGameStateReplicant(GameStateReplicant replica)
 		{
 			ConnectedReplicas.Add(replica);

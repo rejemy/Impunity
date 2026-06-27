@@ -304,6 +304,123 @@ namespace Impunity.GameState
 		}
 	}
 
+	// ----- Internal migration DB actions
+	//
+	// Each runs its file work on the DB thread, then hops back to the live thread (via QueueDBReply, which makes the
+	// live worker call InvokeOnCompleteCallback) to finish the corresponding migration step where the migration state
+	// lives. See GameStateServer.HandleBeginMigration / HandleCommitMigration / HandleAbortMigration.
+
+	/// <summary>Internal DB action: snapshots the database and writes the migration marker, then resumes the begin-migration handshake.</summary>
+	public class MigrationBackupDBAction : ClientActionResultlessBase
+	{
+		private readonly MigrationMarker Marker;
+		private readonly GameStateActionBase BeginAction;
+		private GameStateServer Game = null!;
+		private bool BackupOk;
+		private ImpunityErrorResponse? BackupError;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationBackupDBAction(MigrationMarker marker, GameStateActionBase beginAction)
+		{
+			Marker = marker;
+			BeginAction = beginAction;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Game = game;
+			try
+			{
+				game.DB.BackupForMigration(Marker);
+				BackupOk = true;
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Migration backup failed", e);
+				BackupOk = false;
+				BackupError = new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, e);
+			}
+			game.QueueDBReply(this);
+		}
+
+		public override void InvokeOnCompleteCallback()
+		{
+			Game.FinishBeginMigration(BeginAction, BackupOk, BackupError);
+		}
+	}
+
+	/// <summary>Internal DB action: deletes the snapshot and marker after a successful commit, then finishes the commit.</summary>
+	public class MigrationFinalizeDBAction : ClientActionResultlessBase
+	{
+		private readonly GameStateActionBase CommitAction;
+		private GameStateServer Game = null!;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationFinalizeDBAction(GameStateActionBase commitAction)
+		{
+			CommitAction = commitAction;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Game = game;
+			try
+			{
+				game.DB.ClearMigrationFiles();
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Migration finalize cleanup failed", e);
+			}
+			game.QueueDBReply(this);
+		}
+
+		public override void InvokeOnCompleteCallback()
+		{
+			Game.FinishCommitMigration(CommitAction);
+		}
+	}
+
+	/// <summary>Internal DB action: restores the pre-migration snapshot on abort, then finishes the abort.</summary>
+	public class MigrationRestoreDBAction : ClientActionResultlessBase
+	{
+		private readonly GameStateCollection[] Collections;
+		private readonly GameStateActionBase? AbortAction;
+		private GameStateServer Game = null!;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return true; }
+
+		public MigrationRestoreDBAction(GameStateCollection[] collections, GameStateActionBase? abortAction)
+		{
+			Collections = collections;
+			AbortAction = abortAction;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Game = game;
+			try
+			{
+				game.DB.RestoreFromMigrationBackup(Collections);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Migration restore failed", e);
+			}
+			game.QueueDBReply(this);
+		}
+
+		public override void InvokeOnCompleteCallback()
+		{
+			Game.FinishAbortMigration(AbortAction);
+		}
+	}
+
 	/// <summary>Name-value pair for a single persisted property of a live entity.</summary>
 	public class LiveEntityPersistedPropertyData
 	{
