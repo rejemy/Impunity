@@ -99,6 +99,15 @@ namespace Impunity.Networking
 				return;
 			}
 
+			if (readTask.Result == 0)
+			{
+				// A successful zero-byte read means the peer performed an orderly shutdown (TCP FIN).
+				// ReadAsync would keep completing immediately with 0 from here on, so the loop would spin
+				// without ever noticing the close — treat EOF as a disconnect.
+				Disconnect();
+				return;
+			}
+
 			BytesReceived += readTask.Result;
 
 			if (BytesReceived > 0)
