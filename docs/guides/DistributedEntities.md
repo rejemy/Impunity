@@ -314,7 +314,7 @@ Every entity (override the method, or subscribe to the paired `…Event`) receiv
 | Callback | Fires when |
 |---|---|
 | `OnFullyInitialized` | The entity has been created locally and its initial field values applied — it is ready to use. For a channel with existing members, this fires on the channel *before* its members are created. |
-| `OnObjectAdded(obj, newlyCreated)` *(channels)* | An object joins the channel. `newlyCreated` is `false` for members in the initial snapshot, `true` for objects created later while you watch. |
+| `OnObjectAdded(obj, newlyCreated)` *(channels)* | An object joins the channel. `newlyCreated` is `false` for members in the initial snapshot, `true` for objects created later while you watch — **including objects you create yourself** via `CreateObject` (see [§7](#7-creating-channels-and-objects)). |
 | `OnObjectRemoved(obj)` *(channels)* | An object leaves the channel. *(See [§14](#14-known-caveats).)* |
 | `OnEventTriggered(type, data)` | A one-shot [event](#11-events) is fired on the entity. |
 | `OnLocked` / `OnUnlocked` | The entity's [lock](#10-locks) is taken / released (by anyone). |
@@ -351,6 +351,7 @@ connection.EntityManager.CreateObject(player, zone, replace: false, (err, create
 - **Initial state.** Whatever you `Set` on the instance before `CreateObject`/`CreateChannel` is serialized as its initial field state and sent with the create.
 - **`UniqueName`.** An object may have a `UniqueName` that is unique within its channel (it may not contain `/`). `replace: true` replaces an existing same-named object. For persisted objects the unique name doubles as the database key (a GUID is generated if you leave it null).
 - **Channels can be created pre-populated** by passing `channelObjects` to `CreateChannel`.
+- **The creating client gets the same creation callbacks as everyone else.** When `CreateObject` succeeds, the creator raises `OnDistributedObjectCreated`, the channel's `OnObjectAdded(obj, newlyCreated: true)`, and the object's `OnFullyInitialized` — the same notifications a subscriber receives for a replicated object — *before* your `onComplete` fires. (The server does not echo the create back to its originator; the client raises these locally to close that gap, so the object also lands in the channel's object collection.) Your seeded field values are kept as-is rather than re-applied from the wire, so they are already readable in these callbacks. This means an object you create is delivered through both `onComplete` **and** `OnObjectAdded`/`OnDistributedObjectCreated`; if a handler must not double-process your own creations, use `onComplete` for the creator-specific path and treat the shared callbacks as idempotent.
 
 ---
 

@@ -230,7 +230,12 @@ namespace Impunity.Connection
 
 
 		/// <summary>Creates a distributed object in a channel. Serializes the object's initial properties and sends them
-		/// to the server, then registers the object locally and returns it via the callback once the server confirms.
+		/// to the server, then registers the object locally once the server confirms. Before invoking
+		/// <paramref name="onComplete"/> the creating client receives the same creation notifications a replicated
+		/// object would (<see cref="OnDistributedObjectCreated"/>, the channel's <see cref="IDistributedChannel.OnObjectAdded"/>
+		/// with <c>newlyCreated: true</c>, and the object's <see cref="IDistributedEntity.OnFullyInitialized"/>) — the
+		/// server does not echo the create back to its originator, so these are raised locally instead. The object's
+		/// existing field values are kept as-is (they are not re-applied from the wire).
 		/// Throws if the manager has no <see cref="Connection"/>, the unique name contains '/', or the persisted/client-
 		/// authoritative flags are inconsistent with the type or channel.</summary>
 		/// <typeparam name="T">The concrete distributed object type being created.</typeparam>
@@ -298,6 +303,36 @@ namespace Impunity.Connection
 				}
 
 				RegisterEntity(distObj, objectId);
+
+				distObj.Channel = channel;
+
+				try
+				{
+					OnDistributedObjectCreated?.Invoke(distObj, channel, true);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in OnDistributedObjectCreated handler:", e);
+				}
+
+				try
+				{
+					channel.OnObjectAdded(distObj, true);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in channel OnObjectAdded:", e);
+				}
+
+				try
+				{
+					distObj.OnFullyInitialized();
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in OnFullyInitialized:", e);
+				}
+
 				onComplete?.Invoke(err, distObj);
 			});
 		}
@@ -944,7 +979,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
+				ImpunityLogger.LogError("Exception in OnFullyInitialized:", e);
 			}
 		}
 
@@ -1011,7 +1046,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError("Excpetion in OnDistributedObjectCreated handler:", e);
+				ImpunityLogger.LogError("Exception in OnDistributedObjectCreated handler:", e);
 			}
 
 			try
@@ -1020,7 +1055,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError("Excpetion in channel OnObjectAdded:", e);
+				ImpunityLogger.LogError("Exception in channel OnObjectAdded:", e);
 			}
 
 			SetPropertyBytes(entity, propData, true);
@@ -1031,7 +1066,7 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
-				ImpunityLogger.LogError("Excpetion in OnFullyInitialized:", e);
+				ImpunityLogger.LogError("Exception in OnFullyInitialized:", e);
 			}
 		}
 
