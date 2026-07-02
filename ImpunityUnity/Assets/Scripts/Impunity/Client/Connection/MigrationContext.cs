@@ -39,8 +39,9 @@ namespace Impunity.Connection
 		public string EntityId = null!;
 		/// <summary>The channel this entity belongs to (its own name, for a channel).</summary>
 		public string Channel = null!;
-		/// <summary>The distributed entity type id (the persisted <c>t</c> value).</summary>
-		public int TypeId;
+		/// <summary>The entity type's <c>PersistAs</c> key (the stored <c>t</c> value) — the durable type identity,
+		/// resolved against the registered types when the entity is reloaded.</summary>
+		public string TypeKey = null!;
 		/// <summary>The instance flags (<see cref="ImpunityInstanceFlags"/>) the entity was created with.</summary>
 		public byte Flags;
 		/// <summary>The entity's persisted properties, keyed by persisted-property name, with raw BSON values.</summary>
@@ -200,7 +201,7 @@ namespace Impunity.Connection
 					// Entity metadata row
 					MigrationEntityRow row = GetOrCreate(byId, rowId);
 					row.Channel = doc["ch"].AsString;
-					row.TypeId = doc["t"].AsInt32;
+					row.TypeKey = doc["t"].AsString;
 					row.Flags = (byte)doc["f"].AsInt32;
 				}
 				else
@@ -217,14 +218,14 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Writes (inserts or replaces) a persisted live entity: its metadata row and one row per property.</summary>
-		/// <param name="row">The entity to write. Its <see cref="MigrationEntityRow.EntityId"/>, channel, type id, flags, and properties are all persisted.</param>
+		/// <param name="row">The entity to write. Its <see cref="MigrationEntityRow.EntityId"/>, channel, type key, flags, and properties are all persisted.</param>
 		/// <returns>A task that completes when the entity has been written.</returns>
 		public async Task WriteEntityAsync(MigrationEntityRow row)
 		{
 			BsonDocument meta = new BsonDocument();
 			meta["_id"] = row.EntityId;
 			meta["ch"] = row.Channel;
-			meta["t"] = row.TypeId;
+			meta["t"] = row.TypeKey;
 			meta["f"] = (int)row.Flags;
 			await UpsertAsync(EntitiesCollectionName, meta);
 

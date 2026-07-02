@@ -962,6 +962,9 @@ namespace Impunity.GameState
 	{
 		public GameStateServer Server { get; private set; }
 		GameStateEntityType[] EntityTypes = null!;
+		// Persisted entity types keyed by their PersistAs string — the durable type identity written to the
+		// database (numeric ids are wire-only identity)
+		Dictionary<string, GameStateEntityType> EntityTypesByPersistKey = null!;
 
 		Dictionary<uint, GameStateEntity> AllEntities;
 		Dictionary<string, GameStateEntity> NamedEntities;
@@ -1000,12 +1003,28 @@ namespace Impunity.GameState
 
 			int highestIndex = entityTypes[entityTypes.Length - 1].Index;
 
-			EntityTypes = new GameStateEntityType[highestIndex + 1];
+			// Build into locals and validate before swapping in, so a bad format can't leave the registry half-updated
+			GameStateEntityType[] newEntityTypes = new GameStateEntityType[highestIndex + 1];
+			Dictionary<string, GameStateEntityType> newEntityTypesByPersistKey = new Dictionary<string, GameStateEntityType>();
 			for (int i = 0; i < entityTypes.Length; i++)
 			{
 				GameStateEntityTypeDef typeInfo = entityTypes[i];
-				EntityTypes[typeInfo.Index] = ConvertEntityTypeDef(typeInfo);
+				GameStateEntityType etype = ConvertEntityTypeDef(typeInfo);
+				newEntityTypes[typeInfo.Index] = etype;
+
+				if (etype.PersistedAs != null)
+				{
+					if (newEntityTypesByPersistKey.TryGetValue(etype.PersistedAs, out GameStateEntityType existing))
+					{
+						throw new ImpunityServerFatalException(ImpunityErrorCode.ActionInvalidParameter,
+							"Entity types " + existing.Name + " and " + etype.Name + " both use PersistAs key '" + etype.PersistedAs + "'");
+					}
+					newEntityTypesByPersistKey[etype.PersistedAs] = etype;
+				}
 			}
+
+			EntityTypes = newEntityTypes;
+			EntityTypesByPersistKey = newEntityTypesByPersistKey;
 		}
 
 		private GameStateEntityType ConvertEntityTypeDef(GameStateEntityTypeDef def)
@@ -1158,6 +1177,20 @@ namespace Impunity.GameState
 			return typeInfo;
 		}
 
+		/// <summary>Resolves a persisted entity type by its PersistAs key — the durable type identity stored in
+		/// the database's <c>t</c> field. Throws if no registered type persists under that key (e.g. a stored
+		/// entity whose type's key was renamed without a data migration).</summary>
+		public GameStateEntityType GetEntityTypeByPersistKey(string? persistKey)
+		{
+			GameStateEntityType? typeInfo = persistKey != null ? EntityTypesByPersistKey.GetValueOrDefault(persistKey) : null;
+			if (typeInfo == null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "No persisted entity type with key '" + persistKey + "'");
+			}
+
+			return typeInfo;
+		}
+
 		private bool UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
 							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
@@ -1209,9 +1242,9 @@ namespace Impunity.GameState
 		public GameStateChannel CreateChannel(GameStateChannelLoadProxy proxy, LiveChannelData channelData)
 		{
 			GameStateEntityType? typeInfo = null;
-			if (channelData.EntityType != 0)
+			if (channelData.EntityTypeKey != null)
 			{
-				typeInfo = GetEntityType(channelData.EntityType);
+				typeInfo = GetEntityTypeByPersistKey(channelData.EntityTypeKey);
 			}
 
 			GameStateChannel channel = new GameStateChannel(this, typeInfo, channelData.InstanceFlags, channelData.EntityId);
@@ -1303,7 +1336,7 @@ namespace Impunity.GameState
 			if (channel.IsPersisted() && typeInfo?.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name!, channel.ChannelName, typeId, channel.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name!, channel.ChannelName, typeInfo.PersistedAs, channel.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1405,7 +1438,7 @@ namespace Impunity.GameState
 			if (dobj.IsPersisted() && typeInfo.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name!, dobj.ChannelName!, typeId, channel.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name!, dobj.ChannelName!, typeInfo.PersistedAs, dobj.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1414,7 +1447,7 @@ namespace Impunity.GameState
 
 		public GameStateObject CreateObject(LiveEntityData objData, GameStateChannel channel)
 		{
-			GameStateEntityType typeInfo = GetEntityType(objData.EntityType);
+			GameStateEntityType typeInfo = GetEntityTypeByPersistKey(objData.EntityTypeKey);
 
 			GameStateObject dobj = new GameStateObject(this, typeInfo, objData.InstanceFlags, objData.EntityId);
 			dobj.SetPersistedProps(objData.Properties);

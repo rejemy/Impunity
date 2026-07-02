@@ -18,7 +18,7 @@
     <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <RootNamespace>Impunity</RootNamespace>
-    <AssemblyName>ImpunityRuntime</AssemblyName>
+    <AssemblyName>ImpunityUnityRuntime</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DocumentationFile>bin/$(Configuration)/$(TargetFramework)/$(AssemblyName).xml</DocumentationFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -27,6 +27,9 @@
   </PropertyGroup>
 
 <ItemGroup>
+  <Reference Include="UnityEngine">
+    <HintPath>lib/UnityEngine.dll</HintPath>
+  </Reference>
   <Reference Include="UltraLiteDB">
     <HintPath>../ImpunityUnity/Assets/Plugins/UltraLiteDB.dll</HintPath>
   </Reference>
@@ -35,7 +38,6 @@
 
 <ItemGroup>
    <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/**/*.cs" />
-   <Compile Remove="../ImpunityUnity/Assets/Scripts/Impunity/Client/Unity/**/*.cs" />
 </ItemGroup>
 
 </Project>

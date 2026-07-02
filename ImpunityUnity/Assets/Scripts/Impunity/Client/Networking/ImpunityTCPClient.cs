@@ -422,13 +422,13 @@ namespace Impunity.Networking
 
 
 		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>
-		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(IPEndPoint serverEndpoint, ImpunityOptions? options = null)
 		{
 			throw new NotSupportedException("TCP Client not supported in WebGL");
 		}
 
 		/// <summary>Creates a TCP client that connects to a server at the given hostname and port.</summary>
-		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeTCPClient(string hostname, int port, ImpunityOptions? options = null)
 		{
 			throw new NotSupportedException("TCP Client not supported in WebGL");
 		}

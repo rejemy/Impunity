@@ -179,7 +179,8 @@ namespace Impunity.Connection
 		// -------------- Public API
 
 		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns
-		/// format definitions for the server handshake. Throws if two types share a distributed id.</summary>
+		/// format definitions for the server handshake. Throws if two types share a distributed id or a
+		/// <c>PersistAs</c> key.</summary>
 		/// <param name="entityTypes">The <c>[DistributedEntity]</c>-annotated types this client will use. May be null or
 		/// empty, in which case no types are registered and null is returned.</param>
 		/// <returns>The wire format definitions to send to the server during the handshake, or null when
@@ -196,12 +197,24 @@ namespace Impunity.Connection
 
 			GameStateEntityTypeDef[] convertedEntityTypes = new GameStateEntityTypeDef[entityTypes.Length];
 
+			// PersistAs is the durable type identity stored with every persisted entity, so it must be
+			// unique across types
+			Dictionary<string, string> persistKeyOwners = new Dictionary<string, string>();
 
 			int i = 0;
 			foreach (Type entityType in entityTypes)
 			{
 				GameStateEntityTypeDef entityData = RegisterEntityType(entityType, internalTypeInfoList);
 				convertedEntityTypes[i++] = entityData;
+
+				if (entityData.PersistedAs != null)
+				{
+					if (persistKeyOwners.TryGetValue(entityData.PersistedAs, out string otherTypeName))
+					{
+						throw new Exception("Entity types " + otherTypeName + " and " + entityData.Name + " both use PersistAs key '" + entityData.PersistedAs + "'");
+					}
+					persistKeyOwners[entityData.PersistedAs] = entityData.Name;
+				}
 			}
 
 			Array.Sort(convertedEntityTypes,
@@ -756,15 +769,24 @@ namespace Impunity.Connection
 
 					if (entityData.PersistedAs == null)
 					{
-						throw new Exception("Can't have a distributed field persisted if the entity is not persisted");
-					}
+						if (fieldInfo.DeclaringType == entityType)
+						{
+							throw new Exception("Can't have a distributed field persisted if the entity is not persisted");
+						}
 
-					if (isTemporalValue)
+						// A persisted field inherited from a base type: this type is not itself
+						// persisted, so the field is replicated-only here.
+						fieldPersistedAs = null;
+					}
+					else
 					{
-						throw new Exception("A temporal field can't be persisted");
-					}
+						if (isTemporalValue)
+						{
+							throw new Exception("A temporal field can't be persisted");
+						}
 
-					hasPersistedField = true;
+						hasPersistedField = true;
+					}
 				}
 
 				MethodInfo? writeMethod = GetTypeMethodInherited(entityType, "_imp_WriteChangesWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -804,7 +826,7 @@ namespace Impunity.Connection
 				}
 
 
-				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldAttr.PersistAs?.Trim(),
+				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldPersistedAs,
 																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType,
 																				writeMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
 

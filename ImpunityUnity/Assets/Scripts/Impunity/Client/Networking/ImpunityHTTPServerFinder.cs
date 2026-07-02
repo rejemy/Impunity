@@ -1,41 +1,39 @@
 using System;
 using System.Collections.Generic;
 
-using UnityEngine.Networking;
-
 using UltraLiteDB;
-using UnityEngine;
-using System.Collections;
 
 namespace Impunity.Networking
 {
 
-	/// <summary>Discovers game worlds on a remote standalone server via its HTTP API. Unity-specific (uses UnityWebRequest).</summary>
+	/// <summary>Discovers game worlds on a remote standalone server via its HTTP API. Uses the platform-appropriate transport via <see cref="ImpunityHttp"/> (UnityWebRequest in Unity, HttpClient standalone).</summary>
 	public static class ImpunityHTTPServerFinder
 	{
-		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results on the main thread.</summary>
-		/// <param name="runner">MonoBehaviour to run the coroutine on.</param>
+		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results.</summary>
 		/// <param name="options"></param>
 		/// <param name="hostname">Server hostname, optionally with port (e.g., "example.com" or "example.com:29653").</param>
 		/// <param name="onComplete"></param>
-		public static void GetServerWorlds(MonoBehaviour runner, ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
+		public static void GetServerWorlds(ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
 		{
-			if (hostname.IndexOf(':') < 0)
+			// Preserve the bare host (without any :port) for use in the returned ServerInfo entries.
+			int colonIndex = hostname.IndexOf(':');
+			string bareHost = colonIndex < 0 ? hostname : hostname.Substring(0, colonIndex);
+
+			if (colonIndex < 0)
 			{
 				hostname += ":" + ImpunityConstants.DefaultServerHttpPort;
 			}
 			string url = "http://" + hostname + "/worlds";
 
-			UnityWebRequest request = UnityWebRequest.Get(url);
-			runner.StartCoroutine(SendRequest(request, () =>
+			ImpunityHttp.Instance.Get(url, (err, body) =>
 			{
-				if (request.error != null)
+				if (err != null)
 				{
-					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.ClientUnableToConnectError, request.error), null!);
+					onComplete(err, null!);
 					return;
 				}
 
-				if (string.IsNullOrEmpty(request.downloadHandler.text))
+				if (string.IsNullOrEmpty(body))
 				{
 					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, "Server didn't return a response"), null!);
 					return;
@@ -43,7 +41,7 @@ namespace Impunity.Networking
 
 				try
 				{
-					BsonValue bsonReply = JsonSerializer.Deserialize(request.downloadHandler.text);
+					BsonValue bsonReply = JsonSerializer.Deserialize(body);
 					BsonDocument? docReply = bsonReply as BsonDocument;
 					if (docReply == null)
 					{
@@ -65,8 +63,6 @@ namespace Impunity.Networking
 						return;
 					}
 
-					string hostname = request.uri.DnsSafeHost;
-
 					List<ServerInfo> hostedGames = new List<ServerInfo>();
 
 					foreach (var worldInfo in reply.Worlds)
@@ -78,7 +74,7 @@ namespace Impunity.Networking
 
 						var info = new ServerInfo();
 						info.WorldName = worldInfo.WorldName;
-						info.Hostname = hostname;
+						info.Hostname = bareHost;
 						info.Port = reply.TCPPort.Value;
 						info.GameId = worldInfo.WorldId;
 						info.PasswordProtected = worldInfo.PasswordProtected;
@@ -105,19 +101,13 @@ namespace Impunity.Networking
 					onComplete(new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, e.Message), null!);
 					return;
 				}
-			}));
-		}
-
-		static IEnumerator SendRequest(UnityWebRequest request, Action onCompleted)
-		{
-			yield return request.SendWebRequest();
-			onCompleted();
+			});
 		}
 
 		/// <summary>Queries a standalone server for a specific game world's info by its ID. Returns an error if the world is not found.</summary>
-		public static void GetServerWorldStatus(MonoBehaviour runner, ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
+		public static void GetServerWorldStatus(ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
 		{
-			GetServerWorlds(runner, options, hostname, (err, worlds) =>
+			GetServerWorlds(options, hostname, (err, worlds) =>
 			{
 				if (err != null)
 				{

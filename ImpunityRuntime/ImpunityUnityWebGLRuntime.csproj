@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- Compile the Unity WebGL code paths (JS-interop WebSocket, TCP stubs). UNITY_EDITOR is intentionally NOT defined. -->
+    <DefineConstants>$(DefineConstants);UNITY_WEBGL</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -18,7 +20,7 @@
     <RepositoryUrl>https://github.com/rejemy/Impunity</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <RootNamespace>Impunity</RootNamespace>
-    <AssemblyName>ImpunityRuntime</AssemblyName>
+    <AssemblyName>ImpunityUnityWebGLRuntime</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <DocumentationFile>bin/$(Configuration)/$(TargetFramework)/$(AssemblyName).xml</DocumentationFile>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -27,6 +29,9 @@
   </PropertyGroup>
 
 <ItemGroup>
+  <Reference Include="UnityEngine">
+    <HintPath>lib/UnityEngine.dll</HintPath>
+  </Reference>
   <Reference Include="UltraLiteDB">
     <HintPath>../ImpunityUnity/Assets/Plugins/UltraLiteDB.dll</HintPath>
   </Reference>
@@ -35,7 +40,6 @@
 
 <ItemGroup>
    <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/**/*.cs" />
-   <Compile Remove="../ImpunityUnity/Assets/Scripts/Impunity/Client/Unity/**/*.cs" />
 </ItemGroup>
 
 </Project>

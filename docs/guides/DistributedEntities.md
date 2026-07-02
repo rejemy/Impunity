@@ -75,25 +75,25 @@ Marks a field as replicated and assigns its **field id**.
 public DistributedValue<Vector3, Vector3Serializer> Position;
 ```
 
-- `fieldId` is a **byte in the range 1–63**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (fieldId - 1)`), so a type may have at most 63 distributed fields. Like the type id, a field id is **permanent** once shipped — never change or reuse it (see [below](#why-these-ids-are-immutable)).
+- `fieldId` is a **byte in the range 1–63**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (fieldId - 1)`), so a type may have at most 63 distributed fields. Like the type id, a field id is **wire identity** — fixed for every build sharing a schema version (see [below](#why-these-ids-are-immutable)).
 - Optional `PersistAs = "key"` — persists this field's value under the given key. The containing type must itself be persisted, and the field may not be temporal. See [§9](#9-persistent-objects).
 - A common convention (see the test entities) is a nested `enum DistributedPropIds : byte { … }` so the ids read meaningfully at the declaration site.
 
 ### Why these ids are immutable
 
-The numeric ids and the `PersistAs` strings are both **permanent identity** — baked into the wire format and into saved data — so once a build ships they can never change. Keeping this straight is the single most important thing to understand before you ship:
+The two id systems split cleanly by medium — **short numbers identify things on the wire, `PersistAs` strings identify things at rest** — and carry different immutability rules. Keeping this straight is the single most important thing to understand before you ship:
 
 | Identity | What it identifies | Rule |
 |---|---|---|
-| **Numeric ids** (`[DistributedEntity(n)]`, `[Distributed(n)]`) | The wire identity of every type and field, exchanged on the connect handshake and carried in every update. The **type id is also written into the database** (the stored `t`) for persisted entities. | **Immutable forever.** Never change a number, and never reuse a retired one. The number *is* the identity — the class name, the field name, and the namespace are not — so the value must stay put even as the code around it moves. |
-| **`PersistAs` string keys** | The database key a persisted type and its persisted field values are stored under. | **Immutable forever** once data exists. Renaming a key orphans everything stored under the old one. |
+| **Numeric ids** (`[DistributedEntity(n)]`, `[Distributed(n)]`) | The **wire identity** of every type and field, exchanged on the connect handshake and carried compactly in every update. Numeric ids are never written into saved data. | **Fixed per schema version.** Every build sharing a schema version must agree on the numbers; changing one is a schema change like any other (bump the version and move all builds together). Saved data is unaffected. |
+| **`PersistAs` string keys** | The **durable identity** of everything stored in the database: each persisted entity row records its type's key (the stored `t`), and each persisted field value is stored under the field's key. | **Immutable forever** once data exists. Renaming a key orphans everything stored under the old one (recoverable only via a data migration). Entity-level keys must be **unique across all entity types**. |
 
 Practical consequences:
 
-- **Never renumber, and never reuse, a numeric id** — for either a type or a field. The number is a permanent contract shared with saved data and with every other build on the wire; reusing an old number for a new purpose silently misreads existing data and mismatched peers.
-- **Renaming and reorganizing code is free** — and is the whole reason ids are numbers rather than names. You can rename a `[DistributedEntity]` class or a `[Distributed]` field, move it to a different namespace, or rename the `enum` that labels the ids, as long as the *values* never move.
-- **Treat `PersistAs` keys as equally immutable.** Choose them deliberately; they are your durable storage schema. Keys may not be empty and may not start with `_` (reserved).
-- **To retire a type or field, stop using its id but leave the number burned** — don't reassign it to something new.
+- **The split is deliberate:** compact numbers keep replication traffic small; longer meaningful strings make the data at rest self-describing (and easy to identify in migration code, which sees raw BSON rows).
+- **Renaming and reorganizing code is free** — and is the whole reason identity isn't the class or field name. You can rename a `[DistributedEntity]` class or a `[Distributed]` field, move it to a different namespace, or rename the `enum` that labels the ids, and neither the wire nor the database notices.
+- **Treat `PersistAs` keys as your permanent storage schema.** Choose them deliberately; once a save exists they can never change. Keys may not be empty and may not start with `_` (reserved), and a type's key may not be shared with another type (throws at registration).
+- **Renumbering a numeric id is a coordinated wire change, not a data change** — it alters the format checksum, so it needs a version bump and all builds updated together, but existing saves reload untouched. Reusing a number *within* a version, or between builds that must interoperate, silently misreads updates — don't.
 
 ### The source generator
 
@@ -416,13 +416,14 @@ public partial class ZoneObject : DistributedObjectBase
 
 Rules the server and manager enforce:
 
-- A field can only be persisted if its **type** is persisted (has a `PersistAs`).
+- A field can only be persisted if its **declaring type** is persisted (has a `PersistAs`). Persistence does **not** inherit: a subclass of a persisted type is only persisted if it declares its own `PersistAs`. A non-persisted subclass may still inherit persisted fields from its base — on that subclass they are simply replicated-only.
+- A persisted type's `PersistAs` key must be **unique across all entity types** (it is the durable type identity — this throws at registration).
 - A persisted **type** must have **at least one** persisted field (otherwise it would store nothing — this throws at registration).
 - A persisted **object** must be created in a **persisted channel**.
 - **Temporal fields cannot be persisted.**
 - A persisted object with no `UniqueName` gets a server-generated GUID as its database key.
 
-Only persisted fields are written; non-persisted fields are replicated live but never stored. When a persisted channel is loaded, its stored entities are recreated from the database and re-keyed by their `PersistAs` values — which is exactly why those keys are your [durable schema](#why-these-ids-are-immutable).
+Only persisted fields are written; non-persisted fields are replicated live but never stored. Each stored entity records its **type's `PersistAs` key** (never the numeric type id), and its field values are stored under their field-level keys. When a persisted channel is loaded, the server resolves each stored type key back to the registered entity type and re-applies the field values by their keys — which is exactly why those keys are your [durable schema](#why-these-ids-are-immutable).
 
 ### Working with persisted state directly
 

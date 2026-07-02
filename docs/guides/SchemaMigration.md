@@ -108,10 +108,10 @@ This is the practical "what can I safely change" table for the *additive / re-la
 | Stored thing | Identity that must not change | Free to change | Hazard |
 |---|---|---|---|
 | **Documents** in a collection | the collection's **name** (in the DB) + each doc's `_id` | add collections; add fields to a document type; rename the C# types you map to BSON | renaming or removing a collection orphans its data |
-| **Distributed field values** of a persisted entity | the field's **numeric id** *and* its **`PersistAs`** string | rename the C# field; reorder fields in source | renumbering the field id breaks the wire/identity contract; renaming a `PersistAs` key orphans the stored value |
-| **A persisted entity's type** | its **numeric type id** (also written to disk as `t`) *and* its **`PersistAs`** key | rename or move the class | ⚠️ renumbering the type id breaks reload — the stored `t` is resolved against the *current* registry (`GameStateLive.GetEntityType`), so it maps to the wrong type or falls out of range |
+| **Distributed field values** of a persisted entity | the field's **`PersistAs`** string | rename the C# field; reorder fields in source; renumber the field id (a wire/schema change — version bump — but not a data change) | renaming a `PersistAs` key orphans the stored value |
+| **A persisted entity's type** | its **`PersistAs`** key (written to disk as `t`) | rename or move the class; renumber the type id (wire/schema change only) | ⚠️ renaming the key breaks reload — the stored `t` is resolved against the *current* registry (`GameStateLive.GetEntityTypeByPersistKey`), so an unknown key throws when the channel loads |
 
-As [`DistributedEntities.md`](DistributedEntities.md) §2 spells out, **numeric type ids and field ids are immutable forever** — never renumber or reuse them. Persistence makes this concrete and unforgiving: a persisted entity's numeric type id is written into the database (`t`) and resolved against the current registry on load, so changing it doesn't merely break the wire — it breaks reload of existing saves. Class names, field names, and namespaces are *not* part of the identity, so rename and relocate them freely; only the numbers and the `PersistAs` keys must stay put.
+As [`DistributedEntities.md`](DistributedEntities.md) §2 spells out, **numeric ids are wire-only and `PersistAs` keys are the durable identity**. Nothing numeric is written into saved data: a persisted entity's row records its type's `PersistAs` key (`t`), and its field values are stored under their field-level keys. Renumbering a type or field id is therefore a coordinated schema change (checksum change → version bump, all builds move together) but never touches existing saves; renaming a `PersistAs` key is the destructive act, recoverable only by a migration step that rewrites the stored rows. Class names, field names, and namespaces are *not* part of either identity, so rename and relocate them freely.
 
 ---
 
@@ -175,7 +175,7 @@ Or do it in explicit steps: `await connection.ConnectAsync();` then inspect `con
 | `GetCollectionNamesAsync()` | Every collection present (including old/renamed ones and the live-entities collection). |
 | `ListAsync(name)` / `ScanPageAsync(name, skip, limit)` | Read raw documents (paged internally to stay under the wire size). |
 | `InsertAsync` / `UpsertAsync` / `UpdateAsync` / `DeleteAsync(name, …)` | Raw writes by `_id`. |
-| `ScanEntitiesAsync()` | Read persisted live entities as `MigrationEntityRow` (id, channel, type id, flags, property→BSON). |
+| `ScanEntitiesAsync()` | Read persisted live entities as `MigrationEntityRow` (id, channel, type `PersistAs` key, flags, property→BSON). |
 | `WriteEntityAsync(row)` / `DeleteEntityAsync(row)` | Write/remove a persisted live entity (metadata row + property rows). |
 
 Persisted live entities live in the reserved `"Entities"` collection with the row layout `_id`/`ch`/`t`/`f` (metadata) and `entityId/propertyName` → `v` (one row per persisted property). The `*Entity*` helpers group and rebuild that layout for you; the raw `*Async` calls can also reach it directly via `MigrationContext.EntitiesCollectionName`.
@@ -199,7 +199,7 @@ Because the client does the work, the dangerous case is it going away mid-migrat
 
 1. **Collection rename = copy old name → new name.** Because UltraLiteDB stores collections by name, "renaming" a collection in version Y points its index at a new, empty collection; the old data sits under the old name until a migration step copies it across. (A collection's numeric *index* is still recommended to be immutable like type/field ids, but migration no longer depends on it because it addresses collections by name.)
 
-2. **Numeric type/field ids remain immutable forever** ([§5](#5-what-survives-a-schema-change)). Migration does **not** relax this: a persisted entity's stored `t` and its property `PersistAs` keys are resolved against the current registry on reload. Changing a persisted field's serializer/value type changes the stored shape and is the migration step's responsibility to handle (read the old BSON, write the new).
+2. **`PersistAs` keys remain immutable forever** ([§5](#5-what-survives-a-schema-change)). Migration does **not** relax this by default: a persisted entity's stored `t` (its type's `PersistAs` key) and its property keys are resolved against the current registry on reload, so a key rename only works if the migration step rewrites the stored rows to the new key. Changing a persisted field's serializer/value type likewise changes the stored shape and is the migration step's responsibility (read the old BSON, write the new). Numeric type/field ids are wire-only and never stored, so renumbering them needs a version bump but no data rewrite.
 
 3. **Same version, different checksum** is still treated as adopt-when-alone (no migration), per the versioning rule — migration is offered only when the client's *version* is strictly higher. Always bump the version when the schema changes.
 

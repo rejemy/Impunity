@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    The three runtime projects (ImpunityRuntime, ImpunityUnityRuntime, ImpunityUnityWebGLRuntime)
+    live in this one folder. Give each its own intermediate (obj) dir so their restores/builds don't
+    clobber each other's project.assets.json etc. Must be set here (imported before Microsoft.Common.props)
+    so it takes effect without the MSB3539 warning. Their DLLs share bin/ but have distinct AssemblyNames.
+  -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

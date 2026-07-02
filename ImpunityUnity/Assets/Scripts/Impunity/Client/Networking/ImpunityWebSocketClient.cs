@@ -28,20 +28,20 @@ namespace Impunity.Networking
 		private int InstanceId = -1;
 		private bool Connected;
 
-		private ImpunityCallback OnConnectCallback;
+		private ImpunityCallback? OnConnectCallback;
 
 		private static bool Initialized;
 		private static Dictionary<int, ImpunityWebSocketClient> Instances = new Dictionary<int, ImpunityWebSocketClient>();
 
 
 		/// <summary>Creates a WebSocket client that connects to a server at the given URL (e.g. ws://host:port/ws).</summary>
-		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions options = null)
+		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions? options = null)
 		{
 			string url = $"ws://{host}:{port}/ws";
 			return new ImpunityWebSocketClient(url, options);
 		}
 
-		private ImpunityWebSocketClient(string url, ImpunityOptions options)
+		private ImpunityWebSocketClient(string url, ImpunityOptions? options)
 		{
 			Url = url;
 			InitializeJsBridge();

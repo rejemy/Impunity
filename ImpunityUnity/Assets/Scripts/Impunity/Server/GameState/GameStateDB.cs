@@ -393,14 +393,14 @@ namespace Impunity.GameState
 			return collection.Collection.Exists(Query.EQ("_id", entityId));
 		}
 
-		public void CreateLiveEntity(string entityId, string channelName, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
+		public void CreateLiveEntity(string entityId, string channelName, string entityTypeKey, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
 			BsonDocument entityDoc = new BsonDocument();
 			entityDoc["_id"] = entityId;
 			entityDoc["ch"] = channelName;
-			entityDoc["t"] = entityType;
+			entityDoc["t"] = entityTypeKey;
 			entityDoc["f"] = (int)instanceFlags;
 
 			collection.Collection.Upsert(entityDoc);
@@ -492,7 +492,7 @@ namespace Impunity.GameState
 						loadedEntities[rowId] = entData;
 					}
 
-					entData.EntityType = entDoc["t"].AsInt32;
+					entData.EntityTypeKey = entDoc["t"].AsString;
 					entData.InstanceFlags = (byte)entDoc["f"].AsInt32;
 				}
 				else

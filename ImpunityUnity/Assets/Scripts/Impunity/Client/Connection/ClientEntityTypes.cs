@@ -19,7 +19,9 @@ namespace Impunity.Connection
 		public string? FactoryMethod { get; set; }
 		/// <summary>Optional database key under which entities of this type are persisted. When non-null the type is
 		/// persisted (and reloaded across server restarts); the value must be non-empty and not start with '_'.
-		/// A type must set this for any of its fields to be persistable.</summary>
+		/// A type must set this for any of its fields to be persistable. The key is stored with every persisted
+		/// entity as its durable type identity (numeric entity ids are wire-only), so it must be unique across
+		/// entity types and must never change once data exists.</summary>
 		public string? PersistAs { get; set; }
 
 		/// <summary>Marks the annotated class as a distributed entity type.</summary>
@@ -48,9 +50,10 @@ namespace Impunity.Connection
 	{
 		internal byte FieldId;
 		/// <summary>Optional database key under which this field's value is persisted. When non-null the value is saved
-		/// to the database; the containing entity type must also be persisted (have its own <c>PersistAs</c>), the field
+		/// to the database; the declaring entity type must also be persisted (have its own <c>PersistAs</c>), the field
 		/// must not be temporal, and the key must be non-empty and not start with '_'. Null to leave the field
-		/// replicated-only (not persisted).</summary>
+		/// replicated-only (not persisted). A subclass that is not itself persisted may inherit persisted fields from a
+		/// persisted base type; on that subclass the inherited fields are replicated-only.</summary>
 		public string? PersistAs { get; set; }
 
 		/// <summary>Marks the annotated field as a distributed (replicated) property.</summary>

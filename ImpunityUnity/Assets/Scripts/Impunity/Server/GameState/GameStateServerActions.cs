@@ -439,7 +439,8 @@ namespace Impunity.GameState
 	{
 		public string EntityId;
 		public string ChannelId;
-		public int EntityType;
+		/// <summary>The entity type's PersistAs key — the durable type identity stored in the database.</summary>
+		public string EntityTypeKey;
 		public byte InstanceFlags;
 		public List<LiveEntityPersistedPropertyData>? Properties;
 
@@ -448,18 +449,18 @@ namespace Impunity.GameState
 		public override ushort GetActionType() { throw new Exception("Not supported"); }
 		public override bool IsDBOperation() { return true; }
 
-		public CreatePersistedEntityAction(string entityId, string channelId, int entityType, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
+		public CreatePersistedEntityAction(string entityId, string channelId, string entityTypeKey, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
 		{
 			EntityId = entityId;
 			ChannelId = channelId;
-			EntityType = entityType;
+			EntityTypeKey = entityTypeKey;
 			InstanceFlags = instanceFlags;
 			Properties = properties;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.DB.CreateLiveEntity(EntityId, ChannelId, EntityType, InstanceFlags, Properties);
+			game.DB.CreateLiveEntity(EntityId, ChannelId, EntityTypeKey, InstanceFlags, Properties);
 		}
 	}
 
@@ -528,7 +529,9 @@ namespace Impunity.GameState
 	public class LiveEntityData
 	{
 		public string EntityId;
-		public int EntityType;
+		/// <summary>The entity type's PersistAs key as stored in the database (the <c>t</c> value); resolved
+		/// against the live type registry on load.</summary>
+		public string? EntityTypeKey;
 		public byte InstanceFlags;
 
 		public List<LiveEntityPersistedPropertyData> Properties = null!;

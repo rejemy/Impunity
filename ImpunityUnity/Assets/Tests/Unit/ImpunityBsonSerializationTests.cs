@@ -21,6 +21,8 @@ public static class BsonTestIds
 {
 	public const int ENTITY = 50;
 	public const int SUBENTITY = 51;
+	public const int EPHEMERAL_SUBENTITY = 52;
+	public const int DUPKEY_ENTITY = 53;
 }
 
 /// <summary>Complex value type persisted via BsonSerializer (uses public fields → relies on the
@@ -64,6 +66,21 @@ public partial class BsonTestEntity : DistributedObjectBase
 public partial class BsonTestSubEntity : BsonTestEntity
 {
 	[Distributed(20, PersistAs = "extra")] public DistributedValue<string, StringSerializer> Extra;
+}
+
+/// <summary>Non-persisted subclass of a persisted base — allowed; the inherited persisted fields become
+/// replicated-only on this type.</summary>
+[DistributedEntity(BsonTestIds.EPHEMERAL_SUBENTITY)]
+public partial class BsonTestEphemeralSubEntity : BsonTestEntity
+{
+	[Distributed(21)] public DistributedValue<int, Int32Serializer> Runtime;
+}
+
+/// <summary>Shares BsonTestEntity's PersistAs key — only referenced by the duplicate-key registration test.</summary>
+[DistributedEntity(BsonTestIds.DUPKEY_ENTITY, PersistAs = "ent")]
+public partial class BsonTestDupKeyEntity : DistributedObjectBase
+{
+	[Distributed(1, PersistAs = "other")] public DistributedValue<int, Int32Serializer> Other;
 }
 
 
@@ -430,5 +447,34 @@ public class ImpunityBsonSerializationTests
 	{
 		var em = MakeManager();
 		Assert.Throws<Exception>(() => em.GetFieldSchema(typeof(ImpunityBsonSerializationTests)));
+	}
+
+	// ───────── 5. Registration validation ─────────
+
+	[Test, Category("BsonSchema")]
+	public void Register_NonPersistedSubclassOfPersistedBase_InheritedFieldsAreReplicatedOnly()
+	{
+		var em = new ClientEntityManager();
+		var defs = em.RegisterEntityTypes(new[] { typeof(BsonTestEntity), typeof(BsonTestEphemeralSubEntity) });
+
+		var subDef = defs.First(d => d.Index == BsonTestIds.EPHEMERAL_SUBENTITY);
+		Assert.IsNull(subDef.PersistedAs);
+		foreach (var prop in subDef.Properties)
+		{
+			Assert.IsNull(prop.PersistedAs, prop.Name + " should be replicated-only on the non-persisted subclass");
+		}
+
+		// The persisted base type registered alongside it is unaffected.
+		var baseDef = defs.First(d => d.Index == BsonTestIds.ENTITY);
+		Assert.AreEqual("ent", baseDef.PersistedAs);
+		Assert.AreEqual("name", baseDef.Properties.First(p => p.Name == "Name").PersistedAs);
+	}
+
+	[Test, Category("BsonSchema")]
+	public void Register_DuplicatePersistAsKeyAcrossTypes_Throws()
+	{
+		var em = new ClientEntityManager();
+		var ex = Assert.Throws<Exception>(() => em.RegisterEntityTypes(new[] { typeof(BsonTestEntity), typeof(BsonTestDupKeyEntity) }));
+		StringAssert.Contains("PersistAs", ex.Message);
 	}
 }
