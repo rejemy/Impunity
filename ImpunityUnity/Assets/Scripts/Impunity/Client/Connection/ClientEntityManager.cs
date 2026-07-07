@@ -22,7 +22,7 @@ namespace Impunity.Connection
 		public string FieldName;
 		/// <summary>The database key from <c>[Distributed(PersistAs=…)]</c>, or null if the field is not persisted.</summary>
 		public string? PersistedAs;
-		/// <summary>True if the field is temporal (a transient value carrying a cooldown lock; never persisted).</summary>
+		/// <summary>True if the field is temporal (a transient value; never persisted).</summary>
 		public bool IsTemporal;
 		/// <summary>The container kind: Value, Array, Queue, IntDictionary, or StringDictionary.</summary>
 		public GameStateEntityFieldType FieldType;

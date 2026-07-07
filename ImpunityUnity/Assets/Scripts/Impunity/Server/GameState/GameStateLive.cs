@@ -16,9 +16,6 @@ namespace Impunity.GameState
 
 		public string? PersistedAs = null!;
 
-		/// <summary>True if any property is temporal. Gates the cooldown-lock pre-scan on incoming updates.</summary>
-		public bool HasTemporalProps;
-
 		public GameStateEntityPropertyDef[] PackedProperties = null!;
 		public GameStateEntityPropertyDef[] PropertyIndexLookup = null!;
 		public Dictionary<string, GameStateEntityPropertyDef> PropertyPersistedAsLookup = null!;
@@ -154,8 +151,7 @@ namespace Impunity.GameState
 
 		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.</summary>
 		private ushort[] RecvSeq = null!;
-		/// <summary>Per-field server time (ms) when the temporal cooldown lock expires, indexed by propId. 0 = no lock.</summary>
-		private long[] CooldownExpiry = null!;
+
 		/// <summary>Outgoing sequence counter for broadcasting updates to clients.</summary>
 		public ushort OutSeq;
 
@@ -173,7 +169,6 @@ namespace Impunity.GameState
 					int maxPropIndex = typeInfo.PackedProperties[typeInfo.PackedProperties.Length - 1].Index;
 					Properties = new IStandardDistributableValueType[maxPropIndex + 1];
 					RecvSeq = new ushort[maxPropIndex + 1];
-					CooldownExpiry = new long[maxPropIndex + 1];
 
 					foreach (GameStateEntityPropertyDef propDef in typeInfo.PackedProperties)
 					{
@@ -266,30 +261,21 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>
-		/// Applies a client property update to this entity. Returns false if the entire update was dropped
-		/// because it contains a temporal property that is still under a cooldown lock — in that case nothing
-		/// is applied, persisted, or relayed. A temporal value's cooldown thereby acts as a lock guarding all
-		/// other property updates batched in the same message.
+		/// Applies a client property update to this entity.
 		/// </summary>
-		public virtual bool UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
 						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
 			if (propData.Array == null || propData.Count == 0 || TypeInfo == null)
 			{
 				persistedProps = null;
-				return true;
+				return;
 			}
 
 			List<LiveEntityPersistedPropertyData>? persistedPropsSoFar = null;
 			var propLookup = TypeInfo.PropertyIndexLookup;
 
 			long currTime = GameStateServer.GetServerTime();
-
-			if (TypeInfo.HasTemporalProps && HasActiveCooldownLock(propReader, propLookup, currTime))
-			{
-				persistedProps = null;
-				return false;
-			}
 
 			while (true)
 			{
@@ -302,15 +288,6 @@ namespace Impunity.GameState
 				if (propId >= Properties.Length || Properties[propId] == null)
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
-				}
-
-				var propInfo = propLookup[propId];
-
-				// Temporal field updates carry a requested cooldown lock duration before the value
-				ushort cooldownMs = 0;
-				if (propInfo.IsTemporal)
-				{
-					cooldownMs = propReader.ReadUInt16();
 				}
 
 				// Check per-field sequence number to discard stale out-of-order updates
@@ -324,16 +301,12 @@ namespace Impunity.GameState
 				Properties[propId].ReadFrom(propReader);
 				Properties[propId].LastModifiedTime = currTime;
 
-				if (propInfo.IsTemporal && CooldownExpiry != null)
-				{
-					CooldownExpiry[propId] = cooldownMs > 0 ? currTime + cooldownMs : 0;
-				}
-
 				if (RecvSeq != null && seq != 0)
 				{
 					RecvSeq[propId] = seq;
 				}
 
+				var propInfo = propLookup[propId];
 				if (propInfo.PersistedAs != null)
 				{
 					if (persistedPropsSoFar == null)
@@ -346,46 +319,6 @@ namespace Impunity.GameState
 			}
 
 			persistedProps = persistedPropsSoFar;
-			return true;
-		}
-
-		/// <summary>
-		/// Pre-scans a property update for temporal properties still under an active cooldown lock, without
-		/// applying anything. Returns true if the update must be dropped. Restores the reader position.
-		/// </summary>
-		private bool HasActiveCooldownLock(BinaryReader propReader, GameStateEntityPropertyDef[] propLookup, long currTime)
-		{
-			long startPos = propReader.BaseStream.Position;
-			bool locked = false;
-
-			while (true)
-			{
-				int propId = propReader.ReadByte();
-				if (propId == 0)
-				{
-					break;
-				}
-
-				if (propId >= Properties.Length || Properties[propId] == null)
-				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
-				}
-
-				if (propLookup[propId].IsTemporal)
-				{
-					propReader.ReadUInt16(); // requested cooldown, ignored during scan
-					if (CooldownExpiry != null && currTime < CooldownExpiry[propId])
-					{
-						locked = true;
-						break;
-					}
-				}
-
-				Properties[propId].SkipFrom(propReader);
-			}
-
-			propReader.BaseStream.Position = startPos;
-			return locked;
 		}
 
 		public void SetPersistedProps(List<LiveEntityPersistedPropertyData> props)
@@ -426,18 +359,6 @@ namespace Impunity.GameState
 				if (propInfo.IsTemporal)
 				{
 					writer.Write((uint)(currServerTime - Properties[propInfo.Index].LastModifiedTime));
-
-					// Remaining cooldown lock so a joining client computes the correct lock expiry regardless of age
-					long remainingCooldown = CooldownExpiry != null ? CooldownExpiry[propInfo.Index] - currServerTime : 0;
-					if (remainingCooldown < 0)
-					{
-						remainingCooldown = 0;
-					}
-					else if (remainingCooldown > ushort.MaxValue)
-					{
-						remainingCooldown = ushort.MaxValue;
-					}
-					writer.Write((ushort)remainingCooldown);
 				}
 				Properties[propInfo.Index].WriteTo(writer);
 			}
@@ -580,14 +501,10 @@ namespace Impunity.GameState
 			}
 		}
 
-		public override bool UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
 						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
-			if (!base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq))
-			{
-				// Dropped by a temporal cooldown lock — relay nothing
-				return false;
-			}
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
 
 			OutSeq++;
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
@@ -599,8 +516,6 @@ namespace Impunity.GameState
 			GameStateReplicant? except = IsClientAuthoritative() ? updatedBy : null;
 
 			SendToListeners(updateMessage, except);
-
-			return true;
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData)
@@ -819,18 +734,14 @@ namespace Impunity.GameState
 			return message;
 		}
 
-		public override bool UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
+		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
 					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
-			if (!base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq))
-			{
-				// Dropped by a temporal cooldown lock — relay nothing
-				return false;
-			}
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
 
 			if (Channel == null)
 			{
-				return true;
+				return;
 			}
 
 			OutSeq++;
@@ -843,8 +754,6 @@ namespace Impunity.GameState
 			GameStateReplicant? except = IsClientAuthoritative() ? updatedBy : null;
 
 			Channel.SendToListeners(updateMessage, except);
-
-			return true;
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData)
@@ -1048,10 +957,6 @@ namespace Impunity.GameState
 					{
 						etype.PropertyPersistedAsLookup.Add(prop.PersistedAs, prop);
 					}
-					if (prop.IsTemporal)
-					{
-						etype.HasTemporalProps = true;
-					}
 				}
 			}
 
@@ -1191,13 +1096,13 @@ namespace Impunity.GameState
 			return typeInfo;
 		}
 
-		private bool UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
+		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
 							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
 		{
 			if (propBytes.Array == null || propBytes.Count == 0)
 			{
 				persistedProps = null;
-				return true;
+				return;
 			}
 
 			// Put prop data into a read buffer
@@ -1205,7 +1110,7 @@ namespace Impunity.GameState
 			TempBufferReader.BaseStream.Write(propBytes);
 			TempBufferReader.BaseStream.Position = 0;
 
-			return entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps, seq);
+			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps, seq);
 		}
 
 		// ----- Public API below
@@ -1474,11 +1379,7 @@ namespace Impunity.GameState
 			}
 
 			List<LiveEntityPersistedPropertyData>? persistedProps;
-			if (!UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq))
-			{
-				// Entire update silently dropped by a temporal cooldown lock
-				return false;
-			}
+			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq);
 
 			if (entity.IsPersisted() && persistedProps != null)
 			{

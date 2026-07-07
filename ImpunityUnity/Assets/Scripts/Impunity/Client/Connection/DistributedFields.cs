@@ -207,9 +207,6 @@ namespace Impunity.Connection
 	/// <summary>
 	/// Client-side distributed value that also tracks the server-time of the last modification.
 	/// On initial load, provides the age of the value so clients can interpolate or compensate for staleness.
-	/// Updates may carry a cooldown lock (see <see cref="Set(T, TimeSpan, bool)"/>): the first update to reach
-	/// the server wins and the server silently drops any entity update that touches this field until the
-	/// cooldown expires, letting multiple clients share control of an object without ownership rules.
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
@@ -230,46 +227,8 @@ namespace Impunity.Connection
 
 		public object RawCurrentValue => CurrentValue;
 
-		/// <summary>Cooldown lock duration (ms) to send with the next update flush. 0 = no lock.</summary>
-		ushort PendingCooldownMs;
-		/// <summary>Server time (ms) when the currently known cooldown lock expires. 0 = no lock.</summary>
-		long CooldownExpiry;
-
 		/// <inheritdoc/>
 		public long LastModifiedTime { get; set; }
-
-		/// <summary>True while a cooldown lock is active on this field. While locked, the server drops any entity update that includes this field.</summary>
-		public readonly bool IsCooldownLocked
-		{
-			get { return CooldownExpiry > 0 && TryGetServerTime(out long now) && now < CooldownExpiry; }
-		}
-
-		/// <summary>Time remaining on the active cooldown lock, or <see cref="TimeSpan.Zero"/> when unlocked.</summary>
-		public readonly TimeSpan CooldownRemaining
-		{
-			get
-			{
-				if (CooldownExpiry <= 0 || !TryGetServerTime(out long now))
-				{
-					return TimeSpan.Zero;
-				}
-				long remaining = CooldownExpiry - now;
-				return remaining > 0 ? TimeSpan.FromMilliseconds(remaining) : TimeSpan.Zero;
-			}
-		}
-
-		/// <summary>Reads the connection's server time, returning false if this field's entity is not yet attached to a connected manager (e.g. before the entity is created or subscribed). In that state no server-enforced cooldown can be active.</summary>
-		private readonly bool TryGetServerTime(out long serverTime)
-		{
-			ClientEntityManager? manager = Entity.Manager;
-			if (manager?.Connection == null)
-			{
-				serverTime = 0;
-				return false;
-			}
-			serverTime = manager.Connection.GetServerTime();
-			return true;
-		}
 
 		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
 		{
@@ -283,95 +242,62 @@ namespace Impunity.Connection
 			return CurrentValue;
 		}
 
-		/// <summary>Sets the value with no cooldown lock. See <see cref="Set(T, TimeSpan, bool)"/> for the locking overload.</summary>
+		/// <summary>Queues the value to be sent to the server and marks the field dirty.
+		/// Applied to the local current value immediately only when the entity is client-authoritative.
+		/// Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
 		public bool Set(T newValue, bool force = false)
-		{
-			return Set(newValue, TimeSpan.Zero, force);
-		}
-
-		/// <summary>
-		/// Sets the value and requests a cooldown lock: once the server accepts this update, it silently drops
-		/// any entity update containing this field (from any client, including this one) until the lockout
-		/// elapses. First update to reach the server wins. Returns false without sending if a known cooldown
-		/// is still active locally; <paramref name="force"/> bypasses the local check (the server still enforces).
-		/// </summary>
-		public bool Set(T newValue, TimeSpan updateLockout, bool force = false)
-		{
-			if (!force && (IsCooldownLocked || Equals(newValue, CurrentValue)))
-			{
-				return false;
-			}
-
-			PendingCooldownMs = ClampCooldown(updateLockout);
-
-			PendingValue = newValue;
-			Entity.SetDirty(FieldBitmask, true);
-
-			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
-			{
-				ApplyLocalSet();
-			}
-
-			return true;
-		}
-
-		/// <summary>Sets the value with no cooldown lock, flushed as an unguaranteed (best-effort) update when possible. See <see cref="SetUnguaranteed(T, TimeSpan, bool)"/>.</summary>
-		public bool SetUnguaranteed(T newValue, bool force = false)
-		{
-			return SetUnguaranteed(newValue, TimeSpan.Zero, force);
-		}
-
-		/// <summary>Same as <see cref="Set(T, TimeSpan, bool)"/> but sent as an unguaranteed update if possible.</summary>
-		public bool SetUnguaranteed(T newValue, TimeSpan updateLockout, bool force = false)
-		{
-			if (!force && (IsCooldownLocked || Equals(newValue, CurrentValue)))
-			{
-				return false;
-			}
-
-			PendingCooldownMs = ClampCooldown(updateLockout);
-
-			PendingValue = newValue;
-			Entity.SetDirty(FieldBitmask, false);
-
-			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
-			{
-				ApplyLocalSet();
-			}
-
-			return true;
-		}
-
-		private void ApplyLocalSet()
-		{
-			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-			CooldownExpiry = PendingCooldownMs > 0 ? LastModifiedTime + PendingCooldownMs : 0;
-
-			T oldValue = CurrentValue;
-			CurrentValue = PendingValue!;
-
-			InvokeOnChanged(oldValue, CurrentValue);
-		}
-
-		private static ushort ClampCooldown(TimeSpan updateLockout)
-		{
-			double ms = updateLockout.TotalMilliseconds;
-			if (ms <= 0)
-			{
-				return 0;
-			}
-			return ms >= ushort.MaxValue ? ushort.MaxValue : (ushort)ms;
-		}
-
-		/// <summary>Updates the value locally without sending to the server, refreshing <see cref="LastModifiedTime"/>. Useful for client-side prediction or cosmetic state.</summary>
-		public bool SetLocalOnly(T newValue, bool force = false)
 		{
 			if (!force && Equals(newValue, CurrentValue))
 			{
 				return false;
 			}
 
-			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? LastModifiedTime;
+			PendingValue = newValue;
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				LastModifiedTime = Entity.Manager?.Connection.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+				T oldValue = CurrentValue;
+				CurrentValue = PendingValue;
+
+				InvokeOnChanged(oldValue, CurrentValue);
+			}
+
+			return true;
+		}
+
+		/// <summary>Queues the value to be sent to the server unguaranteed and marks the field dirty.
+		/// Applied to the local current value immediately only when the entity is client-authoritative.
+		/// Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
+		public bool SetUnguaranteed(T newValue, bool force = false)
+		{
+			if (!force && Equals(newValue, CurrentValue))
+			{
+				return false;
+			}
+
+			PendingValue = newValue;
+			Entity.SetDirty(FieldBitmask, false);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				LastModifiedTime = Entity.Manager?.Connection.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+				T oldValue = CurrentValue;
+				CurrentValue = PendingValue;
+
+				InvokeOnChanged(oldValue, CurrentValue);
+			}
+
+			return true;
+		}
+
+		/// <summary>Updates the value locally without sending to the server, refreshing <see cref="LastModifiedTime"/>. Useful for client-side prediction or cosmetic state.</summary>
+		public bool SetLocalOnly(T newValue)
+		{
+			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			T oldValue = CurrentValue;
 			CurrentValue = newValue;
@@ -384,7 +310,6 @@ namespace Impunity.Connection
 		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
-			w.Write(PendingCooldownMs);
 			Serializer.WriteTo(PendingValue!, w);
 			PendingValue = default;
 		}
@@ -397,9 +322,6 @@ namespace Impunity.Connection
 			long ageMilliseconds = r.ReadUInt32();
 			LastModifiedTime = now - ageMilliseconds;
 
-			ushort remainingCooldownMs = r.ReadUInt16();
-			CooldownExpiry = remainingCooldownMs > 0 ? now + remainingCooldownMs : 0;
-
 			CurrentValue = Serializer.ReadFrom(r);
 
 			InvokeOnInitialized(CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
@@ -410,9 +332,6 @@ namespace Impunity.Connection
 		{
 			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-			ushort cooldownMs = r.ReadUInt16();
-			CooldownExpiry = cooldownMs > 0 ? LastModifiedTime + cooldownMs : 0;
-
 			T oldValue = CurrentValue;
 			CurrentValue = Serializer.ReadFrom(r);
 
@@ -422,7 +341,6 @@ namespace Impunity.Connection
 		/// <inheritdoc/>
 		public void SkipFrom(BinaryReader r)
 		{
-			r.ReadUInt16(); // cooldown
 			Serializer.ReadFrom(r);
 		}
 
