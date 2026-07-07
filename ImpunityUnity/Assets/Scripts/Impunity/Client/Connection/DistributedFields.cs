@@ -257,7 +257,7 @@ namespace Impunity.Connection
 
 			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
-				LastModifiedTime = Entity.Manager?.Connection.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+				LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 				T oldValue = CurrentValue;
 				CurrentValue = PendingValue;
@@ -283,7 +283,7 @@ namespace Impunity.Connection
 
 			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
 			{
-				LastModifiedTime = Entity.Manager?.Connection.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+				LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 				T oldValue = CurrentValue;
 				CurrentValue = PendingValue;

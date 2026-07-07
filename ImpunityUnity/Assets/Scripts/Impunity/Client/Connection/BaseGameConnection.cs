@@ -687,6 +687,20 @@ namespace Impunity.Connection
 			DoAction(new UnlockEntityAction(entityId, onComplete));
 		}
 
+		/// <summary>Lists all currently active channels. These are channels that have current subscribers, or have recently had subscribers.</summary>
+		/// <param name="onComplete">Invoked with a list of channel names</param>
+		public void ListActiveChannels(ImpunityCallback<List<string>>? onComplete)
+		{
+			DoAction(new ListActiveChannelsAction(onComplete));
+		}
+
+		/// <summary>Lists all channels that have been persisted to the database, whether they are currently active or not.</summary>
+		/// <param name="onComplete">Invoked with a list of channel names</param>
+		public void ListPersistedChannels(ImpunityCallback<List<string>>? onComplete)
+		{
+			DoAction(new ListPersistedChannelsAction(onComplete));
+		}
+
 		// -------- Broadcast
 
 		/// <summary>Sends a typed broadcast message to all connected clients (delivered to their <see cref="OnBroadcastMessage"/>). Fire-and-forget — no completion callback or reply.</summary>

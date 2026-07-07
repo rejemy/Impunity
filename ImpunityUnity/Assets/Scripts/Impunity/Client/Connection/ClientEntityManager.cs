@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Impunity.GameState;
 using UltraLiteDB;
@@ -177,6 +178,11 @@ namespace Impunity.Connection
 		}
 
 		// -------------- Public API
+
+		public IReadOnlyList<IDistributedChannel> CurrentSubscriptions
+		{
+			get => SubscribedChannels.Values.ToList();
+		}
 
 		/// <summary>Registers all distributed entity types via reflection. Builds internal type metadata and returns
 		/// format definitions for the server handshake. Throws if two types share a distributed id or a

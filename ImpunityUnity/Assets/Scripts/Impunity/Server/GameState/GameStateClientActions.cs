@@ -41,6 +41,8 @@ namespace Impunity.GameState
 		UNLOCK_ENTITY = 308,
 		LOCK_NAMED_LOCK = 309,
 		UNLOCK_NAMED_LOCK = 310,
+		LIST_ACTIVE_CHANNELS = 311,
+		LIST_PERSISTED_CHANNELS = 312,
 
 		BROADCAST_MESSAGE = 400,
 	}
@@ -128,6 +130,10 @@ namespace Impunity.GameState
 					return typeof(LockNamedLockAction);
 				case ClientActionType.UNLOCK_NAMED_LOCK:
 					return typeof(UnlockNamedLockAction);
+				case ClientActionType.LIST_ACTIVE_CHANNELS:
+					return typeof(ListActiveChannelsAction);
+				case ClientActionType.LIST_PERSISTED_CHANNELS:
+					return typeof(ListPersistedChannelsAction);
 
 				case ClientActionType.CREATE_CHANNEL:
 					return typeof(CreateChannelAction);
@@ -1161,6 +1167,44 @@ namespace Impunity.GameState
 		protected override void DoAction(GameStateServer game)
 		{
 			Result = game.Live.UnlockNamedLock(Origin.ConnectionReplicant, Name);
+		}
+	}
+
+	/// <summary>List names of all active channels.</summary>
+	public class ListActiveChannelsAction : ClientActionResultBase<List<string>>
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.LIST_ACTIVE_CHANNELS; }
+		public override bool IsDBOperation() { return false; }
+
+		public ListActiveChannelsAction() { }
+
+		public ListActiveChannelsAction(ImpunityCallback<List<string>>? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.Live.ListActiveChannelNames();
+		}
+	}
+
+	/// <summary>List names of all persisted channels.</summary>
+	public class ListPersistedChannelsAction : ClientActionResultBase<List<string>>
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.LIST_PERSISTED_CHANNELS; }
+		public override bool IsDBOperation() { return true; }
+
+		public ListPersistedChannelsAction() { }
+
+		public ListPersistedChannelsAction(ImpunityCallback<List<string>>? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.DB.ListPersistedChannelNames();
 		}
 	}
 

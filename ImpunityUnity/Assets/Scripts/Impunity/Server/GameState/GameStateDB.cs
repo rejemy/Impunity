@@ -4,6 +4,7 @@ using System.Collections.Generic;
 
 
 using UltraLiteDB;
+using System.Linq;
 
 
 namespace Impunity.GameState
@@ -240,7 +241,8 @@ namespace Impunity.GameState
 			CollectionData entityCollection = new CollectionData();
 			entityCollection.Name = EntitiesCollectionName;
 			entityCollection.Collection = GameDB.GetCollection<BsonDocument>(entityCollection.Name);
-			entityCollection.Collection.EnsureIndex("ch");
+			entityCollection.Collection.EnsureIndex("ch"); // Channel owner index
+			entityCollection.Collection.EnsureIndex("et"); // entity type index
 			Collections[(int)ImpunityInternalCollectionIds.Entities] = entityCollection;
 			collectionNames.Add(entityCollection.Name);
 
@@ -393,13 +395,14 @@ namespace Impunity.GameState
 			return collection.Collection.Exists(Query.EQ("_id", entityId));
 		}
 
-		public void CreateLiveEntity(string entityId, string channelName, string entityTypeKey, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
+		public void CreateLiveEntity(string entityId, string channelName, bool isChannel, string entityTypeKey, byte instanceFlags, List<LiveEntityPersistedPropertyData>? properties)
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
 			BsonDocument entityDoc = new BsonDocument();
 			entityDoc["_id"] = entityId;
 			entityDoc["ch"] = channelName;
+			entityDoc["et"] = isChannel ? "ch" : "obj";
 			entityDoc["t"] = entityTypeKey;
 			entityDoc["f"] = (int)instanceFlags;
 
@@ -532,6 +535,28 @@ namespace Impunity.GameState
 			}
 
 			return channelData;
+		}
+
+		public List<string> ListPersistedChannelNames()
+		{
+			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
+
+			var channelMetadatas = collection.Collection.Find(Query.EQ("et", "ch"));
+			if (channelMetadatas == null)
+			{
+				return new List<string>();
+			}
+
+			try
+			{
+				return channelMetadatas.Select( c => c["ch"].AsString).ToList();
+			}
+			catch (Exception ex)
+			{
+				ImpunityLogger.LogError("Internal error selecting all persisted channel names: " + ex);
+			}
+
+			return new List<string>();
 		}
 
 		// ------------ Migration support -----------------

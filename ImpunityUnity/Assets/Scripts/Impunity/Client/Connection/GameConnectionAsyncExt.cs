@@ -339,6 +339,20 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		public static Task<List<string>> ListActiveChannels(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource<List<string>>();
+			connection.ListActiveChannels(t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<List<string>> ListPersistedChannels(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource<List<string>>();
+			connection.ListPersistedChannels(t.OnComplete);
+			return t.Task;
+		}
+
 	}
 
 	/// <summary>Async/await extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UltraLiteDB;
 
 
@@ -877,6 +878,7 @@ namespace Impunity.GameState
 
 		Dictionary<uint, GameStateEntity> AllEntities;
 		Dictionary<string, GameStateEntity> NamedEntities;
+		HashSet<GameStateChannel> Channels;
 
 		HashSet<GameStateReplicant> ConnectedReplicas;
 		public int NumConnections { get { return ConnectedReplicas.Count; } }
@@ -892,6 +894,7 @@ namespace Impunity.GameState
 
 			AllEntities = new Dictionary<uint, GameStateEntity>();
 			NamedEntities = new Dictionary<string, GameStateEntity>();
+			Channels = new HashSet<GameStateChannel>();
 			ConnectedReplicas = new HashSet<GameStateReplicant>();
 
 			TempBufferReader = new BinaryReader(new MemoryStream(new byte[ImpunityConstants.MaxMessageSize]));
@@ -1000,6 +1003,10 @@ namespace Impunity.GameState
 			{
 				NamedEntities[entity.Name] = entity;
 			}
+			if (entity is GameStateChannel)
+			{
+				Channels.Add((GameStateChannel)entity);
+			}
 
 		}
 
@@ -1011,7 +1018,14 @@ namespace Impunity.GameState
 			{
 				NamedEntities[newEntity.Name] = newEntity;
 			}
-
+			if (oldEntity is GameStateChannel)
+			{
+				Channels.Remove((GameStateChannel)oldEntity);
+			}
+			if (newEntity is GameStateChannel)
+			{
+				Channels.Add((GameStateChannel)newEntity);
+			}
 		}
 
 		private void DestroyEntity(GameStateEntity entity, BsonValue? deleteData)
@@ -1026,6 +1040,10 @@ namespace Impunity.GameState
 			if (entity.Name != null)
 			{
 				NamedEntities.Remove(entity.Name);
+			}
+			if (entity is GameStateChannel)
+			{
+				Channels.Remove((GameStateChannel)entity);
 			}
 		}
 
@@ -1241,7 +1259,7 @@ namespace Impunity.GameState
 			if (channel.IsPersisted() && typeInfo?.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name!, channel.ChannelName, typeInfo.PersistedAs, channel.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(channel.Name!, channel.ChannelName, true, typeInfo.PersistedAs, channel.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1343,7 +1361,7 @@ namespace Impunity.GameState
 			if (dobj.IsPersisted() && typeInfo.PersistedAs != null)
 			{
 				// Save to DB
-				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name!, dobj.ChannelName!, typeInfo.PersistedAs, dobj.FlagByte, persistedProps);
+				CreatePersistedEntityAction action = new CreatePersistedEntityAction(dobj.Name!, dobj.ChannelName!, false, typeInfo.PersistedAs, dobj.FlagByte, persistedProps);
 				Server.QueueAction(action);
 			}
 
@@ -1484,6 +1502,11 @@ namespace Impunity.GameState
 			}
 
 			return unlocked;
+		}
+
+		public List<string> ListActiveChannelNames()
+		{
+			return Channels.Select(c => c.ChannelName).ToList();
 		}
 
 		public void SendBroadcastMessage(int messageType, BsonValue message, string fromConnectionId)

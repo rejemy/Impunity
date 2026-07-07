@@ -249,6 +249,19 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		public static ImpunityYield<List<string>> ListActiveChannelsYield(this BaseGameConnection connection)
+		{
+			var action = new ImpunityYield<List<string>>();
+			connection.ListActiveChannels(action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<List<string>> ListPersistedChannelsYield(this BaseGameConnection connection)
+		{
+			var action = new ImpunityYield<List<string>>();
+			connection.ListPersistedChannels(action.OnComplete);
+			return action;
+		}
 	}
 
 	/// <summary>Unity coroutine yield extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>
