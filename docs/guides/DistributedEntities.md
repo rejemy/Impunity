@@ -21,7 +21,7 @@ This document covers the essentials. It assumes you already have a working `Game
 9. [Persistent objects](#9-persistent-objects)
 10. [Locks](#10-locks)
 11. [Events](#11-events)
-12. [Niche topics](#12-niche-topics) — temporal fields, local-only setters, unguaranteed sends
+12. [Niche topics](#12-niche-topics) — exclusive updates, temporal fields, local-only setters, unguaranteed sends
 13. [Quick reference](#13-quick-reference)
 14. [Known caveats](#14-known-caveats)
 
@@ -194,7 +194,7 @@ A distributed field is a generic struct `Field<T, S>` where `T` is the value typ
 | Type | Shape | Key methods | Change events |
 |---|---|---|---|
 | `DistributedValue<T,S>` | single value | `Get()`, `Set(v)` | `OnChanged(old, new)` |
-| `DistributedTemporalValue<T,S>` | single value + timestamp/cooldown | `Get()`, `Set(v)`, `Set(v, cooldown)` | `OnChanged`, `OnInitialized(v, age)` |
+| `DistributedTemporalValue<T,S>` | single value + last-modified timestamp | `Get()`, `Set(v)` | `OnChanged`, `OnInitialized(v, age)` |
 | `DistributedArray<T,S>` | fixed-size array | `Init(n)` / `Replace(coll)`, `Get(i)`, `Set(i, v)` | `OnChanged(i, old, new)`, `OnReplaced(old, new)` |
 | `DistributedQueue<T,S>` | bounded FIFO (evicts oldest) | `Init(cap)` / `Replace(cap, vals)`, `Add(v)` | `OnChanged(v)`, `OnReplaced(old, new)` |
 | `DistributedIntDictionary<T,S>` | `int`-keyed map | `Init()` / `Replace(map)`, `Get(k)`, `Add(k, v)` | `OnChanged(k, old, new)`, `OnReplaced(old, new)` |
@@ -286,6 +286,7 @@ Key points:
 - **Sequence numbers guard against staleness.** Each entity has an outgoing `SendSeq`; the server tracks a per-field received-sequence and ignores out-of-order updates; the server stamps relays with an `OutSeq`; each client tracks a per-field `FieldRecvSeq` and ignores stale inbound updates. This matters because updates can be sent unguaranteed (best-effort) and arrive out of order — see [§12](#12-niche-topics).
 - **Guaranteed vs. unguaranteed.** `Set` flags the update **guaranteed** (reliable delivery). `SetUnguaranteed` flags it best-effort. If any dirty field on an entity in a frame is guaranteed, that frame's update for the entity is sent reliably.
 - **The writer's echo is what updates its own `Get()`** for non-authoritative entities. For client-authoritative entities the server deliberately does *not* echo to the writer (it already applied locally), avoiding a redundant round trip.
+- **`UpdateExclusive` short-circuits the batch and adds an optimistic-concurrency guard.** It flushes one entity's dirty fields immediately (not on the next `SendUpdates()`) and carries the client's known per-field seqs; the server applies and relays the update only if the client has seen the latest change to every written field, else it rejects the whole update (`ActionStaleData`) with nothing applied. See [§12](#12-niche-topics).
 
 Everything inbound — creates, updates, events, locks, deletes — is dispatched on the thread that calls `connection.Update()` (the main/Unity thread), so your callbacks run where you can safely touch game state and UI.
 
@@ -458,6 +459,8 @@ entity.Unlock((err, released) => { });
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
+A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§12](#12-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.)
+
 ---
 
 ## 11. Events
@@ -478,9 +481,37 @@ Use events for transient signals — a hit, a sound cue, a one-off notification 
 
 ## 12. Niche topics
 
+### Optimistic exclusive updates (`UpdateExclusive`)
+
+The problem: two players pick the same berry. Each sets `bush.HasBerry = false` and the update replicates — both writes "succeed" and both players get a berry. A lock ([§10](#10-locks)) fixes it but is heavy boilerplate for a contention that is rare 99% of the time.
+
+`UpdateExclusive` solves it optimistically. Set your fields as usual, then flush them with a callback instead of waiting for the per-frame sweep:
+
+```csharp
+bush.HasBerry.Set(false);
+bush.UpdateExclusive(err =>
+{
+    if (err == null)
+        player.Inventory.Add(berry);          // we won — the berry is ours
+    // else: someone beat us to it (err.ErrorCode == ActionStaleData); do nothing
+});
+```
+
+How it works: the update carries the client's known per-field sequence numbers. The server applies and relays it **only if this client has seen the latest change to every field being written**; otherwise it rejects the *whole* update (nothing is applied) and the callback receives an `ActionStaleData` error. Because the loser's write never applies, exactly one of the racing players wins.
+
+Details worth knowing:
+
+- **Written fields only.** Staleness is checked only for the fields in this update. A concurrent change to some *other* field (a constantly-updated position, say) never causes a false conflict.
+- **All-or-nothing.** If any written field is stale, the entire update is dropped — batched sibling fields included. There is no partial apply.
+- **The winning value is already local when your callback runs.** On both success and rejection, any winning broadcast has been applied before the callback fires, so it is safe to read the entity's current values inside the callback. Wait for the callback before issuing another exclusive update to the *same* field (your own echo hasn't advanced your known seq until then).
+- **Locks and client-authoritative entities bypass the check.** If you hold the entity's lock the update always applies (the lock is the stronger guarantee). Client-authoritative entities are auto-locked to their creator, so their creator's exclusive updates always pass.
+- **Locked by another connection** yields an `ActionBlockedByLock` error in the callback (unlike ordinary updates, which the server drops silently).
+- **Reliable delivery.** Exclusive updates are always sent guaranteed (over TCP), even if the fields were set with `SetUnguaranteed`.
+- Yield/async wrappers: `entity.UpdateExclusiveYield()` (coroutine) and `entity.UpdateExclusiveAsync()` (faults on rejection).
+
 ### Temporal fields (`DistributedTemporalValue<T,S>`)
 
-A temporal value is a single value that also carries timing information and an optional **cooldown lock**. It exists for state that several clients update cooperatively, where you care *when* it last changed.
+A temporal value is a single value that also carries the server timestamp of its last modification — for state where a late joiner cares *how old* the value is.
 
 ```csharp
 [Distributed(15)]
@@ -490,21 +521,7 @@ public DistributedTemporalValue<MovementState, MovementSerializer> Movement;
 Movement.OnInitialized += (value, age) => { /* extrapolate `value` forward by `age` */ };
 ```
 
-Two extra capabilities over a plain `DistributedValue`:
-
-1. **Age on load.** When the field's initial state arrives, `OnInitialized(value, age)` reports how long ago (server time) the value was last modified — so a late joiner can extrapolate or interpolate rather than snapping to a stale value. The field also exposes `LastModifiedTime`.
-
-2. **Cooldown lock (shared control without ownership).** Set a value with a lockout:
-
-   ```csharp
-   Movement.Set(newState, updateLockout: TimeSpan.FromMilliseconds(500));
-   ```
-
-   Once the server accepts this update, it **silently drops any entity update that touches this field — from any client, including the sender — until the lockout expires.** First update to reach the server wins; the rest are ignored until the window passes. This lets multiple clients share write access to one object with no explicit lock or owner: whoever acts first "holds" the value for the cooldown. Inspect the active lock with `IsCooldownLocked` and `CooldownRemaining`.
-
-   > **Subtlety:** the server's drop applies to the *whole update message*. If a temporal field under an active cooldown is batched with other field changes in the same frame, the entire batch for that entity is dropped. Keep cooldown-locked temporal writes separate from unrelated field writes if you don't want them suppressed together.
-
-   Temporal locking currently applies to single values; the collection field types do not have temporal variants.
+One capability over a plain `DistributedValue`: **age on load.** When the field's initial state arrives, `OnInitialized(value, age)` reports how long ago (server time) the value was last modified — so a late joiner can extrapolate or interpolate rather than snapping to a stale value. The field also exposes `LastModifiedTime`. (For shared write access to one value without an owner, use `UpdateExclusive` above.)
 
 ### Local-only setters (`SetLocalOnly`)
 
@@ -518,7 +535,7 @@ Use it for client-side prediction, cosmetic/interpolated state, or any value you
 
 ### Unguaranteed sends (`SetUnguaranteed`)
 
-`SetUnguaranteed(value)` behaves like `Set` but flags the update as best-effort (it may be sent over an unreliable transport and may be dropped or reordered). Use it for high-frequency, self-correcting streams — positions, rotations — where the latest value matters and a missed intermediate frame is harmless. The per-field sequence numbers ensure a late straggler never clobbers a newer value. For temporal values, `SetUnguaranteed` has the same cooldown overload as `Set`.
+`SetUnguaranteed(value)` behaves like `Set` but flags the update as best-effort (it may be sent over an unreliable transport and may be dropped or reordered). Use it for high-frequency, self-correcting streams — positions, rotations — where the latest value matters and a missed intermediate frame is harmless. The per-field sequence numbers ensure a late straggler never clobbers a newer value.
 
 ---
 
@@ -546,11 +563,12 @@ public partial class Foo : DistributedObjectBase   // or DistributedChannelBase,
 | `Set(v)` | yes | only if client-authoritative / offline | guaranteed |
 | `SetUnguaranteed(v)` | yes | only if client-authoritative / offline | best-effort |
 | `SetLocalOnly(v)` | no | always | — |
-| `Set(v, cooldown)` *(temporal)* | yes | only if client-authoritative / offline | guaranteed, with server cooldown lock |
+
+Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. See [§12](#12-niche-topics).
 
 ### Operations (on `IDistributedEntity`)
 
-`TriggerEvent` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+`TriggerEvent` · `UpdateExclusive` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
 
 ### Per-frame
 

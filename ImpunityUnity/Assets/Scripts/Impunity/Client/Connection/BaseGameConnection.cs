@@ -264,15 +264,15 @@ namespace Impunity.Connection
 		// docs/guides/DistributedEntities.md for what each does to entity state.
 
 		/// <inheritdoc/>
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq)
 		{
-			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData);
+			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData, seq);
 		}
 
 		/// <inheritdoc/>
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq)
 		{
-			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated);
+			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated, seq);
 		}
 
 		/// <inheritdoc/>
@@ -650,6 +650,39 @@ namespace Impunity.Connection
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
 			action.SetGuaranteed(guaranteed);
 			DoAction(action);
+		}
+
+		/// <summary>Sends an exclusive (optimistic-concurrency) property delta for a live entity. The server applies and
+		/// relays it only if the client's known per-field seqs (<paramref name="knownFieldSeqs"/>) match the server's
+		/// last-modified seqs for every field in the update; otherwise the whole update is rejected and
+		/// <paramref name="onComplete"/> receives an <see cref="ImpunityErrorCode.ActionStaleData"/> error. Always sent
+		/// reliably (TCP) regardless of the fields' guaranteed flags, because the reply is positionally correlated over
+		/// the ordered stream.</summary>
+		/// <param name="entityId">The entity to update.</param>
+		/// <param name="updateData">The serialized changed-fields blob.</param>
+		/// <param name="knownFieldSeqs">The client's known per-field seqs blob, format <c>[fieldId:byte][seq:ushort LE]...[0]</c>.</param>
+		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
+		/// <param name="onComplete">Completion callback; receives an error on rejection (stale data or lock held by another).</param>
+		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete)
+		{
+			var action = new UpdateEntityAction(entityId, updateData, seq, knownFieldSeqs, onComplete);
+			action.SetGuaranteed(true);
+			DoAction(action);
+		}
+
+		/// <summary>Queues a completion callback to fire on the next <see cref="Update"/> without a server round-trip, used
+		/// for locally-resolved outcomes (e.g. an exclusive update with nothing to send, or a client-side validation error).
+		/// Delivered via the same <c>CompletedActions</c> queue as server replies, so it never runs reentrantly.</summary>
+		internal void QueueLocalCallback(ImpunityCallback? onComplete, ImpunityErrorResponse? error)
+		{
+			if (onComplete == null)
+			{
+				return;
+			}
+
+			NoOpAction action = new NoOpAction(onComplete);
+			action.Error = error;
+			CompletedActions.Enqueue(action);
 		}
 
 		/// <summary>Deletes a live entity by id. Deleting a channel also deletes its member objects.</summary>

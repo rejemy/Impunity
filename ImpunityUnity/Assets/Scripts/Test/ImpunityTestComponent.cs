@@ -672,7 +672,7 @@ public class ImpunityTestComponent : MonoBehaviour
 			c2player1 = await c2.EntityManager.CreateObjectAsync(c2player1, c2channel, false);
 			ImpunityLogger.LogError("C2 Made player1: " + c2player1.DistributedEntityId);
 		}
-		catch (ImpuntyErrorResponseException e)
+		catch (ImpunityErrorResponseException e)
 		{
 			ImpunityLogger.LogInformation("C2 prevented from making duplicate player1: " + e.Message);
 		}

@@ -17,7 +17,7 @@ namespace Impunity.Connection
 		{
 			if (err != null)
 			{
-				SetException(new ImpuntyErrorResponseException(err));
+				SetException(new ImpunityErrorResponseException(err));
 			}
 			else
 			{
@@ -35,7 +35,7 @@ namespace Impunity.Connection
 		{
 			if (err != null)
 			{
-				SetException(new ImpuntyErrorResponseException(err));
+				SetException(new ImpunityErrorResponseException(err));
 			}
 			else
 			{
@@ -47,7 +47,7 @@ namespace Impunity.Connection
 
 	/// <summary>
 	/// Async/await extension methods for <see cref="BaseGameConnection"/>. Each method wraps
-	/// the corresponding callback-based API, throwing <see cref="ImpuntyErrorResponseException"/> on failure.
+	/// the corresponding callback-based API, throwing <see cref="ImpunityErrorResponseException"/> on failure.
 	/// </summary>
 	public static class ConnectionAsyncExtensions
 	{
@@ -442,6 +442,15 @@ namespace Impunity.Connection
 		{
 			var t = new ImpunityTaskCompletionSource();
 			entity.TriggerEvent(eventType, eventData, t.OnComplete);
+			return t.Task;
+		}
+
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. The returned task faults with an
+		/// <see cref="ImpunityErrorResponseException"/> on a stale-data or lock rejection; await it in a try/catch to handle contention.</summary>
+		public static Task UpdateExclusiveAsync(this IDistributedEntity entity)
+		{
+			var t = new ImpunityTaskCompletionSource();
+			entity.UpdateExclusive(t.OnComplete);
 			return t.Task;
 		}
 

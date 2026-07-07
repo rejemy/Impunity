@@ -997,6 +997,12 @@ namespace Impunity.GameState
 		[BsonField("sq")]
 		public ushort Seq;
 
+		/// <summary>When non-null, marks this as an exclusive (optimistic-concurrency) update: a blob of the client's known
+		/// per-field seqs, format <c>[fieldId:byte][seq:ushort little-endian]...[0]</c>. The server rejects the whole update
+		/// with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field is stale. Absent ⇒ ordinary update.</summary>
+		[BsonField("xs")]
+		public ArraySegment<byte> KnownFieldSeqs;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
 		public override bool IsDBOperation() { return false; }
 
@@ -1010,9 +1016,18 @@ namespace Impunity.GameState
 			OnCompleteCallback = onComplete;
 		}
 
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ArraySegment<byte> knownFieldSeqs, ImpunityCallback? onComplete)
+		{
+			EntityId = entityId;
+			UpdateBytes = updateBytes;
+			Seq = seq;
+			KnownFieldSeqs = knownFieldSeqs;
+			OnCompleteCallback = onComplete;
+		}
+
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq);
+			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq, KnownFieldSeqs);
 		}
 	}
 
@@ -1093,7 +1108,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.LockEntity(Origin.ConnectionReplicant, EntityId);
+			Result = game.Live.LockEntity(Origin.ConnectionReplicant, EntityId);
 		}
 	}
 
@@ -1116,7 +1131,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.UnlockEntity(Origin.ConnectionReplicant, EntityId);
+			Result = game.Live.UnlockEntity(Origin.ConnectionReplicant, EntityId);
 		}
 	}
 

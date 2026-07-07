@@ -353,6 +353,15 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. Yield until the exclusive update
+		/// completes; inspect the yield's error to detect a stale-data or lock rejection.</summary>
+		public static ImpunityYield UpdateExclusiveYield(this IDistributedEntity entity)
+		{
+			var t = new ImpunityYield();
+			entity.UpdateExclusive(t.OnComplete);
+			return t;
+		}
+
 		public static ImpunityYield<bool> DeleteYield(this IDistributedEntity entity, BsonValue deleteData)
 		{
 			var t = new ImpunityYield<bool>();

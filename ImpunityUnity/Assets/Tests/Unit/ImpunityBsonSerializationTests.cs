@@ -5,6 +5,7 @@ using NUnit.Framework;
 
 using Impunity;
 using Impunity.Connection;
+using Impunity.GameState;
 using Impunity.Unity;
 
 using UltraLiteDB;
@@ -476,5 +477,58 @@ public class ImpunityBsonSerializationTests
 		var em = new ClientEntityManager();
 		var ex = Assert.Throws<Exception>(() => em.RegisterEntityTypes(new[] { typeof(BsonTestEntity), typeof(BsonTestDupKeyEntity) }));
 		StringAssert.Contains("PersistAs", ex.Message);
+	}
+
+	// ───────── Exclusive-update wire fields (xs on UpdateEntityAction, sq on create messages) ─────────
+
+	static T WireRoundTrip<T>(T obj) where T : class
+	{
+		var mapper = ImpunityUtil.GetBsonMapper();
+		byte[] bytes = mapper.SerializeToBytes(obj.GetType(), obj);
+		return mapper.DeserializeFromBytes<T>(new ArraySegment<byte>(bytes));
+	}
+
+	[Test, Category("ExclusiveUpdateWire")]
+	public void UpdateEntityAction_WithoutKnownSeqs_RoundTrips()
+	{
+		var action = new UpdateEntityAction(42u, new ArraySegment<byte>(new byte[] { 1, 5, 0 }), 7);
+		var back = WireRoundTrip(action);
+
+		Assert.AreEqual(42u, back.EntityId);
+		Assert.AreEqual(7, back.Seq);
+		Assert.AreEqual(new byte[] { 1, 5, 0 }, back.UpdateBytes.ToArray());
+		// Absent xs must deserialize to a null-array segment (⇒ ordinary, non-exclusive update).
+		Assert.IsNull(back.KnownFieldSeqs.Array, "Absent xs should round-trip as a null-array segment");
+	}
+
+	[Test, Category("ExclusiveUpdateWire")]
+	public void UpdateEntityAction_WithKnownSeqs_RoundTrips()
+	{
+		// Blob: field 1 known seq 0x0102, field 3 known seq 0x00FF, terminator 0.
+		byte[] xs = { 1, 0x02, 0x01, 3, 0xFF, 0x00, 0 };
+		var action = new UpdateEntityAction(42u, new ArraySegment<byte>(new byte[] { 1, 9, 0 }), 7, new ArraySegment<byte>(xs), null);
+		var back = WireRoundTrip(action);
+
+		Assert.IsNotNull(back.KnownFieldSeqs.Array, "Present xs should round-trip as a non-null segment");
+		Assert.AreEqual(xs, back.KnownFieldSeqs.ToArray());
+	}
+
+	[Test, Category("ExclusiveUpdateWire")]
+	public void ChannelCreateMessage_SeqRoundTrips()
+	{
+		var msg = new ChannelCreateMessageAction { ChannelId = 3u, ChannelName = "room", ChannelType = 1, Seq = 12345 };
+		var back = WireRoundTrip(msg);
+		Assert.AreEqual((ushort)12345, back.Seq);
+	}
+
+	[Test, Category("ExclusiveUpdateWire")]
+	public void ObjectCreateMessage_SeqRoundTrips_AndDefaultsToZero()
+	{
+		var withSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1, Seq = 999 });
+		Assert.AreEqual((ushort)999, withSeq.Seq);
+
+		// A message serialized without ever setting Seq must default to 0 (back-compat with old producers).
+		var noSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1 });
+		Assert.AreEqual((ushort)0, noSeq.Seq);
 	}
 }

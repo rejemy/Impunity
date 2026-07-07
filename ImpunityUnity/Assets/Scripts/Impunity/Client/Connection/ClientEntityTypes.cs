@@ -135,6 +135,17 @@ namespace Impunity.Connection
 		/// <param name="eventData">Arbitrary BSON payload delivered with the event.</param>
 		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
+		/// <summary>Immediately flushes this entity's pending dirty fields to the server as an exclusive (optimistic-concurrency)
+		/// update, instead of waiting for the per-frame dirty sweep. The server applies and relays the update only if this
+		/// client has seen the latest change to every field being written; otherwise the whole update is rejected (nothing
+		/// applied) and <paramref name="onComplete"/> receives an <see cref="ImpunityErrorCode.ActionStaleData"/> error — use
+		/// this to resolve races (e.g. two players picking the same berry: both write, only the winner's callback has no error).
+		/// Holding this entity's lock bypasses the check. On both success and rejection the winning field values are already
+		/// applied locally by the time the callback runs, so it is safe to read the entity's current values in the callback;
+		/// wait for the callback before issuing another exclusive update to the same field.</summary>
+		/// <param name="onComplete">Invoked with a null error on success, or a non-null error on rejection (stale data, or the
+		/// entity is locked by another client). Delivered on a later <c>Update()</c>, never reentrantly. May be null.</param>
+		void UpdateExclusive(ImpunityCallback onComplete);
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
@@ -356,6 +367,19 @@ namespace Impunity.Connection
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
 			Manager.Connection?.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+		}
+
+		/// <inheritdoc/>
+		public void UpdateExclusive(ImpunityCallback onComplete)
+		{
+			if (Manager == null)
+			{
+				// No manager means the entity was never registered with a connection; there is no queue to defer through.
+				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection"));
+				return;
+			}
+
+			Manager.SendEntityUpdatesExclusive(this, onComplete);
 		}
 
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers

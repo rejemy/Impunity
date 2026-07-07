@@ -115,6 +115,7 @@ namespace Impunity
 		ActionUniqueNameExists = 3003,
 		ActionNotFound = 3004,
 		ActionBlockedByLock = 3005,
+		ActionStaleData = 3006, // An exclusive update was rejected because the client's known field seq was behind the server's
 	}
 
 	/// <summary>Persisted metadata about a game world, stored in the database.</summary>
@@ -261,14 +262,14 @@ namespace Impunity
 	}
 
 	/// <summary>Client-side exception wrapping an <see cref="ImpunityErrorResponse"/> received from the server.</summary>
-	public class ImpuntyErrorResponseException : Exception
+	public class ImpunityErrorResponseException : Exception
 	{
 		/// <summary>The error code from the server response.</summary>
 		public ImpunityErrorCode ErrorId { get; private set; }
 		/// <summary>The stack trace from the server, for debugging.</summary>
 		public string? ServerStacktrace { get; private set; }
 
-		public ImpuntyErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
+		public ImpunityErrorResponseException(ImpunityErrorResponse err) : base(err.Message)
 		{
 			ErrorId = err.ErrorCode;
 			ServerStacktrace = err.Stacktrace;

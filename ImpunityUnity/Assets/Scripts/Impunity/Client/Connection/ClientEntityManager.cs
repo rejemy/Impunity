@@ -957,7 +957,9 @@ namespace Impunity.Connection
 		/// <param name="isLocked">Whether the channel is currently locked on the server.</param>
 		/// <param name="instanceFlags">Packed <see cref="ImpunityInstanceFlags"/> (e.g. persisted) for the channel.</param>
 		/// <param name="propData">The serialized initial property values for the channel.</param>
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData)
+		/// <param name="seq">The channel's current broadcast seq at snapshot time; seeds all per-field received-seqs so
+		/// optimistic exclusive updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq)
 		{
 			// A fresh channel-create means the client has re-subscribed to this id; clear any
 			// lingering suppression so the re-established channel and its objects flow normally.
@@ -998,6 +1000,7 @@ namespace Impunity.Connection
 			channel.IsLocked = isLocked;
 			channel.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 			RegisterEntity(channel, channelId);
+			SeedFieldRecvSeq(channel, seq);
 
 			SetPropertyBytes(channel, propData, true);
 
@@ -1025,7 +1028,9 @@ namespace Impunity.Connection
 		/// <param name="uniqueName">The object's unique name within the channel, or null if anonymous.</param>
 		/// <param name="newlyCreated">True if the object was just created while subscribed; false if it is part of the
 		/// initial snapshot delivered when the channel was first received.</param>
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated)
+		/// <param name="seq">The object's current broadcast seq at snapshot time; seeds all per-field received-seqs so
+		/// optimistic exclusive updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq)
 		{
 			// In-flight create on a channel being immediately-unsubscribed. Drop it, and also
 			// suppress this brand-new object id so its later updates drop quietly rather than
@@ -1058,6 +1063,7 @@ namespace Impunity.Connection
 			entity.IsPersisted = ((ImpunityInstanceFlags)instanceFlags & ImpunityInstanceFlags.Persisted) != 0;
 
 			RegisterEntity(entity, objectId);
+			SeedFieldRecvSeq(entity, seq);
 
 			IDistributedChannel? channel = DistributedObjects[channelId] as IDistributedChannel;
 
@@ -1119,6 +1125,18 @@ namespace Impunity.Connection
 			if (entity is IDistributedChannel channel)
 			{
 				SubscribedChannels.Add(channel.Name!, channel);
+			}
+		}
+
+		/// <summary>Seeds every entry of a freshly-registered entity's <see cref="IDistributedEntity.FieldRecvSeq"/> with the
+		/// entity's current server broadcast seq (from its create message). Without this, a new subscriber's zero-valued
+		/// received-seqs would be behind the server's per-field last-modified seq for any field changed before this client
+		/// subscribed, causing its optimistic exclusive updates to be rejected forever with no broadcast to correct them.</summary>
+		private static void SeedFieldRecvSeq(IDistributedEntity entity, ushort seq)
+		{
+			if (seq != 0 && entity.FieldRecvSeq != null)
+			{
+				Array.Fill(entity.FieldRecvSeq, seq);
 			}
 		}
 
@@ -1441,6 +1459,82 @@ namespace Impunity.Connection
 			entity.SendSeq++;
 			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null);
 
+		}
+
+		/// <summary>Immediately flushes an entity's pending dirty fields as an exclusive (optimistic-concurrency) update,
+		/// bypassing the per-frame dirty sweep. The update carries the client's known per-field seqs; the server rejects the
+		/// whole update (nothing applied) with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field changed since this
+		/// client last saw it, or <see cref="ImpunityErrorCode.ActionBlockedByLock"/> if another connection holds the lock.
+		/// On success and on rejection the winning values are already applied locally by the time <paramref name="onComplete"/>
+		/// runs (see the ordering guarantee in docs/guides/DistributedEntities.md). Backs <see cref="IDistributedEntity.UpdateExclusive"/>.</summary>
+		/// <param name="entity">The entity whose pending dirty fields to flush exclusively.</param>
+		/// <param name="onComplete">Callback invoked with null on success or an error on rejection. Delivered on a later
+		/// <see cref="BaseGameConnection.Update"/>, never reentrantly.</param>
+		public void SendEntityUpdatesExclusive(IDistributedEntity entity, ImpunityCallback? onComplete)
+		{
+			if (Connection == null)
+			{
+				throw new Exception("ClientEntityManager has no connection");
+			}
+
+			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
+			{
+				Connection.QueueLocalCallback(onComplete, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				return;
+			}
+
+			// Snapshot dirty bits before GetPropertyBytes clears them; nothing dirty is trivially a success.
+			ulong dirtyBits = entity.DirtyBits;
+			if (dirtyBits == 0)
+			{
+				Connection.QueueLocalCallback(onComplete, null);
+				return;
+			}
+
+			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
+
+			// Build the known-seqs blob [fieldId][seq lo][seq hi]...[0] for exactly the dirty fields, using this
+			// client's last-received seq per field (0 if never received). Must be gathered before dirty state is cleared.
+			int dirtyCount = 0;
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo != null && (dirtyBits & fieldInfo.FieldBitmask) != 0)
+				{
+					dirtyCount++;
+				}
+			}
+
+			byte[] seqBlob = new byte[dirtyCount * 3 + 1];
+			int pos = 0;
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo == null || (dirtyBits & fieldInfo.FieldBitmask) == 0)
+				{
+					continue;
+				}
+
+				ushort known = entity.FieldRecvSeq != null ? entity.FieldRecvSeq[fieldInfo.FieldId] : (ushort)0;
+				seqBlob[pos++] = fieldInfo.FieldId;
+				seqBlob[pos++] = (byte)(known & 0xFF);
+				seqBlob[pos++] = (byte)((known >> 8) & 0xFF);
+			}
+			seqBlob[pos] = 0;
+
+			// Serialize the field deltas, then copy out of the shared reused encode buffer: this update must not alias
+			// that buffer, since the local in-process connection shares it by reference and the remote writer thread
+			// drains it asynchronously.
+			ArraySegment<byte> propBytes = GetPropertyBytes(entity, out _);
+			byte[] updateCopy = propBytes.Array != null ? new byte[propBytes.Count] : Array.Empty<byte>();
+			if (propBytes.Array != null)
+			{
+				Array.Copy(propBytes.Array, propBytes.Offset, updateCopy, 0, propBytes.Count);
+			}
+
+			// Drop from the per-frame sweep so it doesn't also send a now-empty follow-up update.
+			DirtyObjects.Remove(entity);
+
+			entity.SendSeq++;
+			Connection.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete);
 		}
 
 		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,

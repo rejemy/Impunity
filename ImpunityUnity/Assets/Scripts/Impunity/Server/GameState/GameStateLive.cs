@@ -153,6 +153,10 @@ namespace Impunity.GameState
 		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.</summary>
 		private ushort[] RecvSeq = null!;
 
+		/// <summary>Per-field <see cref="OutSeq"/> value of the last broadcast that carried each field's most recent modification,
+		/// indexed by propId. 0 = never broadcast. Used to reject stale <c>UpdateExclusive</c> optimistic-concurrency updates.</summary>
+		private ushort[] LastModSeq = null!;
+
 		/// <summary>Outgoing sequence counter for broadcasting updates to clients.</summary>
 		public ushort OutSeq;
 
@@ -170,6 +174,7 @@ namespace Impunity.GameState
 					int maxPropIndex = typeInfo.PackedProperties[typeInfo.PackedProperties.Length - 1].Index;
 					Properties = new IStandardDistributableValueType[maxPropIndex + 1];
 					RecvSeq = new ushort[maxPropIndex + 1];
+					LastModSeq = new ushort[maxPropIndex + 1];
 
 					foreach (GameStateEntityPropertyDef propDef in typeInfo.PackedProperties)
 					{
@@ -261,11 +266,68 @@ namespace Impunity.GameState
 			return LockedWith == null || LockedWith == key;
 		}
 
+		/// <summary>Validates the known-field-sequence blob carried by an exclusive (optimistic-concurrency) update.
+		/// The blob is a sequence of <c>[fieldId:byte][clientKnownSeq:ushort little-endian]</c> pairs terminated by a
+		/// <c>0</c> field id. For each field, the update is stale if the client's known seq is behind this entity's
+		/// <see cref="LastModSeq"/> for that field (i.e. the field was broadcast-modified since the client last saw it).
+		/// Throws <see cref="ImpunityServerException"/> with <see cref="ImpunityErrorCode.ActionStaleData"/> on the first
+		/// stale field, or <see cref="ImpunityErrorCode.ActionInvalidParameter"/> on a malformed blob — in either case the
+		/// caller must not have applied any part of the update yet (all-or-nothing).</summary>
+		public void ValidateExclusiveSeqs(ArraySegment<byte> knownSeqs)
+		{
+			if (knownSeqs.Array == null || knownSeqs.Count == 0)
+			{
+				return;
+			}
+
+			byte[] buf = knownSeqs.Array;
+			int i = knownSeqs.Offset;
+			int end = knownSeqs.Offset + knownSeqs.Count;
+
+			while (true)
+			{
+				if (i >= end)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed exclusive update seq blob (unterminated)");
+				}
+
+				int propId = buf[i++];
+				if (propId == 0)
+				{
+					break;
+				}
+
+				if (i + 1 >= end)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed exclusive update seq blob (truncated seq)");
+				}
+
+				ushort clientKnown = (ushort)(buf[i] | (buf[i + 1] << 8));
+				i += 2;
+
+				if (LastModSeq == null || propId >= LastModSeq.Length || propId >= Properties.Length || Properties[propId] == null)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id in exclusive update: " + propId);
+				}
+
+				// Stale if the client hasn't seen the broadcast that last modified this field.
+				// (short) diff handles ushort wraparound, matching the RecvSeq/FieldRecvSeq idiom.
+				if (!((short)(clientKnown - LastModSeq[propId]) >= 0))
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionStaleData,
+						"Exclusive update rejected: field " + propId + " changed since last read (known " + clientKnown + ", latest " + LastModSeq[propId] + ")");
+				}
+			}
+		}
+
 		/// <summary>
-		/// Applies a client property update to this entity.
+		/// Applies a client property update to this entity. <paramref name="broadcastSeq"/> is the <see cref="OutSeq"/>
+		/// value that will stamp the relayed broadcast of this update; each carried field records it in
+		/// <see cref="LastModSeq"/> for optimistic-concurrency (exclusive-update) staleness checks. Pass 0 when this
+		/// update is not being broadcast (e.g. create-time property seeding on an object not yet in a channel).
 		/// </summary>
 		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
 		{
 			if (propData.Array == null || propData.Count == 0 || TypeInfo == null)
 			{
@@ -294,7 +356,13 @@ namespace Impunity.GameState
 				// Check per-field sequence number to discard stale out-of-order updates
 				if (seq != 0 && RecvSeq != null && !((short)(seq - RecvSeq[propId]) > 0))
 				{
-					// Stale update for this field — skip its data without applying
+					// Stale update for this field — skip its data without applying. Still stamp LastModSeq:
+					// the field's bytes are relayed to listeners in the original message under broadcastSeq, so
+					// receivers' FieldRecvSeq will converge to it — LastModSeq must match to stay consistent.
+					if (broadcastSeq != 0 && LastModSeq != null)
+					{
+						LastModSeq[propId] = broadcastSeq;
+					}
 					Properties[propId].SkipFrom(propReader);
 					continue;
 				}
@@ -305,6 +373,11 @@ namespace Impunity.GameState
 				if (RecvSeq != null && seq != 0)
 				{
 					RecvSeq[propId] = seq;
+				}
+
+				if (broadcastSeq != 0 && LastModSeq != null)
+				{
+					LastModSeq[propId] = broadcastSeq;
 				}
 
 				var propInfo = propLookup[propId];
@@ -448,6 +521,7 @@ namespace Impunity.GameState
 			channelCreate.IsLocked = IsLocked();
 			channelCreate.InstanceFlags = (byte)Flags;
 			channelCreate.PropBytes = GetPropBytes();
+			channelCreate.Seq = OutSeq;
 			channelCreate.ObjectsInChannel = new ObjectCreateMessageAction[Members.Count];
 
 			int i = 0;
@@ -503,11 +577,13 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
-
+			// Bump the broadcast seq before applying, so each carried field's LastModSeq is stamped with the
+			// same OutSeq the relayed message will carry.
 			OutSeq++;
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq, OutSeq);
+
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
 			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
@@ -732,20 +808,25 @@ namespace Impunity.GameState
 			message.InstanceFlags = (byte)Flags;
 			message.PropBytes = GetPropBytes();
 			message.UniqueName = Name;
+			message.Seq = OutSeq;
 			return message;
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
+					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
 		{
-			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq);
-
+			// A fresh object still being created has no channel yet: apply the seeded props but do not broadcast or
+			// advance OutSeq, so the creator's zero-valued FieldRecvSeq stays consistent with LastModSeq (0 >= 0 passes).
 			if (Channel == null)
 			{
+				base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq, 0);
 				return;
 			}
 
+			// Bump the broadcast seq before applying, so each carried field's LastModSeq matches the relayed message.
 			OutSeq++;
+			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq, OutSeq);
+
 			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
 			updateMessage.SetGuaranteed(guaranteed);
 			updateMessage.EntityId = Id;
@@ -926,7 +1007,7 @@ namespace Impunity.GameState
 
 				if (etype.PersistedAs != null)
 				{
-					if (newEntityTypesByPersistKey.TryGetValue(etype.PersistedAs, out GameStateEntityType existing))
+					if (newEntityTypesByPersistKey.TryGetValue(etype.PersistedAs, out GameStateEntityType? existing))
 					{
 						throw new ImpunityServerFatalException(ImpunityErrorCode.ActionInvalidParameter,
 							"Entity types " + existing.Name + " and " + etype.Name + " both use PersistAs key '" + etype.PersistedAs + "'");
@@ -1382,7 +1463,7 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0, ArraySegment<byte> exclusiveSeqs = default)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1390,10 +1471,25 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
+			bool exclusive = exclusiveSeqs.Array != null;
+
 			if (!entity.IsAccessibleBy(origin.ConnectionKey))
 			{
-				// Can't update locked entity
+				// Can't update locked entity. Exclusive updates carry a callback and expect to learn about the
+				// rejection; plain updates keep the historical silent-drop behavior.
+				if (exclusive)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Entity " + entityId + " is locked by another connection");
+				}
 				return false;
+			}
+
+			// Optimistic-concurrency check. Holding the lock is a stronger guarantee than the seq check, so a lock
+			// holder bypasses it (this is also what makes client-authoritative entities — auto-locked to their creator
+			// and never echoed — always pass). Validate every field before applying any: rejection is all-or-nothing.
+			if (exclusive && !entity.IsLockedBy(origin.ConnectionKey))
+			{
+				entity.ValidateExclusiveSeqs(exclusiveSeqs);
 			}
 
 			List<LiveEntityPersistedPropertyData>? persistedProps;

@@ -114,6 +114,19 @@ namespace Impunity.Unity
 			Manager?.Connection?.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
 		}
 
+		/// <inheritdoc/>
+		public void UpdateExclusive(ImpunityCallback onComplete)
+		{
+			if (Manager == null)
+			{
+				// No manager means the entity was never registered with a connection; there is no queue to defer through.
+				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection"));
+				return;
+			}
+
+			Manager.SendEntityUpdatesExclusive(this, onComplete);
+		}
+
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>

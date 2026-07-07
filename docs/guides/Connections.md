@@ -324,7 +324,8 @@ Codes you'll actually branch on:
 | `ServerPasswordIncorrect` | Wrong world password |
 | `ServerUnavailable` | The server is refusing new connections |
 | `ActionUniqueNameExists` | An entity unique-name collision on create |
-| `ActionBlockedByLock` | An update/delete was rejected because another connection holds the lock |
+| `ActionBlockedByLock` | An update/delete was rejected because another connection holds the lock (also an exclusive update on a foreign-locked entity) |
+| `ActionStaleData` | An `UpdateExclusive` was rejected because a written field changed since this client last saw it |
 | `ActionNotFound` | The target entity/document doesn't exist |
 | `ActionBadRequest` / `ActionInvalidParameter` | Malformed request (e.g. a non-DB action in a compound batch, a bad collection id) |
 | `ActionCompoundFailure` | At least one sub-action of a compound action failed |

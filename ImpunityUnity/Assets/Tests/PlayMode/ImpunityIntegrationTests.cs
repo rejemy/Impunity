@@ -224,6 +224,19 @@ public class ImpunityIntegrationTests
 		Assert.IsTrue(condition(), "Condition not met within timeout");
 	}
 
+	/// <summary>Ticks the given connections for a fixed duration, without asserting any condition. Used to give
+	/// would-be-relayed messages time to arrive so a test can assert that they did NOT.</summary>
+	IEnumerator TickFor(float seconds, params BaseGameConnection[] connections)
+	{
+		float elapsed = 0f;
+		while (elapsed < seconds)
+		{
+			foreach (var c in connections) c.Update();
+			yield return null;
+			elapsed += Time.deltaTime;
+		}
+	}
+
 	BaseGameConnection[] AllConnections()
 	{
 		var list = new List<BaseGameConnection>();
@@ -884,7 +897,416 @@ public class ImpunityIntegrationTests
 
 
 	// ═══════════════════════════════════════════════════════════
-	// 8. Delete-On-Disconnect
+	// 8. Exclusive (optimistic-concurrency) Updates
+	// ═══════════════════════════════════════════════════════════
+
+	/// <summary>Helper: subscribes C1 (local) and C2 (remote) to a channel, has C1 create an entity with a baseline
+	/// Health, waits for C2 to replicate it, and returns both clients' instances so both sides can be asserted on.</summary>
+	IEnumerator SetupTwoClientEntity(string channelName, System.Action<IntegrationTestEntity, IntegrationTestEntity> onReady)
+	{
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield(channelName, c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(100);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>(channelName, null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values)
+		{
+			c2Entity = obj as IntegrationTestEntity;
+			break;
+		}
+		Assert.IsNotNull(c2Entity, "C2 did not replicate the entity");
+
+		onReady(c1Entity, c2Entity);
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_FreshClientSucceeds()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl1", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		// Settle a baseline both sides agree on.
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// C2, fully up to date, exclusively writes a new value.
+		bool done = false; ImpunityErrorResponse err = null; int valueInCallback = -1;
+		c2Entity.Health.Set(60);
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; valueInCallback = c2Entity.Health.Get(); });
+
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "Fresh exclusive update should succeed");
+		Assert.AreEqual(60, valueInCallback, "Winner's own echo should be applied before the success callback fires");
+		yield return TickUntil(() => c1Entity.Health.Get() == 60, 3f, AllConnections());
+		Assert.AreEqual(60, c1Entity.Health.Get(), "Value did not replicate to C1");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_StaleRejectsWholeUpdate()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl2", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// C1 changes Health and lands it on the server WITHOUT letting C2 process the resulting broadcast
+		// (tick only C1's connection). C2's known seq for Health is now behind the server's.
+		c1Entity.Health.Set(70);
+		yield return TickUntil(() => c1Entity.Health.Get() == 70, 3f, LocalGame);
+
+		// Watch C1 for any leaked change from C2's doomed update.
+		bool c1HealthChanged = false, c1NameChanged = false;
+		c1Entity.Health.OnChanged += (o, n) => c1HealthChanged = true;
+		c1Entity.DisplayName.OnChanged += (o, n) => c1NameChanged = true;
+
+		// Stale C2 writes Health AND DisplayName in one exclusive update.
+		bool done = false; ImpunityErrorResponse err = null; int healthInCallback = -1; string nameInCallback = null;
+		c2Entity.Health.Set(99);
+		c2Entity.DisplayName.Set("loser");
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; healthInCallback = c2Entity.Health.Get(); nameInCallback = c2Entity.DisplayName.Get(); });
+
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNotNull(err, "Stale exclusive update should be rejected");
+		Assert.AreEqual(ImpunityErrorCode.ActionStaleData, err.ErrorCode, "Rejection should be ActionStaleData");
+		Assert.AreEqual(70, healthInCallback, "Winner's value should already be applied on C2 when the error callback fires");
+
+		// Give any (erroneously) relayed update time to arrive.
+		yield return TickFor(0.5f, AllConnections());
+
+		Assert.IsFalse(c1HealthChanged, "Stale Health leaked through to C1");
+		Assert.IsFalse(c1NameChanged, "Batched DisplayName was not dropped with the stale update (not all-or-nothing)");
+		Assert.AreEqual(70, c1Entity.Health.Get(), "C1 Health changed despite the rejected update");
+		Assert.AreNotEqual("loser", nameInCallback, "Rejected DisplayName should not have applied locally on C2 (non-client-auth applies only on echo)");
+		Assert.AreNotEqual("loser", c1Entity.DisplayName.Get(), "C1 DisplayName changed despite all-or-nothing rejection");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_UnrelatedFieldChangeDoesNotConflict()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl3", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// C1 changes Health (unseen by C2).
+		c1Entity.Health.Set(70);
+		yield return TickUntil(() => c1Entity.Health.Get() == 70, 3f, LocalGame);
+
+		// C2 is stale on Health, but exclusively writes only DisplayName — a different field — so it must succeed
+		// (staleness is scoped to written fields only).
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Entity.DisplayName.Set("hello");
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "Exclusive write to an unrelated field must not conflict with a concurrent change to a different field");
+		yield return TickUntil(() => c1Entity.DisplayName.Get() == "hello", 3f, AllConnections());
+		Assert.AreEqual("hello", c1Entity.DisplayName.Get());
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_RaceExactlyOneWinner()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl4", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// Both clients (each fully up to date) race to set the same field in the same frame.
+		int c1Done = 0, c2Done = 0; int errorCount = 0;
+		c1Entity.Health.Set(11);
+		c1Entity.UpdateExclusive((e) => { c1Done++; if (e != null) errorCount++; });
+		c2Entity.Health.Set(22);
+		c2Entity.UpdateExclusive((e) => { c2Done++; if (e != null) errorCount++; });
+
+		yield return TickUntil(() => c1Done > 0 && c2Done > 0, 3f, AllConnections());
+
+		Assert.AreEqual(1, errorCount, "Exactly one of the racing exclusive updates should be rejected as stale");
+		// Both sides converge on the same (winner's) value.
+		yield return TickUntil(() => c1Entity.Health.Get() == c2Entity.Health.Get() && c1Entity.Health.Get() != 50, 3f, AllConnections());
+		Assert.AreEqual(c1Entity.Health.Get(), c2Entity.Health.Get(), "Clients did not converge on the winner's value");
+		Assert.IsTrue(c1Entity.Health.Get() == 11 || c1Entity.Health.Get() == 22, "Converged value should be one of the two contenders");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_NotDirtyCompletesImmediately()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl5", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		ushort seqBefore = c2Entity.SendSeq;
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "UpdateExclusive with nothing dirty should succeed");
+		Assert.AreEqual(seqBefore, c2Entity.SendSeq, "No message should be sent when nothing is dirty");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_LateSubscriberSeeded()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// C1 creates the entity and performs several normal updates, driving the server's OutSeq/LastModSeq well past 0.
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("excl6", c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(1);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		for (int i = 2; i <= 6; i++)
+		{
+			c1Entity.Health.Set(i);
+			yield return TickUntil(() => c1Entity.Health.Get() == i, 3f, AllConnections());
+		}
+
+		// C2 subscribes only now — its FieldRecvSeq must be seeded from the entity's current OutSeq, or its exclusive
+		// update below would be rejected forever (livelock).
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("excl6", null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+		yield return TickUntil(() => c2Channel.DistributedObjects.Count > 0, 3f, AllConnections());
+
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in c2Channel.DistributedObjects.Values) { c2Entity = obj as IntegrationTestEntity; break; }
+		Assert.IsNotNull(c2Entity);
+		Assert.AreEqual(6, c2Entity.Health.Get(), "Late joiner did not replicate current state");
+
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Entity.Health.Set(60);
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "Late subscriber's first exclusive update should succeed (FieldRecvSeq must be seeded from create-time OutSeq)");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_CreatorOfFreshObjectSucceeds()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("excl7", c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.Health.Set(10);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		// Immediately after create, the creator (FieldRecvSeq all-zero, server OutSeq/LastModSeq all-zero) writes exclusively.
+		bool done = false; ImpunityErrorResponse err = null;
+		c1Entity.Health.Set(20);
+		c1Entity.UpdateExclusive((e) => { done = true; err = e; });
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "Creator of a fresh object should be able to exclusively update it");
+
+		// And a second subscriber sees the value.
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("excl7", null);
+		yield return WaitForYield(subYield2, AllConnections());
+		yield return TickUntil(() => subYield2.Value.DistributedObjects.Count > 0, 3f, AllConnections());
+		IntegrationTestEntity c2Entity = null;
+		foreach (var obj in subYield2.Value.DistributedObjects.Values) { c2Entity = obj as IntegrationTestEntity; break; }
+		Assert.IsNotNull(c2Entity);
+		Assert.AreEqual(20, c2Entity.Health.Get());
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_ChannelEntityFields()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		// SubscribeToChannel does NOT keep the createIfNeeded instance — the server sends a create message and a fresh
+		// instance is registered and returned as subYield.Value. Drive that one, not the throwaway.
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("excl8", new IntegrationTestChannel());
+		yield return WaitForYield(subYield1, AllConnections());
+		var c1Channel = subYield1.Value;
+
+		var subYield2 = RemoteGame.EntityManager.SubscribeToChannelYield<IntegrationTestChannel>("excl8", null);
+		yield return WaitForYield(subYield2, AllConnections());
+		var c2Channel = subYield2.Value;
+
+		// Settle a baseline channel field.
+		c1Channel.Status.Set("ready");
+		yield return TickUntil(() => c1Channel.Status.Get() == "ready" && c2Channel.Status.Get() == "ready", 3f, AllConnections());
+
+		// C1 changes Status, unseen by C2.
+		c1Channel.Status.Set("busy");
+		yield return TickUntil(() => c1Channel.Status.Get() == "busy", 3f, LocalGame);
+
+		// Stale C2 exclusive update on the channel entity is rejected.
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Channel.Status.Set("stale");
+		c2Channel.UpdateExclusive((e) => { done = true; err = e; });
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNotNull(err, "Stale exclusive update on a channel entity should be rejected");
+		Assert.AreEqual(ImpunityErrorCode.ActionStaleData, err.ErrorCode);
+		Assert.AreNotEqual("stale", c1Channel.Status.Get(), "Rejected channel update must not apply");
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_LockHolderBypassesStaleness()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl9", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// Make C2 stale on Health.
+		c1Entity.Health.Set(70);
+		yield return TickUntil(() => c1Entity.Health.Get() == 70, 3f, LocalGame);
+
+		// C2 takes the lock, which is a stronger guarantee than the seq check and bypasses staleness.
+		var lockYield = c2Entity.TryLockYield();
+		yield return WaitForYield(lockYield, AllConnections());
+		Assert.IsTrue(lockYield.Value, "C2 should acquire the lock");
+
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Entity.Health.Set(88);
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNull(err, "Lock holder's exclusive update should bypass the staleness check");
+		yield return TickUntil(() => c1Entity.Health.Get() == 88, 3f, AllConnections());
+		Assert.AreEqual(88, c1Entity.Health.Get());
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_LockedByOtherReturnsError()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		IntegrationTestEntity c1Entity = null, c2Entity = null;
+		yield return SetupTwoClientEntity("excl10", (e1, e2) => { c1Entity = e1; c2Entity = e2; });
+
+		c1Entity.Health.Set(50);
+		yield return TickUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, 3f, AllConnections());
+
+		// C1 locks the entity.
+		var lockYield = c1Entity.TryLockYield();
+		yield return WaitForYield(lockYield, AllConnections());
+		Assert.IsTrue(lockYield.Value);
+		yield return TickUntil(() => c2Entity.IsLocked, 3f, AllConnections());
+
+		// C2's exclusive update should get an explicit lock error (not silence).
+		bool done = false; ImpunityErrorResponse err = null;
+		c2Entity.Health.Set(99);
+		c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+		yield return TickUntil(() => done, 3f, AllConnections());
+
+		Assert.IsNotNull(err, "Exclusive update on an entity locked by another client should error");
+		Assert.AreEqual(ImpunityErrorCode.ActionBlockedByLock, err.ErrorCode);
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_ClientAuthoritativeAlwaysPasses()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+		yield return StartTCPAndConnectRemote();
+
+		var c1Channel = new IntegrationTestChannel();
+		var subYield1 = LocalGame.EntityManager.SubscribeToChannelYield("excl11", c1Channel);
+		yield return WaitForYield(subYield1, AllConnections());
+
+		// Client-authoritative entities are auto-locked to their creator and never echoed, so their FieldRecvSeq never
+		// advances — the lock bypass is what keeps exclusive updates working for them.
+		var c1Entity = new IntegrationTestEntity();
+		c1Entity.IsClientAuthoritative = true;
+		c1Entity.Health.Set(1);
+		var createYield = LocalGame.EntityManager.CreateObjectYield(c1Entity, subYield1.Value, false);
+		yield return WaitForYield(createYield, AllConnections());
+
+		for (int i = 0; i < 3; i++)
+		{
+			bool done = false; ImpunityErrorResponse err = null;
+			c1Entity.Health.Set(100 + i);
+			c1Entity.UpdateExclusive((e) => { done = true; err = e; });
+			yield return TickUntil(() => done, 3f, AllConnections());
+			Assert.IsNull(err, "Client-authoritative creator's exclusive update #" + i + " should always pass");
+		}
+	}
+
+	[UnityTest, Category("ExclusiveUpdate")]
+	public IEnumerator Exclusive_UnregisteredEntityErrors()
+	{
+		CreateServer();
+		yield return ConnectLocal();
+
+		// A bare, never-registered entity has no manager/connection to flush through (its fields are initialized by
+		// the DistributedEntityBase constructor, so Set works and applies locally).
+		var orphan = new IntegrationTestEntity();
+		orphan.Health.Set(5);
+
+		bool done = false; ImpunityErrorResponse err = null;
+		orphan.UpdateExclusive((e) => { done = true; err = e; });
+
+		// Delivered synchronously (no manager to defer through), so it is already done here.
+		Assert.IsTrue(done, "Callback should fire for an unregistered entity");
+		Assert.IsNotNull(err, "Unregistered entity exclusive update should error");
+		Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, err.ErrorCode);
+		yield return null;
+	}
+
+	// ═══════════════════════════════════════════════════════════
+	// 9. Delete-On-Disconnect
 	// ═══════════════════════════════════════════════════════════
 
 	/// <summary>Disposes the TCP remote connection and clears the field so TearDown won't double-dispose it

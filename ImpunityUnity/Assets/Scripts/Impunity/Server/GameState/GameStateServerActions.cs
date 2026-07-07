@@ -101,6 +101,11 @@ namespace Impunity.GameState
 		[BsonField("pb")]
 		public ArraySegment<byte> PropBytes;
 
+		/// <summary>The channel entity's current <c>OutSeq</c> at snapshot time. The client seeds every field's received-seq
+		/// with it so exclusive updates are not falsely rejected against modifications made before this client subscribed.</summary>
+		[BsonField("sq")]
+		public ushort Seq;
+
 		[BsonField("obs")]
 		public ObjectCreateMessageAction[] ObjectsInChannel = Array.Empty<ObjectCreateMessageAction>();
 
@@ -109,11 +114,11 @@ namespace Impunity.GameState
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, IsLocked, InstanceFlags, PropBytes);
+			handler.HandleCreateChannel(ChannelId, ChannelName, ChannelType, IsLocked, InstanceFlags, PropBytes, Seq);
 			foreach (ObjectCreateMessageAction objCreate in ObjectsInChannel)
 			{
 				handler.HandleCreateObject(objCreate.ObjectId, objCreate.ChannelId, objCreate.ObjectType, objCreate.IsLocked,
-														objCreate.InstanceFlags, objCreate.PropBytes, objCreate.UniqueName, false);
+														objCreate.InstanceFlags, objCreate.PropBytes, objCreate.UniqueName, false, objCreate.Seq);
 			}
 		}
 	}
@@ -142,12 +147,16 @@ namespace Impunity.GameState
 		[BsonField("n")]
 		public string? UniqueName;
 
+		/// <summary>The object entity's current <c>OutSeq</c> at snapshot time. See <see cref="ChannelCreateMessageAction.Seq"/>.</summary>
+		[BsonField("sq")]
+		public ushort Seq;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, IsLocked, InstanceFlags, PropBytes, UniqueName, true);
+			handler.HandleCreateObject(ObjectId, ChannelId, ObjectType, IsLocked, InstanceFlags, PropBytes, UniqueName, true, Seq);
 		}
 	}
 
