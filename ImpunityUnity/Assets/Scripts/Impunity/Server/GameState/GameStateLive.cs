@@ -1533,6 +1533,20 @@ namespace Impunity.GameState
 
 			DestroyEntity(entity, deleteData);
 
+			if (entity.IsPersisted())
+			{
+				if (entity is GameStateChannel)
+				{
+					DeletePersistedChannelAction action = new DeletePersistedChannelAction(entity.ChannelName!);
+					Server.QueueAction(action);
+				}
+				else
+				{
+					DeletePersistedObjectAction action = new DeletePersistedObjectAction(entity.Name!);
+					Server.QueueAction(action);
+				}
+			}
+
 			return true;
 		}
 
