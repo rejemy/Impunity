@@ -232,9 +232,9 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<BsonDocument> FindDocumentByIdAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
+		public static Task<BsonDocument?> FindDocumentByIdAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
-			var t = new ImpunityTaskCompletionSource<BsonDocument>();
+			var t = new ImpunityTaskCompletionSource<BsonDocument?>();
 			connection.FindDocumentById(collectionId, id, t.OnComplete);
 			return t.Task;
 		}
@@ -380,9 +380,9 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<DTYPE> FindDocumentByIdAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		public static Task<DTYPE?> FindDocumentByIdAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
-			var t = new ImpunityTaskCompletionSource<DTYPE>();
+			var t = new ImpunityTaskCompletionSource<DTYPE?>();
 			collection.FindDocumentById(id, t.OnComplete);
 			return t.Task;
 		}

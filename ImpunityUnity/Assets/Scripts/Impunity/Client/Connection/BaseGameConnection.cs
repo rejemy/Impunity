@@ -493,7 +493,7 @@ namespace Impunity.Connection
 		/// <param name="collectionId">Target collection id.</param>
 		/// <param name="id">The <c>_id</c> of the document to fetch.</param>
 		/// <param name="onComplete">Invoked on the main thread with the document, or <c>null</c> if no document has that id.</param>
-		public void FindDocumentById(int collectionId, BsonValue id, ImpunityCallback<BsonDocument>? onComplete)
+		public void FindDocumentById(int collectionId, BsonValue id, ImpunityCallback<BsonDocument?>? onComplete)
 		{
 			DoAction(new FindDocumentByIdAction(collectionId, id, onComplete));
 		}

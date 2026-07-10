@@ -680,7 +680,7 @@ namespace Impunity.GameState
 	}
 
 	/// <summary>Retrieves a single document from a DB collection by its ID.</summary>
-	public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument>
+	public class FindDocumentByIdAction : ClientActionResultBase<BsonDocument?>
 	{
 		[BsonField("cid")]
 		public int CollectionId;
@@ -692,7 +692,7 @@ namespace Impunity.GameState
 
 		public FindDocumentByIdAction() { }
 
-		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument>? onComplete = null)
+		public FindDocumentByIdAction(int collectionId, BsonValue id, ImpunityCallback<BsonDocument?>? onComplete = null)
 		{
 			CollectionId = collectionId;
 			Id = id;

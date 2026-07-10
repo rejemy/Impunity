@@ -88,20 +88,12 @@ namespace Impunity.Connection
 
 		/// <summary>Retrieves a single document by its <c>_id</c> and maps it to <typeparamref name="DTYPE"/>.</summary>
 		/// <param name="id">The <c>_id</c> of the document to fetch.</param>
-		/// <param name="onComplete">Invoked on the main thread with the mapped document, or an error.</param>
-		/// <remarks>
-		/// NOTE (flagged for review): unlike <see cref="ListDocuments"/>, this wrapper does not guard the
-		/// not-found / error cases — when the document is missing (or the request errored) the underlying BSON is
-		/// <c>null</c>, yet the mapper's <c>ToObject&lt;DTYPE&gt;</c> is still called on it. For reference
-		/// <typeparamref name="DTYPE"/>s that yields a <c>null</c> result; behaviour for value types is mapper-dependent.
-		/// Callers should check <c>err</c> first and treat a null result as "not found". (The raw
-		/// <see cref="BaseGameConnection.FindDocumentById"/> returns a null <see cref="BsonDocument"/> in that case.)
-		/// </remarks>
-		public void FindDocumentById(BsonValue id, ImpunityCallback<DTYPE> onComplete)
+		/// <param name="onComplete">Invoked on the main thread with the mapped document or null if not found, or an error.</param>
+		public void FindDocumentById(BsonValue id, ImpunityCallback<DTYPE?> onComplete)
 		{
 			Connection.FindDocumentById(CollectionId, id, (err, bson) =>
 			{
-				DTYPE doc = Mapper.ToObject<DTYPE>(bson);
+				DTYPE? doc = (bson != null) ? Mapper.ToObject<DTYPE>(bson) : default;
 				onComplete(err, doc);
 			});
 		}

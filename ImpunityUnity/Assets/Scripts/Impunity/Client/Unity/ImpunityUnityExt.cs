@@ -142,9 +142,9 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<BsonDocument> FindDocumentByIdYield(this BaseGameConnection connection, int collectionId, BsonValue id)
+		public static ImpunityYield<BsonDocument?> FindDocumentByIdYield(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
-			var action = new ImpunityYield<BsonDocument>();
+			var action = new ImpunityYield<BsonDocument?>();
 			connection.FindDocumentById(collectionId, id, action.OnComplete);
 			return action;
 		}
@@ -289,9 +289,9 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<DTYPE> FindDocumentByIdYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
+		public static ImpunityYield<DTYPE?> FindDocumentByIdYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
-			ImpunityYield<DTYPE> action = new ImpunityYield<DTYPE>();
+			ImpunityYield<DTYPE?> action = new ImpunityYield<DTYPE?>();
 			collection.FindDocumentById(id, action.OnComplete);
 			return action;
 		}
