@@ -208,6 +208,26 @@ cd ImpunityRuntime && ./build.sh
 cd ImpunityStandaloneServer && ./build.sh
 ```
 
+## Testing
+
+```bash
+# Run the full test suite — no Unity required
+./test.sh
+
+# Fast path (skips wall-clock idle-reaper / migration-recovery tests)
+./test.sh --filter "Category!=Slow"
+```
+
+The test suite (`ImpunityTests/`) runs against the non-Unity runtime and covers serialization, the
+document database, live channel/entity replication, broadcasts, locks, exclusive updates, and schema
+migration. A transport matrix runs the same connection-level tests over an in-process connection,
+TCP to an embedded server, and TCP + WebSocket to the real standalone server binary launched as a
+child process.
+
+The core suites are also compiled into the Unity project (assembly `ImpunitySharedTests`) and can be
+run from Unity's Test Runner to cover the Mono runtime, alongside Unity-only tests for the Unity type
+serializers and coroutine yield wrappers (`ImpunityUnity/Assets/Tests/Unity/`).
+
 ## Project Structure
 
 | Directory | Description |
@@ -215,6 +235,7 @@ cd ImpunityStandaloneServer && ./build.sh
 | `ImpunityCodeGenerator/` | Roslyn source generator for distributed entity serialization |
 | `ImpunityRuntime/` | Core shared library — networking, serialization, game state |
 | `ImpunityStandaloneServer/` | ASP.NET Core dedicated server with TCP + WebSocket transport |
+| `ImpunityTests/` | NUnit test project — runs the shared test suite with plain `dotnet test` |
 | `ImpunityUnity/` | Unity project with client code, distributed types, and tests |
 
 ## License

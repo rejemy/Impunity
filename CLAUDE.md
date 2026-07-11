@@ -8,7 +8,8 @@ Networked multiplayer save-game and distributed object library for Unity. Provid
 |-----------|--------|-------------|
 | `ImpunityCodeGenerator/` | netstandard2.0 | Roslyn source generator — produces serialization helpers for distributed entity types |
 | `ImpunityRuntime/` | netstandard2.1 | Core shared library (networking, serialization, game state) — used by both client and server. This is just the project file to build the dll, the actual code lives ImpunityUnity/Assets/Scripts/Impunity for ease of testing in Unity |
-| `ImpunityStandaloneServer/` | net10.0 | ASP.NET Core standalone server with WebSocket (incomplete) + TCP transport, can host multiple Impunity server instances |
+| `ImpunityStandaloneServer/` | net10.0 | ASP.NET Core standalone server with WebSocket + TCP transport, can host multiple Impunity server instances |
+| `ImpunityTests/` | net10.0 | NUnit test project runnable with plain `dotnet test` — compiles the shared test sources against the non-Unity runtime; also hosts the out-of-proc standalone-server transport tests |
 | `ImpunityUnity/` | Unity 6 (netstandard2.1) | Unity project containing client connection code, distributed field types, and test scenes |
 
 Server-side game state code lives in `ImpunityUnity/Assets/Scripts/Impunity/Server/` and is linked into `ImpunityStandaloneServer` via glob includes in its `.csproj`.
@@ -26,6 +27,8 @@ cd ImpunityStandaloneServer && ./build.sh # outputs to bin/StandaloneServer/
 ```
 
 All projects use `dotnet build -c Release`. The Unity project is opened via Unity Editor (version 6.3.9f1).
+
+Run the test suite with `./test.sh` (see Tests below).
 
 ## Architecture
 
@@ -64,29 +67,35 @@ All projects use `dotnet build -c Release`. The Unity project is opened via Unit
 
 ## Tests
 
-### NUnit Tests (Unity Test Runner)
+### dotnet test suite (primary)
 
-Tests live in `ImpunityUnity/Assets/Tests/` with two subdirectories:
+```bash
+./test.sh                              # full suite (~35s)
+./test.sh --filter "Category!=Slow"    # skip wall-clock reaper/migration-recovery tests
+./test.sh --filter "Category=Transport"  # just the transport matrix
+```
 
-| Directory | Assembly | Mode | Description |
-|-----------|----------|------|-------------|
-| `Tests/Unit/` | `Tests` (Editor-only) | Edit Mode | Serializer round-trips, utility functions, sequence number logic, buffer pool |
-| `Tests/PlayMode/` | `PlayModeTests` | Play Mode | Integration tests with real servers and clients — database CRUD, TCP connections, live channels, entity replication, broadcasts, locks, distributed collections |
+`ImpunityTests/ImpunityTests.csproj` (net10.0, NUnit 3.14) is the primary way to run tests — no Unity editor needed. Building it automatically builds the code generator (wired as a Roslyn analyzer so `[DistributedEntity] partial` test types get their serialization helpers), the non-Unity `ImpunityRuntime`, and the standalone server (build-only reference — never a compile reference, its types would collide with `ImpunityRuntime`'s).
 
-**Assembly definitions:**
-- `ImpunityUnity/Assets/Scripts/Impunity/Impunity.asmdef` — core library assembly, referenced by both test assemblies
-- `Tests/Unit/Tests.asmdef` — Editor-only, references `Impunity` + `UltraLiteDB.dll`
-- `Tests/PlayMode/PlayModeTests.asmdef` — all platforms (required for Play Mode), references `Impunity` + `UltraLiteDB.dll`
+**Shared test sources** live in `ImpunityUnity/Assets/Tests/Shared/` and are compiled by BOTH the dotnet csproj (glob include) and Unity (asmdef `ImpunitySharedTests`, shows in the Play Mode tab) — the same source-sharing pattern the runtime uses. Portability rules for everything under `Shared/`:
+- No `using UnityEngine` — `Harness/TestEnv.cs` holds the only `#if UNITY_5_3_OR_NEWER` (temp root, error log). The dotnet build enforces this at compile time.
+- Tests are plain NUnit `[Test] async Task` methods driving the async API (`GameConnectionAsyncExt`); never `.Result`/`.Wait()`/`ConfigureAwait(false)` (Unity main-thread deadlock), and stay within Unity's NUnit 3.5 API surface (no `Assert.Multiple`).
+- `Harness/ImpunityTestHarness.cs` is the shared base fixture: per-test temp dir + free ports (`TestPorts` probes TCP+UDP; `ImpunityServer` binds both), `CreateServer()`/`ConnectLocal()`/`StartTCPAndConnectRemote()`, and the pump helpers `Pump(task)` / `PumpUntil(cond)` / `PumpFor(dur)` / `PumpExpectingError(task)` that drive `connection.Update()` (Stopwatch deadlines — NUnit `[Timeout]` is not enforced on .NET Core). Passing explicit connections to a pump is how a test keeps a client "stale"; no arguments pumps every tracked connection.
+- `Harness/SharedTestEntities.cs` holds the test entity types (all `partial`, codegen-dependent), including `TestVec3` — a portable stand-in matching Unity `Vector3Serializer`'s wire shape (CustomSmall, 12 bytes).
 
-**Running tests:** Open Unity → Window → General → Test Runner. Edit Mode tests run immediately; Play Mode tests enter play mode to execute.
+**Suites:** `CoreUnitTests` (serializers/util), `BsonSerializationTests` (persisted-field BSON path), `IntegrationTests` (DB CRUD, channels, entities, broadcasts, locks, collections, unsubscribe, exclusive updates, delete-on-disconnect), `MigrationTests`, `ChannelCleanupTests` (idle reaper, `[Category("Slow")]`), `ChannelListingTests`, and `TransportSuite` — an abstract transport-agnostic battery with four legs: `_Local`, `_EmbeddedTcp` (shared, run in Unity too), `_StandaloneTcp`, `_StandaloneWs` (dotnet-only, in `ImpunityTests/Host/` — launch the real standalone binary out-of-proc via `StandaloneServerFixture` with a generated `config.json`, `/info` readiness probe, and kill-tree teardown).
 
-**Play Mode test patterns:**
-- Tests use `[UnityTest]` returning `IEnumerator` for coroutine-based async
-- Real `GameStateServer`, `ImpunityServer`, `LocalGameConnection`, and `RemoteGameConnection` — no mocks
-- `connection.Update()` must be called each frame; helper methods `WaitForYield()` and `TickUntil()` handle this
-- Each test creates a fresh server with a unique temp directory, cleaned up in `[TearDown]`
-- Test entity types (`IntegrationTestEntity`, `IntegrationTestChannel`) are defined in the test file using only non-Unity serializer types
-- After subscribing to a channel, tick several frames before modifying collection fields (`DistributedQueue`, `DistributedIntDictionary`, `DistributedStringDictionary`) so the initial `NewValue` is flushed and subsequent changes go through the delta `Changes` path
+**Unity-only tests** live in `ImpunityUnity/Assets/Tests/Unity/`:
+- `Unity/Editor/` (asmdef `ImpunityUnityEditorTests`, Edit Mode): Unity type serializer round-trips (binary + BSON) and Unity-typed entity BSON interop.
+- `Unity/PlayMode/` (asmdef `ImpunityUnityPlayModeTests`): `YieldWrapperTests` — coroutine coverage of the `ImpunityYield` / `...Yield()` API, which the shared suites no longer exercise. Reuses the shared harness + entity types.
+
+**Running in Unity:** Window → General → Test Runner. The shared suites appear in the Play Mode tab (Mono runtime coverage); Unity-only Edit Mode tests in the Edit Mode tab.
+
+**Known gotchas preserved from the original suites:**
+- `SubscribeToChannel*` discards the `createIfNeeded` instance — drive the *returned* channel. (`CreateObject*` keeps the caller's instance.)
+- Non-client-authoritative `Set()` applies only on server echo — assert via `PumpUntil`, not synchronously.
+- All `LocalGameConnection`s share the hard-coded `ConnectionKey` `"local_key"`, so the server treats them as the same client for lock ownership; tests needing two distinct local clients assign unique `ConnectionKey`s before connecting.
+- Known intermittent issue under full-suite load (~1 in 6–10 full runs): a second subscriber's `SubscribeChannelAction` over TCP occasionally gets no reply within `ActionTimeoutMillis` — tracked as a library race to investigate, not a harness bug.
 
 ### Legacy Test Component
 

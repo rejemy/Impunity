@@ -1,0 +1,14 @@
+{
+    "name": "ImpunitySharedTests",
+    "references": [
+        "Impunity"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "UltraLiteDB.dll"
+    ]
+}

@@ -1,0 +1,15 @@
+{
+    "name": "ImpunityUnityPlayModeTests",
+    "references": [
+        "Impunity",
+        "ImpunitySharedTests"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [],
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "UltraLiteDB.dll"
+    ]
+}

@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Impunity.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Shared test sources, also compiled inside Unity via ImpunitySharedTests.asmdef.
+         Keep these files free of UnityEngine (TestEnv.cs holds the only #if UNITY_5_3_OR_NEWER). -->
+    <Compile Include="../ImpunityUnity/Assets/Tests/Shared/**/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <!-- NUnit 3.x, not 4.x: shared sources also compile against Unity's NUnit 3.5-based test framework -->
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ImpunityRuntime/ImpunityRuntime.csproj" />
+    <!-- Source generator: emits serialization helpers for [DistributedEntity] partial types declared in this project -->
+    <ProjectReference Include="../ImpunityCodeGenerator/ImpunityCodeGenerator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!-- Build-only dependency for the out-of-proc standalone server tests.
+         Never a compile reference: it contains the same Impunity.GameState types as ImpunityRuntime. -->
+    <ProjectReference Include="../ImpunityStandaloneServer/ImpunityStandaloneServer.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+    <Reference Include="UltraLiteDB">
+      <HintPath>../ImpunityUnity/Assets/Plugins/UltraLiteDB.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Read at runtime by StandaloneServerFixture; IMPUNITY_STANDALONE_DLL env var overrides -->
+    <AssemblyMetadata Include="StandaloneServerDll"
+        Value="$(MSBuildThisFileDirectory)../ImpunityStandaloneServer/bin/$(Configuration)/net10.0/ImpunityStandaloneServer.dll" />
+  </ItemGroup>
+
+</Project>

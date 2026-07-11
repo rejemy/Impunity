@@ -264,10 +264,10 @@ namespace Impunity.Unity
 			{
 				return value;
 			}
-			value.r = r.ReadInt32();
-			value.g = r.ReadInt32();
-			value.b = r.ReadInt32();
-			value.a = r.ReadInt32();
+			value.r = r.ReadSingle();
+			value.g = r.ReadSingle();
+			value.b = r.ReadSingle();
+			value.a = r.ReadSingle();
 			return value;
 		}
 
@@ -418,10 +418,10 @@ namespace Impunity.Unity
 			{
 				return value;
 			}
-			value.x = r.ReadInt32();
-			value.y = r.ReadInt32();
-			value.z = r.ReadInt32();
-			value.w = r.ReadInt32();
+			value.x = r.ReadSingle();
+			value.y = r.ReadSingle();
+			value.z = r.ReadSingle();
+			value.w = r.ReadSingle();
 			return value;
 		}
 
