@@ -57,6 +57,15 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public DateTimeOffset SentAt { get; set; }
 
+		/// <summary>
+		/// Correlation id carried in the message header (not the BSON body). The client assigns a unique id per
+		/// reply-expecting action when sending; the server records the request's id and echoes it on the reply so the
+		/// client can match the reply to the exact action, independent of arrival order. 0 means "untracked" (no reply
+		/// expected, or a server-originated push). See <c>RemoteGameConnection.AwaitingReceive</c>.
+		/// </summary>
+		[BsonIgnore]
+		public ushort MessageId { get; set; }
+
 		/// <summary>Returns the action type ID used for message routing.</summary>
 		public abstract ushort GetActionType();
 		/// <summary>Whether this action has a callback to invoke on completion.</summary>

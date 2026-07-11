@@ -21,10 +21,10 @@ namespace Impunity.Connection
 	/// unguaranteed go over UDP when the transport negotiated it (otherwise they fall back to TCP).
 	/// </para>
 	/// <para>
-	/// Request/reply correlation is positional: every reply-expecting action is appended to <c>AwaitingReceive</c>
-	/// in send order and matched to the next reply in arrival order. This relies on the transport delivering replies
-	/// in the same order requests were sent (true for the single TCP stream). See <see cref="Update"/> for the
-	/// timeout caveat this creates.
+	/// Request/reply correlation is by id: every reply-expecting action is assigned a header correlation id and tracked
+	/// in <c>AwaitingReceive</c> keyed by that id. The server echoes the id on its reply, so each reply is matched to the
+	/// exact action it belongs to regardless of arrival order — a dropped, late, or timed-out reply cannot cause later
+	/// replies to be mis-matched.
 	/// </para>
 	/// <para>Under WebGL there is no background writer thread; the send queue is pumped synchronously from <see cref="Update"/>.</para>
 	/// </summary>
@@ -39,7 +39,14 @@ namespace Impunity.Connection
 		public ImpunityCallback? OnNetworkError { get; set; }
 
 		private BlockingCollection<GameStateActionBase> PendingSend;
-		private ConcurrentQueue<GameStateActionBase> AwaitingReceive;
+		// Reply-expecting actions awaiting a server reply, keyed by the correlation id written into each message
+		// header. Replies are matched to the exact action by id (not by arrival order), so a dropped, late, or
+		// timed-out reply can no longer desync the matching of later replies. Touched by the send path (writer thread,
+		// or Update on WebGL), the socket read thread (reply matching), and the main thread (timeout sweep).
+		private ConcurrentDictionary<ushort, GameStateActionBase> AwaitingReceive;
+		// Monotonic source of header correlation ids; assigned only on the (single-threaded) send path. 0 is reserved
+		// for "untracked" — no-reply actions and server-originated pushes.
+		private ushort NextReplyId;
 
 		private string GameId;
 		private string GamePassword;
@@ -66,7 +73,7 @@ namespace Impunity.Connection
 		public RemoteGameConnection(IImpunityNetworkClient networkClient, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options, ClientEntityManager? em) : base(format, em)
 		{
 			PendingSend = new BlockingCollection<GameStateActionBase>();
-			AwaitingReceive = new ConcurrentQueue<GameStateActionBase>();
+			AwaitingReceive = new ConcurrentDictionary<ushort, GameStateActionBase>();
 
 			GameId = gameId;
 			GamePassword = gamePassword;
@@ -250,15 +257,12 @@ namespace Impunity.Connection
 		/// dispatches completed actions / server pushes on the main thread).
 		/// </summary>
 		/// <remarks>
-		/// Timeouts are checked from the front of <c>AwaitingReceive</c>, which is also the queue replies are matched
-		/// against in FIFO order. Two consequences worth knowing:
-		/// <list type="bullet">
-		/// <item><c>SentAt</c> is stamped when the action is enqueued in <see cref="DoAction"/>, not when it actually
-		/// leaves the writer thread, so time spent waiting behind a send backlog counts toward the timeout.</item>
-		/// <item>If an action is timed out and removed here while its reply is still in flight, the late reply will be
-		/// matched to the <em>next</em> waiting action instead (positional matching has no per-message id to resync on).
-		/// In practice the timeout is generous relative to round-trip time, so this is rare.</item>
-		/// </list>
+		/// Every reply-expecting action in <c>AwaitingReceive</c> is checked, and any whose <c>SentAt</c> is older than
+		/// <see cref="ImpunityOptions.ActionTimeoutMillis"/> is completed with a <see cref="ImpunityErrorCode.TimeoutError"/>
+		/// and removed. Note <c>SentAt</c> is stamped when the action is enqueued in <see cref="DoAction"/>, not when it
+		/// actually leaves the writer thread, so time spent waiting behind a send backlog counts toward the timeout.
+		/// Because replies are matched by id, a reply that arrives after its action was timed out here simply matches
+		/// nothing and is dropped, without affecting any other pending action.
 		/// </remarks>
 		public override void Update()
 		{
@@ -267,38 +271,57 @@ namespace Impunity.Connection
 #endif
 			var tooOld = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(this.Options.ActionTimeoutMillis);
 
-			while (AwaitingReceive.TryPeek(out var pendingAction))
+			// Iterating a ConcurrentDictionary tolerates concurrent adds (send path) and removes (reply matching).
+			foreach (var pending in AwaitingReceive)
 			{
-				if (pendingAction.SentAt >= tooOld)
+				if (pending.Value.SentAt >= tooOld)
 				{
-					break;
+					continue;
 				}
 
-				AwaitingReceive.TryDequeue(out var _);
-
-				pendingAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + pendingAction.GetType().Name + " took too long to complete");
-				CompletedActions.Enqueue(pendingAction);
+				if (AwaitingReceive.TryRemove(pending.Key, out var timedOut))
+				{
+					timedOut.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + timedOut.GetType().Name + " took too long to complete");
+					CompletedActions.Enqueue(timedOut);
+				}
 			}
 
 			base.Update();
 		}
 
+		// Allocates the next header correlation id. Called only on the (single-threaded) send path, so it needs no
+		// locking. Skips 0 (reserved for "untracked") and any id still in flight, so a wraparound can't collide with a
+		// pending action.
+		private ushort AllocateMessageId()
+		{
+			ushort id;
+			do
+			{
+				id = ++NextReplyId;
+			} while (id == 0 || AwaitingReceive.ContainsKey(id));
+			return id;
+		}
+
 		// Serializes one action and writes it to the transport. Called only on the writer thread (or from Update on
-		// WebGL). Actions with a callback are registered in AwaitingReceive (in send order) so their reply can be
-		// matched later; callback-less actions are flagged NO_REPLY so the server won't send one.
+		// WebGL). Actions with a callback are assigned a fresh correlation id and registered in AwaitingReceive keyed by
+		// that id so their reply can be matched later; callback-less actions are flagged NO_REPLY (id 0) so the server
+		// won't send one.
 		private void SendMessage(GameStateActionBase action)
 		{
 			ushort flags = 0;
+			ushort messageId = 0;
 			if (!action.HasCallback())
 			{
 				flags |= ImpunityMessageFlags.NO_REPLY;
 			}
 			else
 			{
-				AwaitingReceive.Enqueue(action);
+				messageId = AllocateMessageId();
+				action.MessageId = messageId;
+				AwaitingReceive[messageId] = action;
 			}
 
-			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, flags, action.GetActionType(), action);
+			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, flags, action.GetActionType(), action);
 
 			if (action.Guaranteed)
 			{
@@ -358,15 +381,18 @@ namespace Impunity.Connection
 			ImpunityLogger.LogInformation("Disconnected by server with code " + reason);
 		}
 
-		// Matches an incoming reply to the oldest reply-expecting action (FIFO), deserializes the result into it, and
-		// queues it for its callback on the main thread. Correlation is positional: messageId is logged for diagnostics
-		// but not used to look up the action, so this depends on replies arriving in send order (true over TCP).
+		// Matches an incoming reply to its originating action by the header correlation id, deserializes the result into
+		// it, and queues it for its callback on the main thread. Matching is by id, so replies need not arrive in send
+		// order and a missing/late reply can't shift the matching of others.
 		private void HandleReplyMessage(ushort messageId, ArraySegment<byte> messageBytes)
 		{
 			GameStateActionBase action;
-			if (!AwaitingReceive.TryDequeue(out action))
+			if (!AwaitingReceive.TryRemove(messageId, out action))
 			{
-				ImpunityLogger.LogError("Got response with id " + messageId + " when we weren't expecting any responses");
+				// No pending action for this id — it most likely already timed out (and was completed with a
+				// TimeoutError), or this is a duplicate/late reply. Safe to drop: id matching means this does not
+				// affect any other pending action.
+				ImpunityLogger.LogWarning("Got reply for message id " + messageId + " with no matching pending action (timed out or duplicate)");
 				return;
 			}
 

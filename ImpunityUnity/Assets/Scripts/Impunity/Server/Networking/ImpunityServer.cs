@@ -84,6 +84,8 @@ namespace Impunity.Networking
 			GameStateActionBase action = (GameStateActionBase)mapper.DeserializeFromBytes(messageActionClassType, messageBytes.Array!, bodyOffset);
 			action.Origin = this;
 			action.ResultsExpected = (msg.Flags & ImpunityMessageFlags.NO_REPLY) == 0;
+			// Remember the request's correlation id so the reply can echo it back for id-based matching.
+			action.MessageId = msg.MessageId;
 
 			// Special handling for first request. If an error happens here, we report the result inline and disconnect,
 			// since the GameServer doesn't even know about this connection yet.
@@ -133,7 +135,11 @@ namespace Impunity.Networking
 		}
 
 		/// <summary>Serializes and sends a message to the client. Acquires the send lock to serialize access to the shared send buffer. Called on the network writer thread.</summary>
-		public void SendMessage(ushort messageType, bool guaranteed, object results)
+		/// <param name="messageType">The action/message type id written to the header.</param>
+		/// <param name="messageId">Correlation id echoed in the header (the request's id for replies; 0 for server-originated pushes).</param>
+		/// <param name="guaranteed">Whether to send reliably (TCP) or over the unguaranteed channel when available.</param>
+		/// <param name="results">The object serialized into the message body.</param>
+		public void SendMessage(ushort messageType, ushort messageId, bool guaranteed, object results)
 		{
 			ArraySegment<byte> encodedMessage;
 
@@ -143,7 +149,7 @@ namespace Impunity.Networking
 
 			try
 			{
-				encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, 0, messageType, results);
+				encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, 0, messageType, results);
 
 				if (guaranteed)
 				{
@@ -388,13 +394,13 @@ namespace Impunity.Networking
 			}
 			else if (action is ServerActionBase)
 			{
-				// Server originated message
-				clientInfo.SendMessage(action.GetActionType(), action.Guaranteed, action);
+				// Server originated push — not a reply, so it carries no correlation id.
+				clientInfo.SendMessage(action.GetActionType(), 0, action.Guaranteed, action);
 			}
 			else
 			{
-				// Reply to client action
-				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, action.Guaranteed, action.GetResult());
+				// Reply to a client action — echo the request's id so the client matches it by id.
+				clientInfo.SendMessage((ushort)ServerActionType.CLIENT_REPLY, action.MessageId, action.Guaranteed, action.GetResult());
 			}
 
 			if (action.CloseConnectionOnComplete)

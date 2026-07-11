@@ -143,50 +143,44 @@ namespace Impunity.Networking
 
 		private void HandleDataRead()
 		{
-			if (BytesReceived < 4)
+			// Drain every complete message currently buffered before returning to read more.
+			// A single socket read can deliver several coalesced messages (Nagle/TCP batching);
+			// processing only the first would strand the rest until more bytes happened to arrive.
+			while (BytesReceived >= 4)
 			{
-				// Didn't read enough to get a size, this is probably some kind of error
-				ImpunityLogger.LogWarning("Only read " + BytesReceived + " from the TCP socket");
-				return;
-			}
+				int messageLength = ImpunityNetworkingUtil.GetMessageLength(ReceiveBuffer);
+				if (messageLength < 12 || messageLength >= ImpunityConstants.MaxMessageSize)
+				{
+					// A length below the 12-byte header or beyond our fixed receive buffer can never
+					// be satisfied, so it would stall this connection forever (or spin on zero-length
+					// reads once the buffer fills). Drop the connection instead.
+					ImpunityLogger.LogWarning("Closing connection, received message with invalid length: " + messageLength);
+					Disconnect();
+					return;
+				}
+				if (BytesReceived < messageLength)
+				{
+					ImpunityLogger.LogDebug("Got partial message: " + BytesReceived + " / " + messageLength);
+					return;
+				}
 
-			int messageLength = ImpunityNetworkingUtil.GetMessageLength(ReceiveBuffer);
-			if (messageLength < 12 || messageLength >= ImpunityConstants.MaxMessageSize)
-			{
-				// A length below the 12-byte header or beyond our fixed receive buffer can never
-				// be satisfied, so it would stall this connection forever (or spin on zero-length
-				// reads once the buffer fills). Drop the connection instead.
-				ImpunityLogger.LogWarning("Closing connection, received message with invalid length: " + messageLength);
-				Disconnect();
-				return;
-			}
-			if (BytesReceived < messageLength)
-			{
-				ImpunityLogger.LogDebug("Got partial message: " + BytesReceived + " / " + messageLength);
-				return;
-			}
+				// We have a whole message, handle it
+				try
+				{
+					OnMessageRecieved?.Invoke(this, new ArraySegment<byte>(ReceiveBuffer, 0, messageLength));
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in TCP socket message handler", e);
+				}
 
-			// We have the whole message, handle it
-			try
-			{
-				OnMessageRecieved?.Invoke(this, new ArraySegment<byte>(ReceiveBuffer, 0, messageLength));
-			}
-			catch (Exception e)
-			{
-				ImpunityLogger.LogError("Exception in TCP socket message handler", e);
-			}
-
-			if (BytesReceived > messageLength)
-			{
-				// If there is any data left over, compact it down and continue reading
+				// Compact any bytes past this message down to the front and keep draining.
 				int extraData = BytesReceived - messageLength;
-				ImpunityLogger.LogDebug("Got part of next message: " + extraData);
-				Buffer.BlockCopy(ReceiveBuffer, messageLength, ReceiveBuffer, 0, extraData);
+				if (extraData > 0)
+				{
+					Buffer.BlockCopy(ReceiveBuffer, messageLength, ReceiveBuffer, 0, extraData);
+				}
 				BytesReceived = extraData;
-			}
-			else
-			{
-				BytesReceived = 0;
 			}
 		}
 
