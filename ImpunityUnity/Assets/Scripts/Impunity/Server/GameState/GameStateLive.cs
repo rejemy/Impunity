@@ -190,6 +190,9 @@ namespace Impunity.GameState
 							case GameStateEntityFieldType.Queue:
 								Properties[propDef.Index] = DistributedValueFactory.MakeQueue(propDef.PropValueType);
 								break;
+							case GameStateEntityFieldType.Stack:
+								Properties[propDef.Index] = DistributedValueFactory.MakeStack(propDef.PropValueType);
+								break;
 							case GameStateEntityFieldType.IntDictionary:
 								Properties[propDef.Index] = DistributedValueFactory.MakeIntDictionary(propDef.PropValueType);
 								break;

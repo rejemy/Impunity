@@ -197,6 +197,7 @@ A distributed field is a generic struct `Field<T, S>` where `T` is the value typ
 | `DistributedTemporalValue<T,S>` | single value + last-modified timestamp | `Get()`, `Set(v)` | `OnChanged`, `OnInitialized(v, age)` |
 | `DistributedArray<T,S>` | fixed-size array | `Init(n)` / `Replace(coll)`, `Get(i)`, `Set(i, v)` | `OnChanged(i, old, new)`, `OnReplaced(old, new)` |
 | `DistributedQueue<T,S>` | bounded FIFO (evicts oldest) | `Init(cap)` / `Replace(cap, vals)`, `Add(v)` | `OnChanged(v)`, `OnReplaced(old, new)` |
+| `DistributedStack<T,S>` | LIFO stack (starts empty, no `Init`) | `Push(v)`, `Pop()`, `SetTop(v)` (pushes if empty), `Peek()` / `TryPeek(out v)`, `Replace(vals)` (last value = top), `Clear()` | `OnPushed(v)`, `OnPopped(v)`, `OnTopChanged(old, new)`, `OnReplaced(old, new)` |
 | `DistributedIntDictionary<T,S>` | `int`-keyed map | `Init()` / `Replace(map)`, `Get(k)`, `Add(k, v)` | `OnChanged(k, old, new)`, `OnReplaced(old, new)` |
 | `DistributedStringDictionary<T,S>` | `string`-keyed map | `Init()` / `Replace(map)`, `Get(k)`, `Add(k, v)` | `OnChanged(k, old, new)`, `OnReplaced(old, new)` |
 
@@ -554,7 +555,7 @@ public partial class Foo : DistributedObjectBase   // or DistributedChannelBase,
 
 ### Field types
 
-`DistributedValue` · `DistributedTemporalValue` · `DistributedArray` · `DistributedQueue` · `DistributedIntDictionary` · `DistributedStringDictionary` — each `<T, S>` with a serializer `S`.
+`DistributedValue` · `DistributedTemporalValue` · `DistributedArray` · `DistributedQueue` · `DistributedStack` · `DistributedIntDictionary` · `DistributedStringDictionary` — each `<T, S>` with a serializer `S`.
 
 ### Set semantics
 

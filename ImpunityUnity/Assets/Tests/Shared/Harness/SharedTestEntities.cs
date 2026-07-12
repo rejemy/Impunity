@@ -120,7 +120,7 @@ namespace Impunity.Tests
 	[DistributedEntity(IntegrationTestTypes.CHANNEL)]
 	public partial class IntegrationTestChannel : DistributedChannelBase
 	{
-		public enum Props : byte { STATUS = 1, GRID = 2, CHAT = 3, FLAGS = 4 }
+		public enum Props : byte { STATUS = 1, GRID = 2, CHAT = 3, FLAGS = 4, HISTORY = 5 }
 
 		[Distributed((byte)Props.STATUS)]
 		public DistributedValue<string, StringSerializer> Status;
@@ -133,6 +133,9 @@ namespace Impunity.Tests
 
 		[Distributed((byte)Props.FLAGS)]
 		public DistributedIntDictionary<string, StringSerializer> Flags;
+
+		[Distributed((byte)Props.HISTORY)]
+		public DistributedStack<string, StringSerializer> History;
 
 		public int UndistributedCount;
 
@@ -231,6 +234,7 @@ namespace Impunity.Tests
 
 		[Distributed(13, PersistAs = "data")] public DistributedValue<BsonTestPoco, BsonSerializer<BsonTestPoco>> Data;
 		[Distributed(14, PersistAs = "pos")] public DistributedValue<TestVec3, TestVec3Serializer> Position;
+		[Distributed(15, PersistAs = "undo")] public DistributedStack<string, StringSerializer> Undo;
 
 	}
 

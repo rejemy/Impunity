@@ -506,6 +506,66 @@ namespace Impunity.Tests
 			Assert.AreEqual("active", c2Channel.Flags.Get(7));
 		}
 
+		[Test, Category("Collections")]
+		public async Task DistributedStack_Replication()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			// C1 creates the channel with initial stack contents (the full-set path)
+			var c1Init = new IntegrationTestChannel();
+			c1Init.History.Replace(new[] { "alpha", "beta" });
+			var c1Channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("stack", c1Init), AllConnections());
+
+			// C2 subscribes and sees the initial state; the last replaced value is the top
+			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("stack", null), AllConnections());
+			Assert.AreEqual(2, c2Channel.History.Count);
+			Assert.AreEqual("beta", c2Channel.History.Peek());
+
+			string pushedVal = null;
+			string poppedVal = null;
+			string changedTop = null;
+			int replacedCount = 0;
+			c2Channel.History.OnPushed += v => pushedVal = v;
+			c2Channel.History.OnPopped += v => poppedVal = v;
+			c2Channel.History.OnTopChanged += (oldTop, newTop) => changedTop = newTop;
+			c2Channel.History.OnReplaced += (oldList, newList) => replacedCount++;
+
+			// Push replicates as a delta
+			c1Channel.History.Push("gamma");
+			await PumpUntil(() => pushedVal == "gamma", TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual("gamma", c2Channel.History.Peek());
+			Assert.AreEqual(3, c2Channel.History.Count);
+
+			// Non-client-authoritative: C1's own value applies on the server echo
+			await PumpUntil(() => c1Channel.History.Count == 3, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual("gamma", c1Channel.History.Peek());
+
+			// SetTop replaces in place
+			c1Channel.History.SetTop("gamma2");
+			await PumpUntil(() => changedTop == "gamma2", TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual("gamma2", c2Channel.History.Peek());
+			Assert.AreEqual(3, c2Channel.History.Count);
+
+			// Pop removes the top
+			c1Channel.History.Pop();
+			await PumpUntil(() => poppedVal == "gamma2", TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual(2, c2Channel.History.Count);
+			Assert.AreEqual("beta", c2Channel.History.Peek());
+
+			// Mutations replicate in the other direction too
+			c2Channel.History.Push("delta");
+			await PumpUntil(() => c1Channel.History.Count == 3, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual("delta", c1Channel.History.Peek());
+
+			// Clear resets everyone to empty via a full replace
+			c1Channel.History.Clear();
+			await PumpUntil(() => replacedCount > 0, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual(0, c2Channel.History.Count);
+			Assert.IsFalse(c2Channel.History.TryPeek(out _));
+		}
+
 		// ═══════════════════════════════════════════════════════════
 		// 7. Unsubscribe
 		// ═══════════════════════════════════════════════════════════

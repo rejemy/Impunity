@@ -479,6 +479,166 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>Server-side distributed stack (LIFO). The last list element is the top of the stack.
+	/// Supports full-set and push/pop/set-top delta updates. Unlike the other collections a stack needs no
+	/// initialization, so delta updates may arrive before any full set and are applied to an empty stack.</summary>
+	/// <typeparam name="T">Element type, must be a standard distributable value struct.</typeparam>
+	public class ServerDistributedStack<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
+	{
+		public GameStateEntityPropertyValueType ValueType => new T().ValueType;
+
+		private List<T>? Value;
+
+		public long LastModifiedTime { get; set; }
+
+		public void ReadFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				if (Value == null)
+				{
+					Value = new List<T>();
+				}
+
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					DistributedStackUpdateType op = (DistributedStackUpdateType)r.ReadByte();
+					switch (op)
+					{
+						case DistributedStackUpdateType.Push:
+						{
+							T val = default(T);
+							val.ReadFrom(r);
+							Value.Add(val);
+							break;
+						}
+						case DistributedStackUpdateType.Pop:
+							// Popping an empty stack is a benign race (two clients popping at once), not an error.
+							if (Value.Count > 0)
+							{
+								Value.RemoveAt(Value.Count - 1);
+							}
+							break;
+						case DistributedStackUpdateType.SetTop:
+						{
+							T val = default(T);
+							val.ReadFrom(r);
+							if (Value.Count == 0)
+							{
+								Value.Add(val);
+							}
+							else
+							{
+								Value[Value.Count - 1] = val;
+							}
+							break;
+						}
+						default:
+							// An unknown op leaves the rest of the stream unparseable. Throwing aborts the
+							// whole update before it is relayed to other subscribers.
+							throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Unknown stack update op: " + (byte)op);
+					}
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				List<T> newValue = new List<T>(numValues);
+
+				for (int index = 0; index < numValues; index++)
+				{
+					T val = default(T);
+					val.ReadFrom(r);
+					newValue.Add(val);
+				}
+
+				Value = newValue;
+			}
+			else
+			{
+				Value = null;
+			}
+		}
+
+		public void SkipFrom(BinaryReader r)
+		{
+			T skip = default;
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					DistributedStackUpdateType op = (DistributedStackUpdateType)r.ReadByte();
+					if (op != DistributedStackUpdateType.Pop)
+					{
+						skip.SkipFrom(r);
+					}
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					skip.SkipFrom(r);
+				}
+			}
+		}
+
+		public void WriteTo(BinaryWriter w)
+		{
+			if (Value == null)
+			{
+				w.Write((byte)DistributedCollectionUpdateType.None);
+			}
+			else
+			{
+				w.Write((byte)DistributedCollectionUpdateType.Set);
+				w.Write((ushort)Value.Count);
+				foreach (T value in Value)
+				{
+					value.WriteTo(w);
+				}
+			}
+		}
+
+		public BsonValue? AsBsonValue()
+		{
+			if (Value == null)
+			{
+				return null;
+			}
+
+			BsonArray array = new BsonArray();
+			foreach (T i in Value)
+			{
+				array.Add(i.AsBsonValue());
+			}
+			return array;
+		}
+
+		public void FromBsonValue(BsonValue value)
+		{
+			BsonArray? array = value.AsArray;
+			if (array == null)
+			{
+				Value = null;
+				return;
+			}
+
+			Value = new List<T>(array.Count);
+			for (int i = 0; i < array.Count; i++)
+			{
+				T val = default(T);
+				val.FromBsonValue(array[i]);
+				Value.Add(val);
+			}
+		}
+	}
+
 	/// <summary>Server-side distributed dictionary with int keys. Supports full-set and per-key delta updates.</summary>
 	/// <typeparam name="T">Value type, must be a standard distributable value struct.</typeparam>
 	public class ServerDistributedIntDictionary<T> : IStandardDistributableValueType where T : struct, IStandardDistributableValueType
@@ -816,6 +976,15 @@ namespace Impunity.GameState
 			Type arrayType = typeof(ServerDistributedQueue<>).MakeGenericType(dtype);
 
 			return (IStandardDistributableValueType)Activator.CreateInstance(arrayType)!;
+		}
+
+		/// <summary>Creates a <see cref="ServerDistributedStack{T}"/> for the given element type code.</summary>
+		public static IStandardDistributableValueType MakeStack(byte type)
+		{
+			Type dtype = GetDistributableType((GameStateEntityPropertyValueType)type);
+			Type stackType = typeof(ServerDistributedStack<>).MakeGenericType(dtype);
+
+			return (IStandardDistributableValueType)Activator.CreateInstance(stackType)!;
 		}
 
 		/// <summary>Creates a <see cref="ServerDistributedIntDictionary{T}"/> for the given value type code.</summary>

@@ -53,6 +53,7 @@ namespace Impunity.Tests
 			e.Items.Replace(new Dictionary<int, string> { { 1, "sword" }, { 2, "shield" } });
 			e.Tags.Replace(new Dictionary<string, string> { { "color", "red" }, { "size", "L" } });
 			e.Log.Replace(3, new List<string> { "hello", "world" });
+			e.Undo.Replace(new List<string> { "first", "second" });
 			e.Data.Set(new BsonTestPoco { Number = 42, Label = "loot" });
 			e.Position.Set(new TestVec3(1.5f, 2.25f, -3.75f));
 		}
@@ -171,7 +172,7 @@ namespace Impunity.Tests
 			BsonDocument doc = em.GetPersistedFieldsAsBson(src);
 
 			CollectionAssert.AreEquivalent(
-				new[] { "name", "count", "ratio", "bigId", "when", "active", "scores", "items", "tags", "log", "data", "pos" },
+				new[] { "name", "count", "ratio", "bigId", "when", "active", "scores", "items", "tags", "log", "data", "pos", "undo" },
 				new List<string>(doc.Keys));
 
 			// Non-persisted and temporal fields must not leak in. (BsonDocument keys are
@@ -235,6 +236,11 @@ namespace Impunity.Tests
 			// Queue (use the implicit Queue<T> conversion; the struct's own GetEnumerator self-recurses).
 			Queue<string> log = dst.Log;
 			Assert.AreEqual(new[] { "hello", "world" }, log.ToArray());
+
+			// Stack — persisted bottom-to-top, so "second" (pushed last) is still the top.
+			Assert.AreEqual(2, dst.Undo.Count);
+			Assert.AreEqual("second", dst.Undo.Peek());
+			Assert.AreEqual(new[] { "second", "first" }, dst.Undo.ToArray(), "stack enumerates top to bottom");
 		}
 
 		[Test, Category("BsonManager")]
@@ -315,7 +321,7 @@ namespace Impunity.Tests
 			var em = MakeManager();
 			var byId = em.GetFieldSchema(typeof(BsonTestEntity)).ToDictionary(f => f.FieldId);
 
-			Assert.AreEqual(14, byId.Count);
+			Assert.AreEqual(15, byId.Count);
 
 			// Scalar, persisted
 			Assert.AreEqual("Name", byId[1].FieldName);
@@ -340,6 +346,8 @@ namespace Impunity.Tests
 			Assert.AreEqual(GameStateEntityFieldType.StringDictionary, byId[11].FieldType);
 			Assert.AreEqual(GameStateEntityFieldType.Queue, byId[12].FieldType);
 			Assert.AreEqual(typeof(string), byId[12].ValueClrType);
+			Assert.AreEqual(GameStateEntityFieldType.Stack, byId[15].FieldType);
+			Assert.AreEqual(typeof(string), byId[15].ValueClrType);
 
 			// Complex classification via ValueType (no BsonSerializer<> sniffing)
 			Assert.AreEqual(GameStateEntityPropertyValueType.Custom, byId[13].ValueType);
@@ -354,7 +362,7 @@ namespace Impunity.Tests
 			var em = MakeManager();
 			var byId = em.GetFieldSchema(typeof(BsonTestSubEntity)).ToDictionary(f => f.FieldId);
 
-			Assert.AreEqual(15, byId.Count);             // 14 inherited + Extra
+			Assert.AreEqual(16, byId.Count);             // 15 inherited + Extra
 			Assert.IsTrue(byId.ContainsKey(1));          // inherited Name
 			Assert.AreEqual("extra", byId[20].PersistAs); // subclass-declared field
 		}

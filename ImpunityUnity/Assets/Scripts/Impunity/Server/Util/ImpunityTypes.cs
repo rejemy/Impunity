@@ -403,14 +403,15 @@ namespace Impunity
 		CustomNullable = 103
 	}
 
-	/// <summary>Container type for a distributed entity field (scalar, array, queue, or dictionary).</summary>
+	/// <summary>Container type for a distributed entity field (scalar, array, queue, stack, or dictionary).</summary>
 	public enum GameStateEntityFieldType : byte
 	{
 		Value = 1,
 		Array = 2,
 		Queue = 3,
 		IntDictionary = 4,
-		StringDictionary = 5
+		StringDictionary = 5,
+		Stack = 6
 	}
 
 	/// <summary>Type of update operation for a distributed collection field.</summary>
@@ -419,6 +420,14 @@ namespace Impunity
 		None = 0,
 		Set = 1,
 		Update = 2
+	}
+
+	/// <summary>Delta operation for a distributed stack field, carried inside an <see cref="DistributedCollectionUpdateType.Update"/> block.</summary>
+	public enum DistributedStackUpdateType : byte
+	{
+		Push = 1,
+		Pop = 2,
+		SetTop = 3
 	}
 
 	/// <summary>Schema definition for a single property on a distributed entity type.</summary>

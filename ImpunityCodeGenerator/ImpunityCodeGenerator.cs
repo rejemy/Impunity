@@ -49,7 +49,7 @@ namespace SourceGenerator
 			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor", "Assembly-CSharp-Editor" });
 
 		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new[]
-			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedIntDictionary", "DistributedStringDictionary",
+			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedStack", "DistributedIntDictionary", "DistributedStringDictionary",
 			  "DistributedTemporalValue", "DistributedTemporalArray", "DistributedTemporalQueue", "DistributedTemporalIntDictionary", "DistributedTemporalStringDictionary" });
 
 

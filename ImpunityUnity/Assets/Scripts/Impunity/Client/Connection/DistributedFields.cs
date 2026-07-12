@@ -1072,6 +1072,489 @@ namespace Impunity.Connection
 	}
 
 	/// <summary>
+	/// Client-side distributed stack (LIFO). Starts life as an empty stack — unlike the other collections, no
+	/// Init call is required before use. Supports full replacement or incremental push/pop/set-top deltas.
+	/// Enumeration yields values top-to-bottom, matching <see cref="Stack{T}"/>.
+	/// </summary>
+	/// <typeparam name="T">The element type.</typeparam>
+	/// <typeparam name="S">The serializer struct.</typeparam>
+	public struct DistributedStack<T, S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	{
+		/// <summary>Raised when a value is pushed onto the stack, including a <see cref="SetTop"/> on an empty stack.</summary>
+		public event Action<T> OnPushed;
+		/// <summary>Raised when the top value is popped, providing the removed value.</summary>
+		public event Action<T> OnPopped;
+		/// <summary>Raised when the top value is replaced via <see cref="SetTop"/>, providing old and new top values.</summary>
+		public event Action<T, T> OnTopChanged;
+		/// <summary>Raised when the entire stack is replaced or cleared, providing old and new backing lists (bottom-to-top order; the old list is null if the stack was never populated).</summary>
+		public event Action<List<T>, List<T>> OnReplaced;
+
+		private static readonly S Serializer = default!;
+
+		private struct StackChange
+		{
+			public DistributedStackUpdateType Op;
+			public T Value;
+		}
+
+		// Backing lists hold the stack bottom-to-top: the last element is the top.
+		List<T> CurrentValue;
+
+		List<T>? NewValue;
+		List<StackChange> Changes;
+
+		public object RawCurrentValue => CurrentValue;
+
+		IDistributedEntity Entity;
+		ulong FieldBitmask;
+
+		/// <summary>The number of values currently on the stack.</summary>
+		public readonly int Count { get => CurrentValue?.Count ?? 0; }
+
+		public void _imp_Initialize(IDistributedEntity entity, byte fieldId)
+		{
+			Entity = entity;
+			FieldBitmask = 1ul << (fieldId - 1);
+		}
+
+		/// <summary>Resets the stack back to empty. Marks the field dirty for full sync.</summary>
+		public void Clear()
+		{
+			ReplaceInternal(new List<T>());
+		}
+
+		/// <summary>Replaces the entire stack contents. Values are pushed in enumeration order, so the last
+		/// value becomes the top of the stack. Marks the field dirty for full sync.</summary>
+		public void Replace(IEnumerable<T> newValues)
+		{
+			ReplaceInternal(new List<T>(newValues));
+		}
+
+		private void ReplaceInternal(List<T> newValue)
+		{
+			NewValue = newValue;
+			Changes = new List<StackChange>();
+
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				List<T> oldValue = CurrentValue;
+				CurrentValue = NewValue;
+
+				InvokeOnReplaced(oldValue, CurrentValue);
+			}
+		}
+
+		/// <summary>Pushes a value onto the top of the stack and marks the field dirty. Sent as a delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
+		public void Push(T newValue)
+		{
+			if (NewValue != null)
+			{
+				NewValue.Add(newValue);
+
+				Entity.SetDirty(FieldBitmask, true);
+
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+				{
+					// If IsClientAuthoritative, NewValue is an alias to CurrentValue so it's already set
+					InvokeOnPushed(newValue);
+				}
+
+				return;
+			}
+
+			AddChange(new StackChange { Op = DistributedStackUpdateType.Push, Value = newValue });
+
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				ApplyPushToCurrent(newValue);
+			}
+		}
+
+		/// <summary>Removes the top value and marks the field dirty. Sent as a delta update. Applied to the
+		/// local current value immediately only when the entity is client-authoritative. A pop applied to an
+		/// empty stack is ignored by every applier, so a pop racing another client's pop stays safe.</summary>
+		public void Pop()
+		{
+			if (NewValue != null)
+			{
+				// A pending full replacement that is already empty has nothing to pop.
+				if (NewValue.Count == 0)
+				{
+					return;
+				}
+
+				T oldTop = NewValue[NewValue.Count - 1];
+				NewValue.RemoveAt(NewValue.Count - 1);
+
+				Entity.SetDirty(FieldBitmask, true);
+
+				if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+				{
+					InvokeOnPopped(oldTop);
+				}
+
+				return;
+			}
+
+			AddChange(new StackChange { Op = DistributedStackUpdateType.Pop });
+
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				ApplyPopToCurrent();
+			}
+		}
+
+		/// <summary>Replaces the top value, or pushes it if the stack is empty, and marks the field dirty. Sent as a delta update. Applied to the local current value immediately only when the entity is client-authoritative.</summary>
+		public void SetTop(T newValue)
+		{
+			if (NewValue != null)
+			{
+				Entity.SetDirty(FieldBitmask, true);
+
+				if (NewValue.Count == 0)
+				{
+					NewValue.Add(newValue);
+
+					if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+					{
+						InvokeOnPushed(newValue);
+					}
+				}
+				else
+				{
+					T oldTop = NewValue[NewValue.Count - 1];
+					NewValue[NewValue.Count - 1] = newValue;
+
+					if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+					{
+						InvokeOnTopChanged(oldTop, newValue);
+					}
+				}
+
+				return;
+			}
+
+			AddChange(new StackChange { Op = DistributedStackUpdateType.SetTop, Value = newValue });
+
+			Entity.SetDirty(FieldBitmask, true);
+
+			if (Entity.IsClientAuthoritative || Entity.Manager?.Connection == null)
+			{
+				ApplySetTopToCurrent(newValue);
+			}
+		}
+
+		/// <summary>Returns the last server-confirmed top value. Pending local changes are not reflected unless the entity is client-authoritative. Throws if the stack is empty.</summary>
+		public readonly T Peek()
+		{
+			if (CurrentValue == null || CurrentValue.Count == 0)
+			{
+				throw new InvalidOperationException("Stack is empty");
+			}
+
+			return CurrentValue[CurrentValue.Count - 1];
+		}
+
+		/// <summary>Gets the last server-confirmed top value, returning false if the stack is empty.</summary>
+		public readonly bool TryPeek(out T value)
+		{
+			if (CurrentValue == null || CurrentValue.Count == 0)
+			{
+				value = default!;
+				return false;
+			}
+
+			value = CurrentValue[CurrentValue.Count - 1];
+			return true;
+		}
+
+		private void AddChange(StackChange change)
+		{
+			// Unlike the other collections there is no Init to create the pending-change list, so it's made lazily.
+			if (Changes == null)
+			{
+				Changes = new List<StackChange>();
+			}
+
+			Changes.Add(change);
+		}
+
+		private void ApplyPushToCurrent(T value)
+		{
+			if (CurrentValue == null)
+			{
+				CurrentValue = new List<T>();
+			}
+
+			CurrentValue.Add(value);
+
+			InvokeOnPushed(value);
+		}
+
+		private void ApplyPopToCurrent()
+		{
+			if (CurrentValue == null || CurrentValue.Count == 0)
+			{
+				return;
+			}
+
+			T oldTop = CurrentValue[CurrentValue.Count - 1];
+			CurrentValue.RemoveAt(CurrentValue.Count - 1);
+
+			InvokeOnPopped(oldTop);
+		}
+
+		private void ApplySetTopToCurrent(T value)
+		{
+			if (CurrentValue == null)
+			{
+				CurrentValue = new List<T>();
+			}
+
+			if (CurrentValue.Count == 0)
+			{
+				CurrentValue.Add(value);
+
+				InvokeOnPushed(value);
+			}
+			else
+			{
+				T oldTop = CurrentValue[CurrentValue.Count - 1];
+				CurrentValue[CurrentValue.Count - 1] = value;
+
+				InvokeOnTopChanged(oldTop, value);
+			}
+		}
+
+		/// <inheritdoc/>
+		public void WriteChangesTo(BinaryWriter w)
+		{
+			if (NewValue != null)
+			{
+				// Resend entire stack, bottom to top
+				w.Write((byte)DistributedCollectionUpdateType.Set);
+				w.Write((ushort)NewValue.Count);
+				foreach (T value in NewValue)
+				{
+					Serializer.WriteTo(value, w);
+				}
+				NewValue = null;
+			}
+			else if (Changes != null)
+			{
+				// Send only changes
+				w.Write((byte)DistributedCollectionUpdateType.Update);
+				w.Write((ushort)Changes.Count);
+				foreach (StackChange change in Changes)
+				{
+					w.Write((byte)change.Op);
+					if (change.Op != DistributedStackUpdateType.Pop)
+					{
+						Serializer.WriteTo(change.Value, w);
+					}
+				}
+				Changes.Clear();
+			}
+			else
+			{
+				w.Write((byte)DistributedCollectionUpdateType.None);
+			}
+		}
+
+		/// <inheritdoc/>
+		public void ReadInitialFrom(BinaryReader r)
+		{
+			ReadChangesFrom(r);
+		}
+
+		/// <inheritdoc/>
+		public void ReadChangesFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					DistributedStackUpdateType op = (DistributedStackUpdateType)r.ReadByte();
+					switch (op)
+					{
+						case DistributedStackUpdateType.Push:
+							ApplyPushToCurrent(Serializer.ReadFrom(r));
+							break;
+						case DistributedStackUpdateType.Pop:
+							ApplyPopToCurrent();
+							break;
+						case DistributedStackUpdateType.SetTop:
+							ApplySetTopToCurrent(Serializer.ReadFrom(r));
+							break;
+						default:
+							// An unknown op leaves the rest of the stream unparseable; the server rejects
+							// these before relaying, so this only fires on a corrupt stream.
+							throw new Exception("Unknown stack update op: " + (byte)op);
+					}
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				Changes = new List<StackChange>();
+
+				int numValues = r.ReadUInt16();
+				List<T> newValue = new List<T>(numValues);
+
+				for (int index = 0; index < numValues; index++)
+				{
+					newValue.Add(Serializer.ReadFrom(r));
+				}
+
+				List<T> oldValue = CurrentValue;
+				CurrentValue = newValue;
+
+				InvokeOnReplaced(oldValue, CurrentValue);
+			}
+		}
+
+		/// <inheritdoc/>
+		public void SkipFrom(BinaryReader r)
+		{
+			byte updateType = r.ReadByte();
+			if (updateType == (byte)DistributedCollectionUpdateType.Update)
+			{
+				int numChanges = r.ReadUInt16();
+				for (int i = 0; i < numChanges; i++)
+				{
+					DistributedStackUpdateType op = (DistributedStackUpdateType)r.ReadByte();
+					if (op != DistributedStackUpdateType.Pop)
+					{
+						Serializer.ReadFrom(r);
+					}
+				}
+			}
+			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
+			{
+				int numValues = r.ReadUInt16();
+				for (int index = 0; index < numValues; index++)
+				{
+					Serializer.ReadFrom(r);
+				}
+			}
+		}
+
+		private readonly void InvokeOnPushed(T newValue)
+		{
+			try
+			{
+				OnPushed?.Invoke(newValue);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnPushed handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnPopped(T oldValue)
+		{
+			try
+			{
+				OnPopped?.Invoke(oldValue);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnPopped handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnTopChanged(T oldValue, T newValue)
+		{
+			try
+			{
+				OnTopChanged?.Invoke(oldValue, newValue);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnTopChanged handler method", e);
+			}
+		}
+
+		private readonly void InvokeOnReplaced(List<T> oldValue, List<T> newValue)
+		{
+			try
+			{
+				OnReplaced?.Invoke(oldValue, newValue);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in OnReplaced handler method", e);
+			}
+		}
+
+		/// <summary>Enumerates the last server-confirmed stack from top to bottom.</summary>
+		public readonly IEnumerator<T> GetEnumerator()
+		{
+			if (CurrentValue == null)
+			{
+				yield break;
+			}
+
+			for (int i = CurrentValue.Count - 1; i >= 0; i--)
+			{
+				yield return CurrentValue[i];
+			}
+		}
+
+		readonly IEnumerator IEnumerable.GetEnumerator()
+		{
+			return GetEnumerator();
+		}
+
+		/// <summary>Gets field value as a BsonValue</summary>
+		public BsonValue GetAsBsonValue()
+		{
+			if (CurrentValue == null)
+			{
+				return BsonValue.Null;
+			}
+
+			BsonArray array = new BsonArray();
+			foreach (var val in CurrentValue)
+			{
+				array.Add(Serializer.ToBsonValue(val));
+			}
+
+			return array;
+		}
+
+		/// <summary>Sets field from a BsonValue</summary>
+		public void SetFromBsonValue(BsonValue val)
+		{
+			if (val.IsNull || !val.IsArray)
+			{
+				return;
+			}
+			BsonArray source = val.AsArray!;
+			List<T> list = new List<T>(source.Count);
+
+			foreach (var item in source)
+			{
+				list.Add(Serializer.FromBsonValue(item));
+			}
+
+			ReplaceInternal(list);
+		}
+
+		public GameStateEntityFieldType FieldType { get => GameStateEntityFieldType.Stack; }
+		public GameStateEntityPropertyValueType ValueType { get => Serializer.ValueType; }
+
+		public static implicit operator List<T>(DistributedStack<T, S> d) => d.CurrentValue;
+	}
+
+	/// <summary>
 	/// Client-side distributed dictionary with integer keys. Supports full replacement or per-key delta updates.
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
