@@ -1,15 +1,14 @@
+using System;
+using System.IO;
+using System.Collections.Generic;
+
 using UnityEngine;
 
-using System.Collections.Generic;
+using UltraLiteDB;
 
 using Impunity;
 using Impunity.Connection;
-
-using UltraLiteDB;
 using Impunity.Unity;
-using System.IO;
-using System;
-using System.Collections;
 
 
 public static class TestCollectionTypes
@@ -65,12 +64,9 @@ public class CustomMovementStateData : IEquatable<CustomMovementStateData>
 	}
 }
 
-public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<CustomMovementStateData>, ICustomPayloadSerializer<CustomMovementStateData>
+public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<CustomMovementStateData>
 {
-	public void WriteTo(CustomMovementStateData value, BinaryWriter w) => default(CustomSmallNullableSerializer<CustomMovementStateData, CustomMovementStateDataSerializer>).WriteTo(value, w);
-	public CustomMovementStateData ReadFrom(BinaryReader r) => default(CustomSmallNullableSerializer<CustomMovementStateData, CustomMovementStateDataSerializer>).ReadFrom(r);
-
-	public void WritePayload(CustomMovementStateData value, BinaryWriter w)
+	public void WriteTo(CustomMovementStateData value, BinaryWriter w)
 	{
 		w.Write(value.StartPos.x);
 		w.Write(value.StartPos.y);
@@ -80,7 +76,7 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 		w.Write(value.Velocity.z);
 	}
 
-	public CustomMovementStateData ReadPayload(BinaryReader r, int byteCount)
+	public CustomMovementStateData ReadFrom(BinaryReader r, int byteCount)
 	{
 		CustomMovementStateData value = new CustomMovementStateData();	
 

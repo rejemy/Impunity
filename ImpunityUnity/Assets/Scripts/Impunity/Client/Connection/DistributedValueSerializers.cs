@@ -1,22 +1,31 @@
 using System;
 using System.IO;
+
 using UltraLiteDB;
 
 namespace Impunity.Connection
 {
 
 	/// <summary>
-	/// Interface for binary serializers used by distributed field types. Each implementation handles
-	/// reading and writing a specific value type to/from the wire protocol's binary stream.
+	/// Interface for binary serializers used by distributed field types. Each implementation reads and
+	/// writes just the <em>payload</em> of its value type — the wire framing (length prefix for the
+	/// <c>Custom*</c> types, and the null indicator for the nullable ones) is applied by
+	/// <see cref="FramingSerializer"/>, driven by <see cref="ValueType"/>. This means a custom serializer only
+	/// has to write its bytes; it cannot forget or mismatch the framing.
 	/// Implemented as readonly structs for zero-allocation generic specialization.
 	/// </summary>
 	/// <typeparam name="T">The value type this serializer handles.</typeparam>
 	public interface IDistributableValueSerializer<T>
 	{
-		/// <summary>Writes <paramref name="value"/> to the binary stream.</summary>
+		/// <summary>Writes <paramref name="value"/>'s bytes to the stream.
+		/// For the <c>Custom*</c> value types <see cref="FramingSerializer"/> measures what is written
+		/// here and prepends the length; primitive types are written as-is.</summary>
 		void WriteTo(T value, BinaryWriter w);
-		/// <summary>Reads and returns a value from the binary stream.</summary>
-		T ReadFrom(BinaryReader r);
+
+		/// <summary>Reads and returns a value from its payload bytes. <paramref name="byteCount"/> is the
+		/// payload length <see cref="FramingSerializer"/> already consumed for a <c>Custom*</c> type (useful for
+		/// variable-length payloads); it is 0 for primitive types, which read their own fixed layout.</summary>
+		T ReadFrom(BinaryReader r, int byteCount);
 
 		/// <summary>Converts value to BsonValue</summary>
 		BsonValue ToBsonValue(T value);
@@ -24,109 +33,137 @@ namespace Impunity.Connection
 		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
 		T FromBsonValue(BsonValue value);
 
-		/// <summary>The property value type tag used in the wire protocol for this serializer's type.</summary>
+		/// <summary>The property value type tag used in the wire protocol for this serializer's type.
+		/// <see cref="FramingSerializer"/> uses this to decide the framing applied around <see cref="WriteTo"/>.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
 	/// <summary>
-	/// Narrow interface for authoring custom binary serializers without dealing with wire framing.
-	/// Implement this to read and write just the <em>payload</em> of a value; then reference one of the
-	/// framing wrappers as the field's serializer — <see cref="CustomSmallSerializer{T,P}"/> or
-	/// <see cref="CustomSerializer{T,P}"/> for non-null values, and the
-	/// <see cref="CustomSmallNullableSerializer{T,P}"/> / <see cref="CustomNullableSerializer{T,P}"/>
-	/// variants when the value can be null. The wrapper supplies the length prefix (and, for the
-	/// nullable variants, the null indicator) automatically, so implementations cannot get the framing
-	/// wrong or forget it.
+	/// Central wire framing for distributed values. A serializer only reads and writes its payload
+	/// (<see cref="IDistributableValueSerializer{T}.WriteTo"/> /
+	/// <see cref="IDistributableValueSerializer{T}.ReadFrom"/>); this class adds the length prefix and
+	/// null indicator required by the <c>Custom*</c> value types, and passes primitive types straight
+	/// through. The framing to apply is chosen from
+	/// <see cref="IDistributableValueSerializer{T}.ValueType"/>, which is a compile-time constant for a
+	/// concrete serializer struct, so the switch folds away in specialized generics — this is as cheap as
+	/// calling the serializer directly.
 	/// </summary>
-	/// <remarks>
-	/// A serializer may implement both this interface and <see cref="IDistributableValueSerializer{T}"/>
-	/// (delegating <c>WriteTo</c>/<c>ReadFrom</c> to a wrapper) so it keeps a stable name at field
-	/// declaration sites — that is how the built-in serializers are written.
-	/// </remarks>
-	/// <typeparam name="T">The value type this serializer handles.</typeparam>
-	public interface ICustomPayloadSerializer<T>
+	public static class FramingSerializer
 	{
-		/// <summary>Writes just the value's bytes — no length prefix, no null indicator. The wrapper
-		/// measures whatever is written here and prepends the length for you.</summary>
-		void WritePayload(T value, BinaryWriter w);
-
-		/// <summary>Reads a value back from its payload bytes. <paramref name="byteCount"/> is the payload
-		/// length the wrapper already consumed from the stream (useful for variable-length payloads;
-		/// fixed-layout payloads can ignore it).</summary>
-		T ReadPayload(BinaryReader r, int byteCount);
-
-		/// <summary>Converts value to BsonValue.</summary>
-		BsonValue ToBsonValue(T value);
-
-		/// <summary>Converts BsonValue to C# type, might throw if incompatible types.</summary>
-		T FromBsonValue(BsonValue value);
-	}
-
-	/// <summary>
-	/// Framing wrapper for a non-nullable custom value up to 255 bytes (<c>CustomSmall</c>): writes a
-	/// single-byte length prefix around the payload produced by <typeparamref name="P"/>. A length of 0
-	/// on the wire denotes the uninitialized/default value (this is what the server sends for a custom
-	/// field that was never set), so <typeparamref name="P"/>'s payload for a real value must be at least
-	/// one byte.
-	/// </summary>
-	/// <typeparam name="T">The value type.</typeparam>
-	/// <typeparam name="P">The payload serializer struct.</typeparam>
-	public readonly struct CustomSmallSerializer<T, P> : IDistributableValueSerializer<T>
-		where P : struct, ICustomPayloadSerializer<T>
-	{
-		public void WriteTo(T value, BinaryWriter w)
+		/// <summary>Writes <paramref name="value"/> with whatever framing its serializer's
+		/// <see cref="IDistributableValueSerializer{T}.ValueType"/> requires.</summary>
+		public static void Write<T, S>(S serializer, T value, BinaryWriter w) where S : IDistributableValueSerializer<T>
 		{
-			// Reserve the length byte, write the payload, then seek back and patch the real length.
-			// The outgoing BinaryWriter is always backed by a seekable MemoryStream, so this stays
-			// allocation-free and works regardless of whether the payload is fixed- or variable-length.
+			switch (serializer.ValueType)
+			{
+				case GameStateEntityPropertyValueType.CustomSmall:
+					WriteBytePrefixed(serializer, value, w);
+					break;
+				case GameStateEntityPropertyValueType.CustomSmallNullable:
+					if (value is null) { w.Write(false); break; }
+					w.Write(true);
+					WriteBytePrefixed(serializer, value, w);
+					break;
+				case GameStateEntityPropertyValueType.Custom:
+					WriteUShortPrefixed(serializer, value, w);
+					break;
+				case GameStateEntityPropertyValueType.CustomNullable:
+					if (value is null) { w.Write(false); break; }
+					w.Write(true);
+					WriteUShortPrefixed(serializer, value, w);
+					break;
+				default:
+					// Primitive / self-framing types (String, Blob) write their payload directly.
+					serializer.WriteTo(value, w);
+					break;
+			}
+		}
+
+		/// <summary>Reads a value written by <see cref="Write{T,S}"/>.</summary>
+		public static T Read<T, S>(S serializer, BinaryReader r) where S : IDistributableValueSerializer<T>
+		{
+			switch (serializer.ValueType)
+			{
+				case GameStateEntityPropertyValueType.CustomSmall:
+				{
+					int count = r.ReadByte();
+					// A zero length is the uninitialized/default sentinel the server sends for an unset field.
+					return count == 0 ? default! : serializer.ReadFrom(r, count);
+				}
+				case GameStateEntityPropertyValueType.CustomSmallNullable:
+				{
+					if (!r.ReadBoolean()) return default!;
+					int count = r.ReadByte();
+					return serializer.ReadFrom(r, count);
+				}
+				case GameStateEntityPropertyValueType.Custom:
+				{
+					int count = r.ReadUInt16();
+					return count == 0 ? default! : serializer.ReadFrom(r, count);
+				}
+				case GameStateEntityPropertyValueType.CustomNullable:
+				{
+					if (!r.ReadBoolean()) return default!;
+					int count = r.ReadUInt16();
+					return serializer.ReadFrom(r, count);
+				}
+				default:
+					return serializer.ReadFrom(r, 0);
+			}
+		}
+
+		/// <summary>Advances past a value written by <see cref="Write{T,S}"/> without deserializing it.</summary>
+		public static void Skip<T, S>(S serializer, BinaryReader r) where S : IDistributableValueSerializer<T>
+		{
+			switch (serializer.ValueType)
+			{
+				case GameStateEntityPropertyValueType.CustomSmall:
+					SkipBytes(r, r.ReadByte());
+					break;
+				case GameStateEntityPropertyValueType.CustomSmallNullable:
+					if (r.ReadBoolean()) SkipBytes(r, r.ReadByte());
+					break;
+				case GameStateEntityPropertyValueType.Custom:
+					SkipBytes(r, r.ReadUInt16());
+					break;
+				case GameStateEntityPropertyValueType.CustomNullable:
+					if (r.ReadBoolean()) SkipBytes(r, r.ReadUInt16());
+					break;
+				default:
+					// Primitive / self-framing types have no length prefix; read and discard.
+					serializer.ReadFrom(r, 0);
+					break;
+			}
+		}
+
+		// Reserve the length prefix, write the payload, then seek back and patch in the real length. The
+		// outgoing BinaryWriter is always backed by a seekable MemoryStream, so this stays allocation-free
+		// and works whether the payload is fixed- or variable-length.
+		private static void WriteBytePrefixed<T, S>(S serializer, T value, BinaryWriter w) where S : IDistributableValueSerializer<T>
+		{
 			Stream s = w.BaseStream;
 			long lenPos = s.Position;
 			w.Write((byte)0);
 			long start = s.Position;
-			default(P).WritePayload(value, w);
+			serializer.WriteTo(value, w);
 			long end = s.Position;
 			long count = end - start;
 			if (count > byte.MaxValue)
 			{
-				throw new Exception($"Custom value of {count} bytes is too large for a CustomSmall field (max {byte.MaxValue}); use CustomSerializer instead.");
+				throw new Exception($"Custom value of {count} bytes is too large for a CustomSmall field (max {byte.MaxValue}); use a Custom (ushort-prefixed) value type instead.");
 			}
 			s.Position = lenPos;
 			w.Write((byte)count);
 			s.Position = end;
 		}
 
-		public T ReadFrom(BinaryReader r)
-		{
-			int count = r.ReadByte();
-			if (count == 0)
-			{
-				return default!; // uninitialized/default sentinel
-			}
-			return default(P).ReadPayload(r, count);
-		}
-
-		public BsonValue ToBsonValue(T value) => default(P).ToBsonValue(value);
-		public T FromBsonValue(BsonValue value) => default(P).FromBsonValue(value);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
-	}
-
-	/// <summary>
-	/// Framing wrapper for a non-nullable custom value up to 65535 bytes (<c>Custom</c>): writes a
-	/// <see cref="ushort"/> length prefix around the payload produced by <typeparamref name="P"/>. A
-	/// length of 0 denotes the uninitialized/default value.
-	/// </summary>
-	/// <typeparam name="T">The value type.</typeparam>
-	/// <typeparam name="P">The payload serializer struct.</typeparam>
-	public readonly struct CustomSerializer<T, P> : IDistributableValueSerializer<T>
-		where P : struct, ICustomPayloadSerializer<T>
-	{
-		public void WriteTo(T value, BinaryWriter w)
+		private static void WriteUShortPrefixed<T, S>(S serializer, T value, BinaryWriter w) where S : IDistributableValueSerializer<T>
 		{
 			Stream s = w.BaseStream;
 			long lenPos = s.Position;
 			w.Write((ushort)0);
 			long start = s.Position;
-			default(P).WritePayload(value, w);
+			serializer.WriteTo(value, w);
 			long end = s.Position;
 			long count = end - start;
 			if (count > ushort.MaxValue)
@@ -138,120 +175,13 @@ namespace Impunity.Connection
 			s.Position = end;
 		}
 
-		public T ReadFrom(BinaryReader r)
+		private static void SkipBytes(BinaryReader r, int count)
 		{
-			int count = r.ReadUInt16();
-			if (count == 0)
+			if (count > 0)
 			{
-				return default!; // uninitialized/default sentinel
+				r.BaseStream.Seek(count, SeekOrigin.Current);
 			}
-			return default(P).ReadPayload(r, count);
 		}
-
-		public BsonValue ToBsonValue(T value) => default(P).ToBsonValue(value);
-		public T FromBsonValue(BsonValue value) => default(P).FromBsonValue(value);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
-	}
-
-	/// <summary>
-	/// Framing wrapper for a nullable custom value up to 255 bytes (<c>CustomSmallNullable</c>): writes a
-	/// boolean null indicator, then (when non-null) a single-byte length prefix around the payload from
-	/// <typeparamref name="P"/>. Unlike the non-nullable variant, a present value is always round-tripped
-	/// through <typeparamref name="P"/> even if its payload is empty — null and empty are distinct.
-	/// </summary>
-	/// <typeparam name="T">The (reference) value type.</typeparam>
-	/// <typeparam name="P">The payload serializer struct.</typeparam>
-	public readonly struct CustomSmallNullableSerializer<T, P> : IDistributableValueSerializer<T>
-		where T : class
-		where P : struct, ICustomPayloadSerializer<T>
-	{
-		public void WriteTo(T value, BinaryWriter w)
-		{
-			if (value == null)
-			{
-				w.Write(false);
-				return;
-			}
-			w.Write(true);
-			Stream s = w.BaseStream;
-			long lenPos = s.Position;
-			w.Write((byte)0);
-			long start = s.Position;
-			default(P).WritePayload(value, w);
-			long end = s.Position;
-			long count = end - start;
-			if (count > byte.MaxValue)
-			{
-				throw new Exception($"Custom value of {count} bytes is too large for a CustomSmallNullable field (max {byte.MaxValue}); use CustomNullableSerializer instead.");
-			}
-			s.Position = lenPos;
-			w.Write((byte)count);
-			s.Position = end;
-		}
-
-		public T ReadFrom(BinaryReader r)
-		{
-			if (!r.ReadBoolean())
-			{
-				return null!;
-			}
-			int count = r.ReadByte();
-			return default(P).ReadPayload(r, count);
-		}
-
-		public BsonValue ToBsonValue(T value) => default(P).ToBsonValue(value);
-		public T FromBsonValue(BsonValue value) => default(P).FromBsonValue(value);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
-	}
-
-	/// <summary>
-	/// Framing wrapper for a nullable custom value up to 65535 bytes (<c>CustomNullable</c>): writes a
-	/// boolean null indicator, then (when non-null) a <see cref="ushort"/> length prefix around the
-	/// payload from <typeparamref name="P"/>. Null and empty are distinct.
-	/// </summary>
-	/// <typeparam name="T">The (reference) value type.</typeparam>
-	/// <typeparam name="P">The payload serializer struct.</typeparam>
-	public readonly struct CustomNullableSerializer<T, P> : IDistributableValueSerializer<T>
-		where T : class
-		where P : struct, ICustomPayloadSerializer<T>
-	{
-		public void WriteTo(T value, BinaryWriter w)
-		{
-			if (value == null)
-			{
-				w.Write(false);
-				return;
-			}
-			w.Write(true);
-			Stream s = w.BaseStream;
-			long lenPos = s.Position;
-			w.Write((ushort)0);
-			long start = s.Position;
-			default(P).WritePayload(value, w);
-			long end = s.Position;
-			long count = end - start;
-			if (count > ushort.MaxValue)
-			{
-				throw new Exception($"Custom value of {count} bytes is too large to serialize (max {ushort.MaxValue}).");
-			}
-			s.Position = lenPos;
-			w.Write((ushort)count);
-			s.Position = end;
-		}
-
-		public T ReadFrom(BinaryReader r)
-		{
-			if (!r.ReadBoolean())
-			{
-				return null!;
-			}
-			int count = r.ReadUInt16();
-			return default(P).ReadPayload(r, count);
-		}
-
-		public BsonValue ToBsonValue(T value) => default(P).ToBsonValue(value);
-		public T FromBsonValue(BsonValue value) => default(P).FromBsonValue(value);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="bool"/> values.</summary>
@@ -262,7 +192,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public bool ReadFrom(BinaryReader r)
+		public bool ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadBoolean();
 		}
@@ -290,7 +220,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public sbyte ReadFrom(BinaryReader r)
+		public sbyte ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadSByte();
 		}
@@ -318,7 +248,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public byte ReadFrom(BinaryReader r)
+		public byte ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadByte();
 		}
@@ -346,7 +276,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public short ReadFrom(BinaryReader r)
+		public short ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadInt16();
 		}
@@ -374,7 +304,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public readonly ushort ReadFrom(BinaryReader r)
+		public readonly ushort ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadUInt16();
 		}
@@ -402,7 +332,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public int ReadFrom(BinaryReader r)
+		public int ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadInt32();
 		}
@@ -430,7 +360,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public readonly uint ReadFrom(BinaryReader r)
+		public readonly uint ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadUInt32();
 		}
@@ -458,7 +388,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public long ReadFrom(BinaryReader r)
+		public long ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadInt64();
 		}
@@ -486,7 +416,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public ulong ReadFrom(BinaryReader r)
+		public ulong ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadUInt64();
 		}
@@ -516,7 +446,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public float ReadFrom(BinaryReader r)
+		public float ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadSingle();
 		}
@@ -546,7 +476,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public double ReadFrom(BinaryReader r)
+		public double ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadDouble();
 		}
@@ -574,7 +504,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public decimal ReadFrom(BinaryReader r)
+		public decimal ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadDecimal();
 		}
@@ -602,7 +532,7 @@ namespace Impunity.Connection
 			w.Write(value);
 		}
 
-		public char ReadFrom(BinaryReader r)
+		public char ReadFrom(BinaryReader r, int byteCount)
 		{
 			return r.ReadChar();
 		}
@@ -638,7 +568,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public string? ReadFrom(BinaryReader r)
+		public string? ReadFrom(BinaryReader r, int byteCount)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -686,7 +616,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		public ArraySegment<byte> ReadFrom(BinaryReader r)
+		public ArraySegment<byte> ReadFrom(BinaryReader r, int byteCount)
 		{
 			bool hasValue = r.ReadBoolean();
 			if (hasValue)
@@ -723,7 +653,7 @@ namespace Impunity.Connection
 			w.Write(value.ToBinary());
 		}
 
-		public DateTime ReadFrom(BinaryReader r)
+		public DateTime ReadFrom(BinaryReader r, int byteCount)
 		{
 			return DateTime.FromBinary(r.ReadInt64());
 		}
@@ -753,7 +683,7 @@ namespace Impunity.Connection
 			w.Write((short)value.Offset.TotalMinutes);
 		}
 
-		public DateTimeOffset ReadFrom(BinaryReader r)
+		public DateTimeOffset ReadFrom(BinaryReader r, int byteCount)
 		{
 			long ticks = r.ReadInt64();
 			TimeSpan offset = TimeSpan.FromMinutes(r.ReadInt16());
@@ -791,7 +721,7 @@ namespace Impunity.Connection
 			w.Write(value.Ticks);
 		}
 
-		public TimeSpan ReadFrom(BinaryReader r)
+		public TimeSpan ReadFrom(BinaryReader r, int byteCount)
 		{
 			return new TimeSpan(r.ReadInt64());
 		}
@@ -819,7 +749,7 @@ namespace Impunity.Connection
 			w.Write(value.ToByteArray());
 		}
 
-		public Guid ReadFrom(BinaryReader r)
+		public Guid ReadFrom(BinaryReader r, int byteCount)
 		{
 			return new Guid(r.ReadBytes(16));
 		}
@@ -839,26 +769,17 @@ namespace Impunity.Connection
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
 	}
 
-	/// <summary>BSON serializer for small custom objects (max 255 bytes). Uses a single-byte length prefix
-	/// (framing supplied by <see cref="CustomSmallSerializer{T,P}"/>).</summary>
+	/// <summary>BSON serializer for small custom objects (max 255 bytes). CustomSmall value type — framing
+	/// (single-byte length prefix) supplied by <see cref="FramingSerializer"/>.</summary>
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
-	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T>, ICustomPayloadSerializer<T> where T : class
+	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
-		public void WriteTo(T value, BinaryWriter w) => default(CustomSmallSerializer<T, BsonSmallSerializer<T>>).WriteTo(value, w);
-		public T ReadFrom(BinaryReader r) => default(CustomSmallSerializer<T, BsonSmallSerializer<T>>).ReadFrom(r);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
-
-		public void WritePayload(T value, BinaryWriter w)
+		public void WriteTo(T value, BinaryWriter w)
 		{
-			// A null value writes no payload; the wrapper's zero length round-trips back to null.
-			if (value == null)
-			{
-				return;
-			}
 			w.Write(BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value)));
 		}
 
-		public T ReadPayload(BinaryReader r, int byteCount)
+		public T ReadFrom(BinaryReader r, int byteCount)
 		{
 			byte[] bytes = r.ReadBytes(byteCount);
 			return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
@@ -875,29 +796,22 @@ namespace Impunity.Connection
 		{
 			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
 		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
 	}
 
 
-	/// <summary>BSON serializer for custom objects (max 65535 bytes). Uses a ushort length prefix
-	/// (framing supplied by <see cref="CustomSerializer{T,P}"/>).</summary>
+	/// <summary>BSON serializer for custom objects (max 65535 bytes). Custom value type — framing
+	/// (ushort length prefix) supplied by <see cref="FramingSerializer"/>.</summary>
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
-	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T>, ICustomPayloadSerializer<T> where T : class
+	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
-		public void WriteTo(T value, BinaryWriter w) => default(CustomSerializer<T, BsonSerializer<T>>).WriteTo(value, w);
-		public T ReadFrom(BinaryReader r) => default(CustomSerializer<T, BsonSerializer<T>>).ReadFrom(r);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
-
-		public void WritePayload(T value, BinaryWriter w)
+		public void WriteTo(T value, BinaryWriter w)
 		{
-			// A null value writes no payload; the wrapper's zero length round-trips back to null.
-			if (value == null)
-			{
-				return;
-			}
 			w.Write(BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value)));
 		}
 
-		public T ReadPayload(BinaryReader r, int byteCount)
+		public T ReadFrom(BinaryReader r, int byteCount)
 		{
 			byte[] bytes = r.ReadBytes(byteCount);
 			return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
@@ -914,5 +828,7 @@ namespace Impunity.Connection
 		{
 			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
 		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 	}
 }

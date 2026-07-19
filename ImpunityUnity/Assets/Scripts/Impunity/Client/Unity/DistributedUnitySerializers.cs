@@ -1,24 +1,24 @@
-using System;
 using System.IO;
-using Impunity.Connection;
-using UltraLiteDB;
+
 using UnityEngine;
+
+using UltraLiteDB;
+
+using Impunity.Connection;
+
 
 namespace Impunity.Unity
 {
 	/// <summary>Binary serializer for Unity <see cref="Vector2"/> (8 bytes: 2 floats).</summary>
-	public readonly struct Vector2Serializer : IDistributableValueSerializer<Vector2>, ICustomPayloadSerializer<Vector2>
+	public readonly struct Vector2Serializer : IDistributableValueSerializer<Vector2>
 	{
-		public void WriteTo(Vector2 value, BinaryWriter w) => default(CustomSmallSerializer<Vector2, Vector2Serializer>).WriteTo(value, w);
-		public Vector2 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Vector2, Vector2Serializer>).ReadFrom(r);
-
-		public void WritePayload(Vector2 value, BinaryWriter w)
+		public void WriteTo(Vector2 value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
 		}
 
-		public Vector2 ReadPayload(BinaryReader r, int byteCount)
+		public Vector2 ReadFrom(BinaryReader r, int byteCount)
 		{
 			Vector2 value = new Vector2();
 			value.x = r.ReadSingle();
@@ -49,19 +49,16 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector3"/> (12 bytes: 3 floats).</summary>
-	public readonly struct Vector3Serializer : IDistributableValueSerializer<Vector3>, ICustomPayloadSerializer<Vector3>
+	public readonly struct Vector3Serializer : IDistributableValueSerializer<Vector3>
 	{
-		public void WriteTo(Vector3 value, BinaryWriter w) => default(CustomSmallSerializer<Vector3, Vector3Serializer>).WriteTo(value, w);
-		public Vector3 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Vector3, Vector3Serializer>).ReadFrom(r);
-
-		public void WritePayload(Vector3 value, BinaryWriter w)
+		public void WriteTo(Vector3 value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
 			w.Write(value.z);
 		}
 
-		public Vector3 ReadPayload(BinaryReader r, int byteCount)
+		public Vector3 ReadFrom(BinaryReader r, int byteCount)
 		{
 			Vector3 value = new Vector3();
 			value.x = r.ReadSingle();
@@ -94,12 +91,9 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector4"/> (16 bytes: 4 floats).</summary>
-	public readonly struct DVector4Serializer : IDistributableValueSerializer<Vector4>, ICustomPayloadSerializer<Vector4>
+	public readonly struct DVector4Serializer : IDistributableValueSerializer<Vector4>
 	{
-		public void WriteTo(Vector4 value, BinaryWriter w) => default(CustomSmallSerializer<Vector4, DVector4Serializer>).WriteTo(value, w);
-		public Vector4 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Vector4, DVector4Serializer>).ReadFrom(r);
-
-		public void WritePayload(Vector4 value, BinaryWriter w)
+		public void WriteTo(Vector4 value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
@@ -107,7 +101,7 @@ namespace Impunity.Unity
 			w.Write(value.w);
 		}
 
-		public Vector4 ReadPayload(BinaryReader r, int byteCount)
+		public Vector4 ReadFrom(BinaryReader r, int byteCount)
 		{
 			Vector4 value = new Vector4();
 			value.x = r.ReadSingle();
@@ -142,18 +136,15 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector2Int"/> (8 bytes: 2 ints).</summary>
-	public readonly struct Vector2IntSerializer : IDistributableValueSerializer<Vector2Int>, ICustomPayloadSerializer<Vector2Int>
+	public readonly struct Vector2IntSerializer : IDistributableValueSerializer<Vector2Int>
 	{
-		public void WriteTo(Vector2Int value, BinaryWriter w) => default(CustomSmallSerializer<Vector2Int, Vector2IntSerializer>).WriteTo(value, w);
-		public Vector2Int ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Vector2Int, Vector2IntSerializer>).ReadFrom(r);
-
-		public void WritePayload(Vector2Int value, BinaryWriter w)
+		public void WriteTo(Vector2Int value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
 		}
 
-		public Vector2Int ReadPayload(BinaryReader r, int byteCount)
+		public Vector2Int ReadFrom(BinaryReader r, int byteCount)
 		{
 			Vector2Int value = new Vector2Int();
 			value.x = r.ReadInt32();
@@ -184,19 +175,16 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector3Int"/> (12 bytes: 3 ints).</summary>
-	public readonly struct Vector3IntSerializer : IDistributableValueSerializer<Vector3Int>, ICustomPayloadSerializer<Vector3Int>
+	public readonly struct Vector3IntSerializer : IDistributableValueSerializer<Vector3Int>
 	{
-		public void WriteTo(Vector3Int value, BinaryWriter w) => default(CustomSmallSerializer<Vector3Int, Vector3IntSerializer>).WriteTo(value, w);
-		public Vector3Int ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Vector3Int, Vector3IntSerializer>).ReadFrom(r);
-
-		public void WritePayload(Vector3Int value, BinaryWriter w)
+		public void WriteTo(Vector3Int value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
 			w.Write(value.z);
 		}
 
-		public Vector3Int ReadPayload(BinaryReader r, int byteCount)
+		public Vector3Int ReadFrom(BinaryReader r, int byteCount)
 		{
 			Vector3Int value = new Vector3Int();
 			value.x = r.ReadInt32();
@@ -229,12 +217,9 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Color"/> (16 bytes: 4 floats for RGBA).</summary>
-	public readonly struct ColorSerializer : IDistributableValueSerializer<Color>, ICustomPayloadSerializer<Color>
+	public readonly struct ColorSerializer : IDistributableValueSerializer<Color>
 	{
-		public void WriteTo(Color value, BinaryWriter w) => default(CustomSmallSerializer<Color, ColorSerializer>).WriteTo(value, w);
-		public Color ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Color, ColorSerializer>).ReadFrom(r);
-
-		public void WritePayload(Color value, BinaryWriter w)
+		public void WriteTo(Color value, BinaryWriter w)
 		{
 			w.Write(value.r);
 			w.Write(value.g);
@@ -242,7 +227,7 @@ namespace Impunity.Unity
 			w.Write(value.a);
 		}
 
-		public Color ReadPayload(BinaryReader r, int byteCount)
+		public Color ReadFrom(BinaryReader r, int byteCount)
 		{
 			Color value = new Color();
 			value.r = r.ReadSingle();
@@ -278,12 +263,9 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Color32"/> (4 bytes: 4 bytes for RGBA).</summary>
-	public readonly struct Color32Serializer : IDistributableValueSerializer<Color32>, ICustomPayloadSerializer<Color32>
+	public readonly struct Color32Serializer : IDistributableValueSerializer<Color32>
 	{
-		public void WriteTo(Color32 value, BinaryWriter w) => default(CustomSmallSerializer<Color32, Color32Serializer>).WriteTo(value, w);
-		public Color32 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Color32, Color32Serializer>).ReadFrom(r);
-
-		public void WritePayload(Color32 value, BinaryWriter w)
+		public void WriteTo(Color32 value, BinaryWriter w)
 		{
 			w.Write(value.r);
 			w.Write(value.g);
@@ -291,7 +273,7 @@ namespace Impunity.Unity
 			w.Write(value.a);
 		}
 
-		public Color32 ReadPayload(BinaryReader r, int byteCount)
+		public Color32 ReadFrom(BinaryReader r, int byteCount)
 		{
 			Color32 value = new Color32();
 			value.r = r.ReadByte();
@@ -326,12 +308,9 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Matrix4x4"/> (64 bytes: 16 floats).</summary>
-	public readonly struct Matrix4x4Serializer : IDistributableValueSerializer<Matrix4x4>, ICustomPayloadSerializer<Matrix4x4>
+	public readonly struct Matrix4x4Serializer : IDistributableValueSerializer<Matrix4x4>
 	{
-		public void WriteTo(Matrix4x4 value, BinaryWriter w) => default(CustomSmallSerializer<Matrix4x4, Matrix4x4Serializer>).WriteTo(value, w);
-		public Matrix4x4 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Matrix4x4, Matrix4x4Serializer>).ReadFrom(r);
-
-		public void WritePayload(Matrix4x4 value, BinaryWriter w)
+		public void WriteTo(Matrix4x4 value, BinaryWriter w)
 		{
 			for (int i = 0; i < 16; i++)
 			{
@@ -339,7 +318,7 @@ namespace Impunity.Unity
 			}
 		}
 
-		public Matrix4x4 ReadPayload(BinaryReader r, int byteCount)
+		public Matrix4x4 ReadFrom(BinaryReader r, int byteCount)
 		{
 			Matrix4x4 value = new Matrix4x4();
 			for (int i = 0; i < 16; i++)
@@ -377,12 +356,9 @@ namespace Impunity.Unity
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Quaternion"/> (16 bytes: 4 floats for XYZW).</summary>
-	public readonly struct QuaternionSerializer : IDistributableValueSerializer<Quaternion>, ICustomPayloadSerializer<Quaternion>
+	public readonly struct QuaternionSerializer : IDistributableValueSerializer<Quaternion>
 	{
-		public void WriteTo(Quaternion value, BinaryWriter w) => default(CustomSmallSerializer<Quaternion, QuaternionSerializer>).WriteTo(value, w);
-		public Quaternion ReadFrom(BinaryReader r) => default(CustomSmallSerializer<Quaternion, QuaternionSerializer>).ReadFrom(r);
-
-		public void WritePayload(Quaternion value, BinaryWriter w)
+		public void WriteTo(Quaternion value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
@@ -390,7 +366,7 @@ namespace Impunity.Unity
 			w.Write(value.w);
 		}
 
-		public Quaternion ReadPayload(BinaryReader r, int byteCount)
+		public Quaternion ReadFrom(BinaryReader r, int byteCount)
 		{
 			Quaternion value = new Quaternion();
 			value.x = r.ReadSingle();

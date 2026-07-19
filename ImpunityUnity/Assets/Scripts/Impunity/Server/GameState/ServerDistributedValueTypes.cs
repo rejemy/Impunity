@@ -8,6 +8,66 @@ using UltraLiteDB;
 namespace Impunity.GameState
 {
 
+	/// <summary>
+	/// Shared wire framing for the server's opaque custom value carriers (<see cref="DSmallCustom"/>,
+	/// <see cref="DSmallNullableCustom"/>, <see cref="DCustom"/>, <see cref="DNullableCustom"/>). They all
+	/// carry an <see cref="ArraySegment{Byte}"/> payload and differ only in the prefix width (byte vs
+	/// ushort) and whether null is distinguished from a present value — so the framing lives here once
+	/// rather than being repeated four times. This mirrors the client's <c>FramingSerializer</c>.
+	/// </summary>
+	internal static class ServerCustomFramingSerializer
+	{
+		/// <summary>Writes <paramref name="value"/> framed for a custom value slot. For non-nullable
+		/// slots a null backing array is written as a zero length prefix (the uninitialized/default
+		/// sentinel); for nullable slots null is written as a leading <c>false</c>.</summary>
+		public static void Write(BinaryWriter w, ArraySegment<byte> value, bool small, bool nullable)
+		{
+			if (nullable)
+			{
+				if (value.Array == null)
+				{
+					w.Write(false);
+					return;
+				}
+				w.Write(true);
+			}
+			else if (value.Array == null)
+			{
+				if (small) w.Write((byte)0); else w.Write((ushort)0);
+				return;
+			}
+
+			if (small) w.Write((byte)value.Count); else w.Write((ushort)value.Count);
+			w.Write(value);
+		}
+
+		/// <summary>Reads a payload written by <see cref="Write"/>. Returns a default (null-backed) segment
+		/// only for a nullable slot whose null indicator was <c>false</c>.</summary>
+		public static ArraySegment<byte> Read(BinaryReader r, bool small, bool nullable)
+		{
+			if (nullable && !r.ReadBoolean())
+			{
+				return default;
+			}
+			int count = small ? r.ReadByte() : r.ReadUInt16();
+			return r.ReadBytes(count);
+		}
+
+		/// <summary>Advances past a payload written by <see cref="Write"/> without materializing it.</summary>
+		public static void Skip(BinaryReader r, bool small, bool nullable)
+		{
+			if (nullable && !r.ReadBoolean())
+			{
+				return;
+			}
+			int count = small ? r.ReadByte() : r.ReadUInt16();
+			if (count > 0)
+			{
+				r.BaseStream.Seek(count, SeekOrigin.Current);
+			}
+		}
+	}
+
 	/// <summary>Distributed custom binary value (max 255 bytes). Null backing array represents uninitialized default.</summary>
 	public struct DSmallCustom : IStandardDistributableValueType, IEquatable<DSmallCustom>
 	{
@@ -21,30 +81,9 @@ namespace Impunity.GameState
 			LastModifiedTime = 0;
 		}
 
-		public void WriteTo(BinaryWriter w)
-		{
-			// For non-nullable custom, null actually means "uninitialized default value,
-			// whatever that is for that type. Send 0 length indicates default.
-			if (Value.Array == null)
-			{
-				w.Write((byte)0);
-				return;
-			}
-			w.Write((byte)Value.Count);
-			w.Write(Value);
-		}
-
-		public void ReadFrom(BinaryReader r)
-		{
-			int count = r.ReadByte();
-			Value = r.ReadBytes(count);
-		}
-
-		public void SkipFrom(BinaryReader r)
-		{
-			int count = r.ReadByte();
-			r.ReadBytes(count);
-		}
+		public void WriteTo(BinaryWriter w) => ServerCustomFramingSerializer.Write(w, Value, small: true, nullable: false);
+		public void ReadFrom(BinaryReader r) => Value = ServerCustomFramingSerializer.Read(r, small: true, nullable: false);
+		public void SkipFrom(BinaryReader r) => ServerCustomFramingSerializer.Skip(r, small: true, nullable: false);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 
@@ -69,42 +108,9 @@ namespace Impunity.GameState
 			LastModifiedTime = 0;
 		}
 
-		public void WriteTo(BinaryWriter w)
-		{
-			if (Value.Array == null)
-			{
-				w.Write(false);
-			}
-			else
-			{
-				w.Write(true);
-				w.Write((byte)Value.Count);
-				w.Write(Value);
-			}
-		}
-
-		public void ReadFrom(BinaryReader r)
-		{
-			bool hasValue = r.ReadBoolean();
-			if (hasValue)
-			{
-				int count = r.ReadByte();
-				Value = r.ReadBytes(count);
-			}
-			else
-			{
-				Value = default;
-			}
-		}
-
-		public void SkipFrom(BinaryReader r)
-		{
-			if (r.ReadBoolean())
-			{
-				int count = r.ReadByte();
-				r.ReadBytes(count);
-			}
-		}
+		public void WriteTo(BinaryWriter w) => ServerCustomFramingSerializer.Write(w, Value, small: true, nullable: true);
+		public void ReadFrom(BinaryReader r) => Value = ServerCustomFramingSerializer.Read(r, small: true, nullable: true);
+		public void SkipFrom(BinaryReader r) => ServerCustomFramingSerializer.Skip(r, small: true, nullable: true);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
 
@@ -129,30 +135,9 @@ namespace Impunity.GameState
 			LastModifiedTime = 0;
 		}
 
-		public void WriteTo(BinaryWriter w)
-		{
-			// For non-nullable custom, null actually means "uninitialized default value,
-			// whatever that is for that type. Send 0 length indicates default.
-			if (Value.Array == null)
-			{
-				w.Write((ushort)0);
-				return;
-			}
-			w.Write((ushort)Value.Count);
-			w.Write(Value);
-		}
-
-		public void ReadFrom(BinaryReader r)
-		{
-			int count = r.ReadUInt16();
-			Value = r.ReadBytes(count);
-		}
-
-		public void SkipFrom(BinaryReader r)
-		{
-			int count = r.ReadUInt16();
-			r.ReadBytes(count);
-		}
+		public void WriteTo(BinaryWriter w) => ServerCustomFramingSerializer.Write(w, Value, small: false, nullable: false);
+		public void ReadFrom(BinaryReader r) => Value = ServerCustomFramingSerializer.Read(r, small: false, nullable: false);
+		public void SkipFrom(BinaryReader r) => ServerCustomFramingSerializer.Skip(r, small: false, nullable: false);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Custom; }
 
@@ -177,42 +162,9 @@ namespace Impunity.GameState
 			LastModifiedTime = 0;
 		}
 
-		public void WriteTo(BinaryWriter w)
-		{
-			if (Value.Array == null)
-			{
-				w.Write(false);
-			}
-			else
-			{
-				w.Write(true);
-				w.Write((ushort)Value.Count);
-				w.Write(Value);
-			}
-		}
-
-		public void ReadFrom(BinaryReader r)
-		{
-			bool hasValue = r.ReadBoolean();
-			if (hasValue)
-			{
-				int count = r.ReadUInt16();
-				Value = r.ReadBytes(count);
-			}
-			else
-			{
-				Value = default;
-			}
-		}
-
-		public void SkipFrom(BinaryReader r)
-		{
-			if (r.ReadBoolean())
-			{
-				int count = r.ReadUInt16();
-				r.ReadBytes(count);
-			}
-		}
+		public void WriteTo(BinaryWriter w) => ServerCustomFramingSerializer.Write(w, Value, small: false, nullable: true);
+		public void ReadFrom(BinaryReader r) => Value = ServerCustomFramingSerializer.Read(r, small: false, nullable: true);
+		public void SkipFrom(BinaryReader r) => ServerCustomFramingSerializer.Skip(r, small: false, nullable: true);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 

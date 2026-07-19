@@ -350,7 +350,7 @@ namespace Impunity.Tests
 			Assert.AreEqual(typeof(string), byId[15].ValueClrType);
 
 			// Complex classification via ValueType (no BsonSerializer<> sniffing)
-			Assert.AreEqual(GameStateEntityPropertyValueType.Custom, byId[13].ValueType);
+			Assert.AreEqual(GameStateEntityPropertyValueType.CustomNullable, byId[13].ValueType);
 			Assert.AreEqual(typeof(BsonTestPoco), byId[13].ValueClrType);
 			Assert.AreEqual(GameStateEntityPropertyValueType.CustomSmall, byId[14].ValueType);
 			Assert.AreEqual(typeof(TestVec3), byId[14].ValueClrType);

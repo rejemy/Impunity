@@ -9,8 +9,8 @@
 
   <PropertyGroup>
     <PackageId>ImpunityNetworking</PackageId>
-    <Version>1.3.2</Version>
-    <AssemblyVersion>1.3.2</AssemblyVersion>
+    <Version>1.3.3</Version>
+    <AssemblyVersion>1.3.3</AssemblyVersion>
     <Authors>Jeremy Friesen</Authors>
     <Product>ImpunityNetworking</Product>
     <Description>Impunity Networking - Unity library enabling networked save state and multiplayer</Description>

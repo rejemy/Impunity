@@ -25,13 +25,14 @@ namespace Impunity.Tests
 
 		static void ResetStream(MemoryStream ms) => ms.Position = 0;
 
-		/// <summary>Round-trip helper for client-side serializers.</summary>
+		/// <summary>Round-trip helper for client-side serializers. Goes through <see cref="FramingSerializer"/> so it
+		/// exercises the real wire framing (length prefix / null indicator) on top of the serializer payload.</summary>
 		static T RoundTrip<T, S>(S ser, T value) where S : IDistributableValueSerializer<T>
 		{
 			var (ms, w, r) = MakeStream();
-			ser.WriteTo(value, w);
+			FramingSerializer.Write(ser, value, w);
 			ResetStream(ms);
-			return ser.ReadFrom(r);
+			return FramingSerializer.Read<T, S>(ser, r);
 		}
 
 		/// <summary>Round-trip helper for server-side value types.</summary>
@@ -263,6 +264,89 @@ namespace Impunity.Tests
 			Assert.AreEqual(42, back.Count);
 		}
 
+		// ───────── 1b. FramingSerializer framing (custom + nullable + skip) ─────────
+		//
+		// These target the wire framing FramingSerializer applies around a serializer's payload — especially the
+		// nullable custom paths and the Skip path, which the round-trips above don't reach.
+
+		[Test, Category("Serializers")]
+		public void FramingSerializer_CustomSmallNullable_RoundTrip()
+		{
+			var ser = new TestBoxSmallNullableSerializer();
+			Assert.AreEqual(new TestBox(7), RoundTrip(ser, new TestBox(7)));
+			Assert.IsNull(RoundTrip(ser, (TestBox)null));
+		}
+
+		[Test, Category("Serializers")]
+		public void FramingSerializer_CustomNullable_RoundTrip()
+		{
+			var ser = new TestBoxNullableSerializer();
+			Assert.AreEqual(new TestBox(-99), RoundTrip(ser, new TestBox(-99)));
+			Assert.IsNull(RoundTrip(ser, (TestBox)null));
+		}
+
+		// A nullable value writes a leading false for null vs. a leading true (+length+payload) when present.
+		[Test, Category("Serializers")]
+		public void FramingSerializer_Nullable_NullIsOneByte()
+		{
+			var (ms, w, r) = MakeStream();
+			FramingSerializer.Write(new TestBoxSmallNullableSerializer(), (TestBox)null, w);
+			Assert.AreEqual(1, ms.Position, "A null nullable-custom should serialize to a single false byte");
+		}
+
+		// The server sends a zero-length prefix for a non-nullable custom field that was never set; the
+		// client must decode that as the default value without trying to read a payload.
+		[Test, Category("Serializers")]
+		public void FramingSerializer_CustomSmall_ZeroLengthIsDefault()
+		{
+			var (ms, w, r) = MakeStream();
+			w.Write((byte)0);
+			ResetStream(ms);
+			Assert.AreEqual(default(TestVec3), FramingSerializer.Read<TestVec3, TestVec3Serializer>(default, r));
+		}
+
+		[Test, Category("Serializers")]
+		public void FramingSerializer_Custom_ZeroLengthIsDefault()
+		{
+			var (ms, w, r) = MakeStream();
+			w.Write((ushort)0);
+			ResetStream(ms);
+			Assert.IsNull(FramingSerializer.Read<TestPoco, BsonSerializer<TestPoco>>(default, r));
+		}
+
+		// Skip must advance past exactly the value's bytes (framing + payload) and no further. We prove this
+		// by writing a sentinel int right after the value and asserting Skip lands exactly on it.
+		static void AssertSkipConsumesExactly<T, S>(S ser, T value) where S : IDistributableValueSerializer<T>
+		{
+			const int sentinel = 0x5EED5EED;
+			var (ms, w, r) = MakeStream();
+			FramingSerializer.Write(ser, value, w);
+			w.Write(sentinel);
+			ResetStream(ms);
+			FramingSerializer.Skip<T, S>(ser, r);
+			Assert.AreEqual(sentinel, r.ReadInt32(), "Skip did not consume exactly the value's bytes");
+		}
+
+		[Test, Category("Serializers")]
+		public void FramingSerializer_Skip_ConsumesExactly()
+		{
+			// Primitive (default branch)
+			AssertSkipConsumesExactly(new Int32Serializer(), 123456);
+			// Self-framing primitives
+			AssertSkipConsumesExactly(new StringSerializer(), "hello");
+			AssertSkipConsumesExactly(new StringSerializer(), (string)null);
+			// CustomSmall (byte prefix)
+			AssertSkipConsumesExactly(new TestVec3Serializer(), new TestVec3(1, 2, 3));
+			// Custom (ushort prefix)
+			AssertSkipConsumesExactly(new BsonSerializer<TestPoco>(), new TestPoco { X = 5, Y = "z" });
+			// CustomSmallNullable — present and null
+			AssertSkipConsumesExactly(new TestBoxSmallNullableSerializer(), new TestBox(11));
+			AssertSkipConsumesExactly(new TestBoxSmallNullableSerializer(), (TestBox)null);
+			// CustomNullable — present and null
+			AssertSkipConsumesExactly(new TestBoxNullableSerializer(), new TestBox(22));
+			AssertSkipConsumesExactly(new TestBoxNullableSerializer(), (TestBox)null);
+		}
+
 		// ───────── 2. Server-Side Value Type Round-Trips ─────────
 
 		[Test, Category("ServerValueTypes")]
@@ -385,6 +469,82 @@ namespace Impunity.Tests
 			var g = Guid.NewGuid();
 			DGuid val = g;
 			Assert.AreEqual(g, (Guid)RoundTripServer(val));
+		}
+
+		// ───────── 2b. Server custom carriers (framing via ServerCustomFramingSerializer) ─────────
+		//
+		// The server carriers are opaque byte relays; these cover the shared framing helper for all four
+		// (byte/ushort prefix × nullable), including the null-vs-empty distinction the nullable ones keep.
+
+		static ArraySegment<byte> Bytes(params byte[] b) => new ArraySegment<byte>(b);
+
+		[Test, Category("ServerValueTypes")]
+		public void DSmallCustom_RoundTrip()
+		{
+			// DSmallCustom exposes a nullable ArraySegment conversion.
+			ArraySegment<byte>? segN = RoundTripServer(new DSmallCustom(Bytes(1, 2, 3)));
+			Assert.IsTrue(segN.HasValue);
+			ArraySegment<byte> seg = segN.Value;
+			Assert.AreEqual(3, seg.Count);
+			Assert.AreEqual(2, seg.Array[seg.Offset + 1]);
+		}
+
+		[Test, Category("ServerValueTypes")]
+		public void DCustom_RoundTrip()
+		{
+			ArraySegment<byte> seg = RoundTripServer(new DCustom(Bytes(9, 8, 7, 6)));
+			Assert.AreEqual(4, seg.Count);
+			Assert.AreEqual(6, seg.Array[seg.Offset + 3]);
+		}
+
+		[Test, Category("ServerValueTypes")]
+		public void DSmallNullableCustom_NullVsEmptyPreserved()
+		{
+			// null (no backing array) stays null...
+			ArraySegment<byte> nul = RoundTripServer(new DSmallNullableCustom(default));
+			Assert.IsNull(nul.Array, "null nullable-custom must round-trip as null");
+			// ...and an empty-but-present value stays a distinct empty (non-null) segment.
+			ArraySegment<byte> empty = RoundTripServer(new DSmallNullableCustom(Bytes()));
+			Assert.IsNotNull(empty.Array, "empty (present) nullable-custom must not become null");
+			Assert.AreEqual(0, empty.Count);
+			// ...and a real value survives.
+			ArraySegment<byte> full = RoundTripServer(new DSmallNullableCustom(Bytes(5, 6)));
+			Assert.AreEqual(2, full.Count);
+		}
+
+		[Test, Category("ServerValueTypes")]
+		public void DNullableCustom_NullVsEmptyPreserved()
+		{
+			ArraySegment<byte> nul = RoundTripServer(new DNullableCustom(default));
+			Assert.IsNull(nul.Array, "null nullable-custom must round-trip as null");
+			ArraySegment<byte> empty = RoundTripServer(new DNullableCustom(Bytes()));
+			Assert.IsNotNull(empty.Array, "empty (present) nullable-custom must not become null");
+			Assert.AreEqual(0, empty.Count);
+			ArraySegment<byte> full = RoundTripServer(new DNullableCustom(Bytes(1, 2, 3, 4, 5)));
+			Assert.AreEqual(5, full.Count);
+		}
+
+		// SkipFrom on the carriers must advance past exactly the framed payload.
+		static void AssertServerSkipConsumesExactly<T>(T val) where T : struct, IDistributableValueType
+		{
+			const int sentinel = 0x5EED5EED;
+			var (ms, w, r) = MakeStream();
+			val.WriteTo(w);
+			w.Write(sentinel);
+			ResetStream(ms);
+			default(T).SkipFrom(r);
+			Assert.AreEqual(sentinel, r.ReadInt32(), "SkipFrom did not consume exactly the value's bytes");
+		}
+
+		[Test, Category("ServerValueTypes")]
+		public void ServerCustomCarriers_Skip_ConsumesExactly()
+		{
+			AssertServerSkipConsumesExactly(new DSmallCustom(Bytes(1, 2, 3)));
+			AssertServerSkipConsumesExactly(new DCustom(Bytes(1, 2, 3, 4)));
+			AssertServerSkipConsumesExactly(new DSmallNullableCustom(Bytes(7)));
+			AssertServerSkipConsumesExactly(new DSmallNullableCustom(default)); // null → single false byte
+			AssertServerSkipConsumesExactly(new DNullableCustom(Bytes(7, 8)));
+			AssertServerSkipConsumesExactly(new DNullableCustom(default));
 		}
 
 		// ───────── 3. Utility Functions ─────────

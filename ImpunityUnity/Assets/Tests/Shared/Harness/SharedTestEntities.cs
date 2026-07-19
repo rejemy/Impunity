@@ -42,22 +42,18 @@ namespace Impunity.Tests
 
 	/// <summary>Binary serializer for <see cref="TestVec3"/> — mirrors Vector3Serializer
 	/// (Client/Unity/DistributedUnitySerializers.cs): 12 bytes, CustomSmall. Also doubles as the
-	/// portable coverage for the payload-serializer + framing-wrapper machinery
-	/// (<see cref="ICustomPayloadSerializer{T}"/> / <see cref="CustomSmallSerializer{T,P}"/>).</summary>
-	public readonly struct TestVec3Serializer : IDistributableValueSerializer<TestVec3>, ICustomPayloadSerializer<TestVec3>
+	/// portable coverage for the payload-serializer + framing machinery
+	/// (<see cref="IDistributableValueSerializer{T}"/> payload methods + <see cref="FramingSerializer"/>).</summary>
+	public readonly struct TestVec3Serializer : IDistributableValueSerializer<TestVec3>
 	{
-		public void WriteTo(TestVec3 value, BinaryWriter w) => default(CustomSmallSerializer<TestVec3, TestVec3Serializer>).WriteTo(value, w);
-		public TestVec3 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<TestVec3, TestVec3Serializer>).ReadFrom(r);
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
-
-		public void WritePayload(TestVec3 value, BinaryWriter w)
+		public void WriteTo(TestVec3 value, BinaryWriter w)
 		{
 			w.Write(value.x);
 			w.Write(value.y);
 			w.Write(value.z);
 		}
 
-		public TestVec3 ReadPayload(BinaryReader r, int byteCount)
+		public TestVec3 ReadFrom(BinaryReader r, int byteCount)
 		{
 			return new TestVec3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
 		}
@@ -79,6 +75,62 @@ namespace Impunity.Tests
 
 			return new TestVec3(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle);
 		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+	}
+
+	// ───────── Portable nullable-custom stand-in ─────────
+
+	/// <summary>A nullable reference-type custom value. Lets the shared suite exercise the
+	/// <c>CustomSmallNullable</c> / <c>CustomNullable</c> framing paths (client <see cref="FramingSerializer"/>
+	/// null indicator + server nullable carriers) that the non-nullable <see cref="TestVec3"/> can't reach.</summary>
+	public sealed class TestBox : IEquatable<TestBox>
+	{
+		public int Value;
+
+		public TestBox() { }
+		public TestBox(int value) { Value = value; }
+
+		public bool Equals(TestBox other) => other != null && Value == other.Value;
+		public override bool Equals(object obj) => Equals(obj as TestBox);
+		public override int GetHashCode() => Value;
+		public override string ToString() => $"TestBox({Value})";
+	}
+
+	/// <summary>Nullable custom serializer for <see cref="TestBox"/> — CustomSmallNullable (byte-prefixed).
+	/// Only writes the payload; FramingSerializer supplies the null indicator and length.</summary>
+	public readonly struct TestBoxSmallNullableSerializer : IDistributableValueSerializer<TestBox>
+	{
+		public void WriteTo(TestBox value, BinaryWriter w) => w.Write(value.Value);
+		public TestBox ReadFrom(BinaryReader r, int byteCount) => new TestBox(r.ReadInt32());
+
+		public BsonValue ToBsonValue(TestBox value)
+		{
+			if (value == null) return BsonValue.Null;
+			return value.Value;
+		}
+
+		public TestBox FromBsonValue(BsonValue value) => value.IsNull ? null : new TestBox(value.AsInt32);
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
+	}
+
+	/// <summary>Nullable custom serializer for <see cref="TestBox"/> — CustomNullable (ushort-prefixed).
+	/// Same payload as <see cref="TestBoxSmallNullableSerializer"/>, exercising the wide-prefix framing.</summary>
+	public readonly struct TestBoxNullableSerializer : IDistributableValueSerializer<TestBox>
+	{
+		public void WriteTo(TestBox value, BinaryWriter w) => w.Write(value.Value);
+		public TestBox ReadFrom(BinaryReader r, int byteCount) => new TestBox(r.ReadInt32());
+
+		public BsonValue ToBsonValue(TestBox value)
+		{
+			if (value == null) return BsonValue.Null;
+			return value.Value;
+		}
+
+		public TestBox FromBsonValue(BsonValue value) => value.IsNull ? null : new TestBox(value.AsInt32);
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
 	}
 
 	// ───────── Integration test types (ephemeral) ─────────

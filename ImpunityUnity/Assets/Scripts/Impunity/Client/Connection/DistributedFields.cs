@@ -135,7 +135,7 @@ namespace Impunity.Connection
 		public void WriteChangesTo(BinaryWriter w)
 		{
 			// Only called if there's a pending value
-			Serializer.WriteTo(PendingValue!, w);
+			FramingSerializer.Write(Serializer, PendingValue!, w);
 			PendingValue = default;
 		}
 
@@ -149,7 +149,7 @@ namespace Impunity.Connection
 		public void ReadChangesFrom(BinaryReader r)
 		{
 			T oldValue = CurrentValue;
-			CurrentValue = Serializer.ReadFrom(r);
+			CurrentValue = FramingSerializer.Read<T, S>(Serializer, r);
 
 			InvokeOnChanged(oldValue, CurrentValue);
 		}
@@ -157,7 +157,7 @@ namespace Impunity.Connection
 		/// <inheritdoc/>
 		public void SkipFrom(BinaryReader r)
 		{
-			Serializer.ReadFrom(r);
+			FramingSerializer.Skip<T, S>(Serializer, r);
 		}
 
 		private readonly void InvokeOnChanged(T oldValue, T newValue)
@@ -310,7 +310,7 @@ namespace Impunity.Connection
 		/// <inheritdoc/>
 		public void WriteChangesTo(BinaryWriter w)
 		{
-			Serializer.WriteTo(PendingValue!, w);
+			FramingSerializer.Write(Serializer, PendingValue!, w);
 			PendingValue = default;
 		}
 
@@ -322,7 +322,7 @@ namespace Impunity.Connection
 			long ageMilliseconds = r.ReadUInt32();
 			LastModifiedTime = now - ageMilliseconds;
 
-			CurrentValue = Serializer.ReadFrom(r);
+			CurrentValue = FramingSerializer.Read<T, S>(Serializer, r);
 
 			InvokeOnInitialized(CurrentValue, TimeSpan.FromMilliseconds(ageMilliseconds));
 		}
@@ -333,7 +333,7 @@ namespace Impunity.Connection
 			LastModifiedTime = Entity.Manager?.Connection?.GetServerTime() ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			T oldValue = CurrentValue;
-			CurrentValue = Serializer.ReadFrom(r);
+			CurrentValue = FramingSerializer.Read<T, S>(Serializer, r);
 
 			InvokeOnChanged(oldValue, CurrentValue);
 		}
@@ -341,7 +341,7 @@ namespace Impunity.Connection
 		/// <inheritdoc/>
 		public void SkipFrom(BinaryReader r)
 		{
-			Serializer.ReadFrom(r);
+			FramingSerializer.Skip<T, S>(Serializer, r);
 		}
 
 		private readonly void InvokeOnInitialized(T newValue, TimeSpan age)
@@ -553,7 +553,7 @@ namespace Impunity.Connection
 				w.Write((ushort)NewValue.Length);
 				for (int index = 0; index < NewValue.Length; index++)
 				{
-					Serializer.WriteTo(NewValue[index], w);
+					FramingSerializer.Write(Serializer, NewValue[index], w);
 				}
 				NewValue = null;
 			}
@@ -565,7 +565,7 @@ namespace Impunity.Connection
 				foreach (var change in Changes)
 				{
 					w.Write((ushort)change.Key);
-					Serializer.WriteTo(change.Value, w);
+					FramingSerializer.Write(Serializer, change.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -592,7 +592,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					int index = r.ReadUInt16();
-					T newValue = Serializer.ReadFrom(r);
+					T newValue = FramingSerializer.Read<T, S>(Serializer, r);
 
 					// Always consume the value above so the stream stays aligned, but ignore an
 					// out-of-range index rather than throwing on malformed/relayed hostile data.
@@ -618,7 +618,7 @@ namespace Impunity.Connection
 
 				for (int index = 0; index < arraySize; index++)
 				{
-					newValue[index] = Serializer.ReadFrom(r);
+					newValue[index] = FramingSerializer.Read<T, S>(Serializer, r);
 				}
 
 				CurrentValue = newValue;
@@ -637,7 +637,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					r.ReadUInt16(); // index
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -645,7 +645,7 @@ namespace Impunity.Connection
 				int arraySize = r.ReadUInt16();
 				for (int index = 0; index < arraySize; index++)
 				{
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 		}
@@ -892,7 +892,7 @@ namespace Impunity.Connection
 				w.Write((ushort)NewValue.Count);
 				foreach (T value in NewValue)
 				{
-					Serializer.WriteTo(value, w);
+					FramingSerializer.Write(Serializer, value, w);
 				}
 				NewValue = null;
 			}
@@ -903,7 +903,7 @@ namespace Impunity.Connection
 				w.Write((ushort)Changes.Count);
 				foreach (var change in Changes)
 				{
-					Serializer.WriteTo(change, w);
+					FramingSerializer.Write(Serializer, change, w);
 				}
 				Changes.Clear();
 			}
@@ -928,7 +928,7 @@ namespace Impunity.Connection
 				int numChanges = r.ReadUInt16();
 				for (int i = 0; i < numChanges; i++)
 				{
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 					AddToCurrent(val);
 
 					InvokeOnChanged(val);
@@ -946,7 +946,7 @@ namespace Impunity.Connection
 
 				for (int index = 0; index < numValues; index++)
 				{
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 					if (CurrentValue.Count == CurrentCapacity)
 					{
 						CurrentValue.Dequeue();
@@ -967,7 +967,7 @@ namespace Impunity.Connection
 				int numChanges = r.ReadUInt16();
 				for (int i = 0; i < numChanges; i++)
 				{
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -976,7 +976,7 @@ namespace Impunity.Connection
 				int numValues = r.ReadUInt16();
 				for (int index = 0; index < numValues; index++)
 				{
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 		}
@@ -1342,7 +1342,7 @@ namespace Impunity.Connection
 				w.Write((ushort)NewValue.Count);
 				foreach (T value in NewValue)
 				{
-					Serializer.WriteTo(value, w);
+					FramingSerializer.Write(Serializer, value, w);
 				}
 				NewValue = null;
 			}
@@ -1356,7 +1356,7 @@ namespace Impunity.Connection
 					w.Write((byte)change.Op);
 					if (change.Op != DistributedStackUpdateType.Pop)
 					{
-						Serializer.WriteTo(change.Value, w);
+						FramingSerializer.Write(Serializer, change.Value, w);
 					}
 				}
 				Changes.Clear();
@@ -1386,13 +1386,13 @@ namespace Impunity.Connection
 					switch (op)
 					{
 						case DistributedStackUpdateType.Push:
-							ApplyPushToCurrent(Serializer.ReadFrom(r));
+							ApplyPushToCurrent(FramingSerializer.Read<T, S>(Serializer, r));
 							break;
 						case DistributedStackUpdateType.Pop:
 							ApplyPopToCurrent();
 							break;
 						case DistributedStackUpdateType.SetTop:
-							ApplySetTopToCurrent(Serializer.ReadFrom(r));
+							ApplySetTopToCurrent(FramingSerializer.Read<T, S>(Serializer, r));
 							break;
 						default:
 							// An unknown op leaves the rest of the stream unparseable; the server rejects
@@ -1410,7 +1410,7 @@ namespace Impunity.Connection
 
 				for (int index = 0; index < numValues; index++)
 				{
-					newValue.Add(Serializer.ReadFrom(r));
+					newValue.Add(FramingSerializer.Read<T, S>(Serializer, r));
 				}
 
 				List<T> oldValue = CurrentValue;
@@ -1432,7 +1432,7 @@ namespace Impunity.Connection
 					DistributedStackUpdateType op = (DistributedStackUpdateType)r.ReadByte();
 					if (op != DistributedStackUpdateType.Pop)
 					{
-						Serializer.ReadFrom(r);
+						FramingSerializer.Skip<T, S>(Serializer, r);
 					}
 				}
 			}
@@ -1441,7 +1441,7 @@ namespace Impunity.Connection
 				int numValues = r.ReadUInt16();
 				for (int index = 0; index < numValues; index++)
 				{
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 		}
@@ -1687,7 +1687,7 @@ namespace Impunity.Connection
 				foreach (var pair in NewValue)
 				{
 					w.Write(pair.Key);
-					Serializer.WriteTo(pair.Value, w);
+					FramingSerializer.Write(Serializer, pair.Value, w);
 				}
 				NewValue = null;
 			}
@@ -1699,7 +1699,7 @@ namespace Impunity.Connection
 				foreach (var pair in Changes)
 				{
 					w.Write(pair.Key);
-					Serializer.WriteTo(pair.Value, w);
+					FramingSerializer.Write(Serializer, pair.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -1725,7 +1725,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					int key = r.ReadInt32();
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
@@ -1743,7 +1743,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					int key = r.ReadInt32();
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 					newValue[key] = val;
 				}
 
@@ -1765,7 +1765,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					r.ReadInt32(); // key
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -1774,7 +1774,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					r.ReadInt32(); // key
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 		}
@@ -2007,7 +2007,7 @@ namespace Impunity.Connection
 				foreach (var pair in NewValue)
 				{
 					w.Write(pair.Key);
-					Serializer.WriteTo(pair.Value, w);
+					FramingSerializer.Write(Serializer, pair.Value, w);
 				}
 				NewValue = null;
 			}
@@ -2019,7 +2019,7 @@ namespace Impunity.Connection
 				foreach (var pair in Changes)
 				{
 					w.Write(pair.Key);
-					Serializer.WriteTo(pair.Value, w);
+					FramingSerializer.Write(Serializer, pair.Value, w);
 				}
 				Changes.Clear();
 			}
@@ -2045,7 +2045,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					string key = r.ReadString();
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 
 					T oldVal = CurrentValue.GetValueOrDefault(key);
 					CurrentValue[key] = val;
@@ -2063,7 +2063,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					string key = r.ReadString();
-					T val = Serializer.ReadFrom(r);
+					T val = FramingSerializer.Read<T, S>(Serializer, r);
 					newValue[key] = val;
 				}
 
@@ -2085,7 +2085,7 @@ namespace Impunity.Connection
 				for (int i = 0; i < numChanges; i++)
 				{
 					r.ReadString(); // key
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 			else if (updateType == (byte)DistributedCollectionUpdateType.Set)
@@ -2094,7 +2094,7 @@ namespace Impunity.Connection
 				for (int index = 0; index < numValues; index++)
 				{
 					r.ReadString(); // key
-					Serializer.ReadFrom(r);
+					FramingSerializer.Skip<T, S>(Serializer, r);
 				}
 			}
 		}

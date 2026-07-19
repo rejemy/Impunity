@@ -1,7 +1,7 @@
 // ───────── Unity Type Serializer Tests (Edit Mode) ─────────
 //
 // Round-trips the Unity-typed serializers from Impunity.Unity (Client/Unity/DistributedUnitySerializers.cs)
-// through both their binary (WriteTo/ReadFrom) and BSON (ToBsonValue/FromBsonValue) paths. These types
+// through both their binary (payload + FramingSerializer framing) and BSON (ToBsonValue/FromBsonValue) paths. These types
 // require UnityEngine, so they can only be covered here — the shared dotnet suite covers the same
 // serializer machinery via the portable TestVec3 stand-in.
 //
@@ -23,9 +23,9 @@ public class UnitySerializerTests
 	{
 		using var ms = new MemoryStream();
 		var w = new BinaryWriter(ms);
-		ser.WriteTo(value, w);
+		FramingSerializer.Write(ser, value, w);
 		ms.Position = 0;
-		return ser.ReadFrom(new BinaryReader(ms));
+		return FramingSerializer.Read<T, S>(ser, new BinaryReader(ms));
 	}
 
 	static T BsonRoundTrip<T, S>(S ser, T value) where S : IDistributableValueSerializer<T>
