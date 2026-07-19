@@ -367,17 +367,17 @@
             Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from an <see cref="T:System.ArraySegment`1"/>.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.BsonReader.ReadDocument(UltraLiteDB.ByteReader)">
+        <member name="M:UltraLiteDB.BsonReader.ReadDocument(UltraLiteDB.IByteReader)">
             <summary>
             Reads a complete BSON document (length prefix + elements + terminator) from the reader.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.BsonReader.ReadArray(UltraLiteDB.ByteReader)">
+        <member name="M:UltraLiteDB.BsonReader.ReadArray(UltraLiteDB.IByteReader)">
             <summary>
             Reads a complete BSON array (length prefix + indexed elements + terminator) from the reader.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.BsonReader.ReadElement(UltraLiteDB.ByteReader,System.String@)">
+        <member name="M:UltraLiteDB.BsonReader.ReadElement(UltraLiteDB.IByteReader,System.String@)">
             <summary>
             Reads a single BSON element (type byte + CString key + value) and outputs the field name.
             </summary>
@@ -399,6 +399,14 @@
             </summary>
             <returns>The writer position after serialization (offset + bytes written).</returns>
         </member>
+        <member name="M:UltraLiteDB.BsonSerializer.Serialize(UltraLiteDB.BsonDocument,System.IO.Stream)">
+            <summary>
+            Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> to a standard .NET <see cref="T:System.IO.Stream"/> in BSON format.
+            Writes forward-only, so any writable stream is supported (seekable or not).
+            </summary>
+            <param name="doc">The document to serialize.</param>
+            <param name="stream">The stream to write the BSON data to.</param>
+        </member>
         <member name="M:UltraLiteDB.BsonSerializer.Deserialize(System.Byte[],System.Int32)">
             <summary>
             Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a BSON byte array.
@@ -410,6 +418,13 @@
             <summary>
             Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a BSON <see cref="T:System.ArraySegment`1"/>.
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonSerializer.Deserialize(System.IO.Stream)">
+            <summary>
+            Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a standard .NET <see cref="T:System.IO.Stream"/>.
+            Reads forward-only, so any readable stream is supported (seekable or not).
+            </summary>
+            <param name="stream">The stream to read the BSON document from.</param>
         </member>
         <member name="T:UltraLiteDB.BsonWriter">
             <summary>
@@ -428,12 +443,12 @@
             </summary>
             <returns>The writer position after serialization.</returns>
         </member>
-        <member name="M:UltraLiteDB.BsonWriter.WriteDocument(UltraLiteDB.ByteWriter,UltraLiteDB.BsonDocument)">
+        <member name="M:UltraLiteDB.BsonWriter.WriteDocument(UltraLiteDB.IByteWriter,UltraLiteDB.BsonDocument)">
             <summary>
             Writes a BSON document (length prefix + elements + 0x00 terminator) to the writer.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.BsonWriter.WriteArray(UltraLiteDB.ByteWriter,UltraLiteDB.BsonArray)">
+        <member name="M:UltraLiteDB.BsonWriter.WriteArray(UltraLiteDB.IByteWriter,UltraLiteDB.BsonArray)">
             <summary>
             Writes a BSON array (length prefix + indexed elements + 0x00 terminator) to the writer.
             </summary>
@@ -444,37 +459,37 @@
             Reduces GC pressure for high-throughput deserialization. Supports polymorphism via _t/_type discriminators.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
             <summary>
             Read a BSON document from bytes directly into a C# object
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryFromPosition(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type,System.Byte,System.String,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryFromPosition(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type,System.Byte,System.String,System.Int32)">
             <summary>
             Helper to finish reading a dictionary when we discover mid-document that the target is IDictionary
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadValueDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Byte,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadValueDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Byte,System.Type)">
             <summary>
             Read a BSON value and convert directly to the target .NET type
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
             <summary>
             Read a BSON array directly into an Array or IList
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
             <summary>
             Read a BSON document directly into an IDictionary
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadBsonValue(UltraLiteDB.ByteReader,System.Byte)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadBsonValue(UltraLiteDB.IByteReader,System.Byte)">
             <summary>
             Read a BSON element value as a BsonValue (fallback for custom serializers)
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.SkipValue(UltraLiteDB.ByteReader,System.Byte)">
+        <member name="M:UltraLiteDB.DirectBsonReader.SkipValue(UltraLiteDB.IByteReader,System.Byte)">
             <summary>
             Skip past a BSON element's value bytes
             </summary>
@@ -485,27 +500,27 @@
             Reduces GC pressure for high-throughput serialization. Supports polymorphism via _t/_type discriminators.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Int32)">
             <summary>
             Write a C# object as a BSON document directly to the ByteWriter
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.String,System.Type,System.Object,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.String,System.Type,System.Object,System.Int32)">
             <summary>
             Write a single value as a BSON element (type byte + CString key + value bytes)
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteArrayDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IEnumerable,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteArrayDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IEnumerable,System.Int32)">
             <summary>
             Write an IEnumerable as a BSON array directly
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteDictionaryDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IDictionary,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteDictionaryDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IDictionary,System.Int32)">
             <summary>
             Write an IDictionary as a BSON document directly
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementFromBsonValue(UltraLiteDB.ByteWriter,System.String,UltraLiteDB.BsonValue)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementFromBsonValue(UltraLiteDB.IByteWriter,System.String,UltraLiteDB.BsonValue)">
             <summary>
             Write a BsonValue as an element using the existing BsonWriter format.
             Used as fallback for custom serializers and BsonValue-typed properties.
@@ -2969,6 +2984,23 @@
             <param name="type">The target CLR type.</param>
             <param name="bsonBytes">BSON-encoded byte segment.</param>
         </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromStream``1(System.IO.Stream)">
+            <summary>
+            Deserializes BSON from a standard .NET <see cref="T:System.IO.Stream"/> directly to a
+            <typeparamref name="T"/> instance, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
+            Reads forward-only, so any readable stream is supported.
+            </summary>
+            <typeparam name="T">The target entity type.</typeparam>
+            <param name="stream">The stream to read BSON from.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.DeserializeFromStream(System.Type,System.IO.Stream)">
+            <summary>
+            Deserializes BSON from a standard .NET <see cref="T:System.IO.Stream"/> directly to an entity of the
+            specified type. Falls back to <see cref="T:UltraLiteDB.BsonReader"/> if the target type is <see cref="T:UltraLiteDB.BsonDocument"/>.
+            </summary>
+            <param name="type">The target CLR type.</param>
+            <param name="stream">The stream to read BSON from.</param>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToBytes``1(``0)">
             <summary>
             Serializes an entity directly to BSON bytes, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation to reduce GC pressure.
@@ -3001,6 +3033,26 @@
             <param name="type">The declared type (used for polymorphic type resolution).</param>
             <param name="entity">The object to serialize.</param>
             <param name="writer">The writer to output BSON bytes to.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToStream``1(``0,System.IO.Stream)">
+            <summary>
+            Serializes an entity directly to BSON on a standard .NET <see cref="T:System.IO.Stream"/>, bypassing
+            intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
+            </summary>
+            <typeparam name="T">The entity type.</typeparam>
+            <param name="entity">The object to serialize.</param>
+            <param name="stream">The stream to write BSON bytes to. Must be seekable (unless the entity
+            is already a <see cref="T:UltraLiteDB.BsonDocument"/>), because document/array length prefixes are backfilled.</param>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.SerializeToStream(System.Type,System.Object,System.IO.Stream)">
+            <summary>
+            Serializes an entity directly to BSON on a standard .NET <see cref="T:System.IO.Stream"/>. Falls back to
+            <see cref="T:UltraLiteDB.BsonWriter"/> if the entity is already a <see cref="T:UltraLiteDB.BsonDocument"/>.
+            </summary>
+            <param name="type">The declared type (used for polymorphic type resolution).</param>
+            <param name="entity">The object to serialize.</param>
+            <param name="stream">The stream to write BSON bytes to. Must be seekable (unless the entity
+            is already a <see cref="T:UltraLiteDB.BsonDocument"/>), because document/array length prefixes are backfilled.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToDocument(System.Type,System.Object)">
             <summary>
@@ -3665,6 +3717,59 @@
         <member name="P:UltraLiteDB.FileOptions.Flush">
             <summary>If true, flush bypasses OS write cache by calling FileStream.Flush(true).</summary>
         </member>
+        <member name="T:UltraLiteDB.IByteReader">
+            <summary>
+            Reads primitive and extended data types sequentially from a source in little-endian format.
+            Implemented by both the byte-array-backed <see cref="T:UltraLiteDB.ByteReader"/> and the stream-backed
+            <see cref="T:UltraLiteDB.StreamByteReader"/>, allowing the BSON layer to read from either without change.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.IByteReader.Position">
+            <summary>
+            Gets the current read position. Used by the BSON layer only for end-of-document
+            comparisons; reads are always forward-only.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IByteReader.ReadCString">
+            <summary>
+            Reads a null-terminated C-style string (CString).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IByteReader.ReadBsonString">
+            <summary>
+            Reads a BSON-encoded string (4-byte length prefix including the trailing null terminator).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IByteReader.Skip(System.Int32)">
+            <summary>
+            Advances the read position by the specified number of bytes without returning data.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.IByteWriter">
+            <summary>
+            Writes primitive and extended data types sequentially to a destination in little-endian format.
+            Implemented by both the byte-array-backed <see cref="T:UltraLiteDB.ByteWriter"/> and the stream-backed
+            <see cref="T:UltraLiteDB.StreamByteWriter"/>, allowing the BSON layer to write to either without change.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.IByteWriter.Position">
+            <summary>
+            Gets or sets the current write position. Setting the position is used by the direct
+            (POCO) serializer to backfill document/array length prefixes, and therefore requires a
+            seekable destination.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IByteWriter.EnsureCapacity(System.Int32)">
+            <summary>
+            Ensures the destination has room for the specified number of additional bytes.
+            May be a no-op for destinations that grow automatically (e.g. streams).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.IByteWriter.Skip(System.Int32)">
+            <summary>
+            Advances the write position by the specified number of bytes, reserving space.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.KeyDocument">
             <summary>
             Pairs a sort key with its document, used internally during query result sorting.
@@ -3742,6 +3847,76 @@
         <member name="M:UltraLiteDB.StorageUnitHelper.FormatFileSize(System.Int64)">
             <summary>
             Format a long file length to pretty file unit
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.StreamByteReader">
+            <summary>
+            Reads primitive and extended data types sequentially from a standard .NET <see cref="T:System.IO.Stream"/>
+            in little-endian format, preserving BSON wire compatibility. Reads are forward-only, so any
+            readable stream is supported (seekable or not).
+            </summary>
+            <remarks>
+            <see cref="P:UltraLiteDB.StreamByteReader.Position"/> is tracked relative to the stream position when this reader was created,
+            starting at zero. A single BSON document is bounded by its 4-byte length prefix (&lt; 2 GB),
+            so an <see cref="T:System.Int32"/> position is sufficient.
+            </remarks>
+        </member>
+        <member name="P:UltraLiteDB.StreamByteReader.Position">
+            <inheritdoc/>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteReader.#ctor(System.IO.Stream)">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.StreamByteReader"/> that reads from the specified stream.
+            </summary>
+            <param name="stream">The readable stream to read BSON data from.</param>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteReader.FillBuffer(System.Byte[],System.Int32)">
+            <summary>
+            Fills <paramref name="count"/> bytes into <paramref name="buffer"/>, looping until the
+            count is satisfied. Throws <see cref="T:System.IO.EndOfStreamException"/> if the stream ends early.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteReader.ReadBsonString">
+            <summary>
+            Reads a BSON-encoded string (4-byte length prefix including the trailing null terminator).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteReader.ReadCString">
+            <summary>
+            Reads a null-terminated C-style string (CString).
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.StreamByteWriter">
+            <summary>
+            Writes primitive and extended data types sequentially to a standard .NET <see cref="T:System.IO.Stream"/>
+            in little-endian format, preserving BSON wire compatibility.
+            </summary>
+            <remarks>
+            The direct (POCO) serializer backfills document/array length prefixes by rewinding the write
+            position, which requires a seekable stream. Setting <see cref="P:UltraLiteDB.StreamByteWriter.Position"/> throws
+            <see cref="T:System.NotSupportedException"/> when the underlying stream is not seekable. Writing a
+            <see cref="T:UltraLiteDB.BsonDocument"/> is forward-only and never sets the position, so it works with any
+            writable stream.
+            </remarks>
+        </member>
+        <member name="P:UltraLiteDB.StreamByteWriter.Position">
+            <inheritdoc/>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteWriter.#ctor(System.IO.Stream)">
+            <summary>
+            Initializes a <see cref="T:UltraLiteDB.StreamByteWriter"/> that writes to the specified stream.
+            </summary>
+            <param name="stream">The writable stream to write BSON data to.</param>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteWriter.EnsureCapacity(System.Int32)">
+            <summary>
+            No-op for streams, which grow automatically as data is written.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.StreamByteWriter.Skip(System.Int32)">
+            <summary>
+            Reserves <paramref name="length"/> bytes by writing zeros. The direct serializer later
+            rewinds and overwrites these placeholder bytes with the actual length prefix.
             </summary>
         </member>
         <member name="T:UltraLiteDB.StringScanner">
