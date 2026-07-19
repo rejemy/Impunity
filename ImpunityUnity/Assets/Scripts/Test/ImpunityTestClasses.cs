@@ -65,17 +65,13 @@ public class CustomMovementStateData : IEquatable<CustomMovementStateData>
 	}
 }
 
-public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<CustomMovementStateData>
+public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<CustomMovementStateData>, ICustomPayloadSerializer<CustomMovementStateData>
 {
-	public void WriteTo(CustomMovementStateData value, BinaryWriter w)
-	{
-		if (value == null)
-		{
-			w.Write(false);
-			return;
-		}
+	public void WriteTo(CustomMovementStateData value, BinaryWriter w) => default(CustomSmallNullableSerializer<CustomMovementStateData, CustomMovementStateDataSerializer>).WriteTo(value, w);
+	public CustomMovementStateData ReadFrom(BinaryReader r) => default(CustomSmallNullableSerializer<CustomMovementStateData, CustomMovementStateDataSerializer>).ReadFrom(r);
 
-		w.Write(true);
+	public void WritePayload(CustomMovementStateData value, BinaryWriter w)
+	{
 		w.Write(value.StartPos.x);
 		w.Write(value.StartPos.y);
 		w.Write(value.StartPos.z);
@@ -84,14 +80,9 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 		w.Write(value.Velocity.z);
 	}
 
-	public CustomMovementStateData ReadFrom(BinaryReader r)
+	public CustomMovementStateData ReadPayload(BinaryReader r, int byteCount)
 	{
-		if (r.ReadBoolean() == false)
-		{
-			return null;
-		}
-
-		CustomMovementStateData value = new CustomMovementStateData();
+		CustomMovementStateData value = new CustomMovementStateData();	
 
 		value.StartPos.x = r.ReadSingle();
 		value.StartPos.y = r.ReadSingle();

@@ -41,29 +41,25 @@ namespace Impunity.Tests
 	}
 
 	/// <summary>Binary serializer for <see cref="TestVec3"/> — mirrors Vector3Serializer
-	/// (Client/Unity/DistributedUnitySerializers.cs): 12 bytes, CustomSmall.</summary>
-	public readonly struct TestVec3Serializer : IDistributableValueSerializer<TestVec3>
+	/// (Client/Unity/DistributedUnitySerializers.cs): 12 bytes, CustomSmall. Also doubles as the
+	/// portable coverage for the payload-serializer + framing-wrapper machinery
+	/// (<see cref="ICustomPayloadSerializer{T}"/> / <see cref="CustomSmallSerializer{T,P}"/>).</summary>
+	public readonly struct TestVec3Serializer : IDistributableValueSerializer<TestVec3>, ICustomPayloadSerializer<TestVec3>
 	{
-		public void WriteTo(TestVec3 value, BinaryWriter w)
+		public void WriteTo(TestVec3 value, BinaryWriter w) => default(CustomSmallSerializer<TestVec3, TestVec3Serializer>).WriteTo(value, w);
+		public TestVec3 ReadFrom(BinaryReader r) => default(CustomSmallSerializer<TestVec3, TestVec3Serializer>).ReadFrom(r);
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+
+		public void WritePayload(TestVec3 value, BinaryWriter w)
 		{
-			w.Write((byte)12);
 			w.Write(value.x);
 			w.Write(value.y);
 			w.Write(value.z);
 		}
 
-		public TestVec3 ReadFrom(BinaryReader r)
+		public TestVec3 ReadPayload(BinaryReader r, int byteCount)
 		{
-			TestVec3 value = new TestVec3();
-			if (r.ReadByte() == 0)
-			{
-				return value;
-			}
-
-			value.x = r.ReadSingle();
-			value.y = r.ReadSingle();
-			value.z = r.ReadSingle();
-			return value;
+			return new TestVec3(r.ReadSingle(), r.ReadSingle(), r.ReadSingle());
 		}
 
 		public BsonValue ToBsonValue(TestVec3 value)
@@ -83,8 +79,6 @@ namespace Impunity.Tests
 
 			return new TestVec3(vect[0].AsSingle, vect[1].AsSingle, vect[2].AsSingle);
 		}
-
-		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
 	}
 
 	// ───────── Integration test types (ephemeral) ─────────
