@@ -2896,6 +2896,14 @@
             <param name="t">The CLR type to register.</param>
             <param name="id">The compact <see cref="T:UltraLiteDB.BsonValue"/> identifier for this type.</param>
         </member>
+        <member name="M:UltraLiteDB.BsonMapper.GetRegisteredTypeById(UltraLiteDB.BsonValue)">
+            <summary>
+            Returns type type registed by a compact type identifier, or null if the id
+            has not been registered
+            </summary>
+            <param name="id">A compact <see cref="T:UltraLiteDB.BsonValue"/> identifier.</param>
+            <returns>The CLR type registered to the id, or null.</returns>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.Entity``1">
             <summary>
             Returns a fluent <see cref="T:UltraLiteDB.EntityBuilder`1"/> for configuring how type <typeparamref name="T"/> maps to a <see cref="T:UltraLiteDB.BsonDocument"/>.
