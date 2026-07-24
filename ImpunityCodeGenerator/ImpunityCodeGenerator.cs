@@ -53,8 +53,15 @@ namespace SourceGenerator
 			  "DistributedTemporalValue", "DistributedTemporalArray", "DistributedTemporalQueue", "DistributedTemporalIntDictionary", "DistributedTemporalStringDictionary" });
 
 
-		public static StringBuilder Output = new StringBuilder();
-		public static StringBuilder Info = new StringBuilder();
+		// IDE compilers (VS / VS Code's Roslyn language server) cache and reuse a single
+		// generator instance across every project that references the analyzer, and may run
+		// Execute concurrently — so all per-run state must be instance-level, reset at the
+		// start of Execute, and guarded by ExecuteLock. (Batch builds hide bugs here: they
+		// spin up a fresh instance per compilation.)
+		private readonly object ExecuteLock = new object();
+
+		public StringBuilder Output = new StringBuilder();
+		public StringBuilder Info = new StringBuilder();
 
 		public List<DistributedClassInfo> DistributedClasses = new List<DistributedClassInfo>();
 		public string? SourceBasePath;
@@ -95,7 +102,7 @@ namespace SourceGenerator
 			}
 		}
 
-		public static void WriteInfo(string line)
+		public void WriteInfo(string line)
 		{
 			Info.AppendLine(line);
 		}
@@ -112,39 +119,42 @@ namespace SourceGenerator
 				return;
 			}
 
-			SourceBasePath = null;
-			Output.Clear();
-			Info.Clear();
-
-			//WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
-
-			foreach (var syntaxTree in context.Compilation.SyntaxTrees)
+			lock (ExecuteLock)
 			{
-				ExamineSyntaxTree(context, syntaxTree);
-				//WriteInfo(syntaxTree.FilePath);
-				//LogNode(syntaxTree.GetRoot(), "");
-			}
+				SourceBasePath = null;
+				DistributedClasses.Clear();
+				Output.Clear();
+				Info.Clear();
 
-			DistributedClasses.Sort((c1, c2) =>
-			{
-				int nameSpace = string.Compare(c1.Namespace, c2.Namespace);
-				if (nameSpace != 0)
+				//WriteInfo("Running codegen 8 against " + context.Compilation.AssemblyName + " at " + DateTime.Now.ToString());
+
+				foreach (var syntaxTree in context.Compilation.SyntaxTrees)
 				{
-					return nameSpace;
+					ExamineSyntaxTree(context, syntaxTree);
+					//WriteInfo(syntaxTree.FilePath);
+					//LogNode(syntaxTree.GetRoot(), "");
 				}
 
-				return string.Compare(c1.ClassName, c2.ClassName);
-			});
+				DistributedClasses.Sort((c1, c2) =>
+				{
+					int nameSpace = string.Compare(c1.Namespace, c2.Namespace);
+					if (nameSpace != 0)
+					{
+						return nameSpace;
+					}
 
-			GenerateDistributedCode();
+					return string.Compare(c1.ClassName, c2.ClassName);
+				});
 
-			//WriteInfo();
+				GenerateDistributedCode();
 
-			if (DistributedClasses.Count > 0)
-			{
-				context.AddSource("ImpunityCode.generated.cs", Output.ToString());
+				//WriteInfo();
+
+				if (DistributedClasses.Count > 0)
+				{
+					context.AddSource("ImpunityCode.generated.cs", Output.ToString());
+				}
 			}
-
 		}
 
 
