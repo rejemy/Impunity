@@ -455,8 +455,10 @@ entity.Unlock((err, released) => { });
 - `TryLock` succeeds if the entity is unlocked or you already hold it; it fails (`false`) if another connection holds it.
 - `WaitForLock` tries to lock and, if another client holds it, **queues you on the server**. When the current holder releases, the lock is handed to the longest-waiting connection and your callback fires with `LockWaitResult.Locked` — you hold it, there is no race to win. No timeout is applied, so a holder that never releases leaves the callback pending; use `RunExclusive` if you need a deadline.
 - `Unlock` releases a lock you hold (`released: false` if you didn't hold it).
-- `IsLocked` reflects whether the entity is currently locked by anyone; `OnLocked`/`OnUnlocked` fire as that state changes (and are kept in sync with the server). `OnUnlocked` fires only when the lock is released with nobody queued — when it is handed straight to a waiter, listeners see `OnLocked` for the new holder instead.
+- `IsLocked` reflects whether the entity is currently locked by anyone; `OnLocked`/`OnUnlocked` fire as that state changes (and are kept in sync with the server). `OnUnlocked` fires only when the lock is released with nobody queued — when it is handed straight to a waiter the entity never becomes free, so listeners see `OnLocked` for the new holder instead. **Don't build a retry loop on `OnUnlocked`** (see below).
 - Locks held by a connection are released automatically when it disconnects, and any queue it was sitting in is left cleanly.
+
+> **`TryLock` polling can starve.** Because the queue is served first, a client that loops on `TryLock` — retrying when it fails, or waking on `OnUnlocked` — is never handed the lock and may never see it free while anyone is queued. `OnUnlocked` will not even fire on a handoff. If you need the lock, get in line: use `WaitForLock` or `RunExclusive`. `TryLock` is for "take it if it happens to be free right now".
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
@@ -486,7 +488,7 @@ timeoutSeconds: 5f);
 What it guarantees:
 
 - **Fair waiting.** If another client is inside its scope, you join the server's queue and are handed the lock in turn — first come, first served.
-- **The handoff guarantee.** Your body is guaranteed to observe every edit the *previous* holder's scope made. This is the reason to prefer `RunExclusive` over hand-rolled lock/unlock: field writes normally only mark dirty bits and are flushed on the next `Update()`, so a hand-written `Set(); Unlock();` puts the unlock on the wire *ahead* of the write and lets the next holder read stale values. `RunExclusive` flushes before it releases.
+- **The handoff guarantee.** Your body is guaranteed to observe every edit the *previous* holder made under the lock. (This one is not exclusive to `RunExclusive`: `Unlock` flushes the entity's pending edits before sending the release, so a hand-rolled `TryLock` / edit / `Unlock` gets the same guarantee. It matters because field writes otherwise only mark dirty bits and are flushed on the next `Update()` — without the flush, the release would reach the server *ahead* of the write and the next holder would read stale values.)
 - **The lock is always released** — when the body returns, and equally when it throws. A thrown exception is reported as `RunExclusiveResult.Failed` with the message in `err`; edits made before the throw are still flushed, since the entity has already been mutated locally.
 - **Your own scopes serialize.** Two `RunExclusive` calls on the same entity from the same connection run one after the other, in call order, never nested.
 
@@ -625,6 +627,7 @@ A few sharp edges to be aware of (these reflect the current implementation and a
 
 - **`IsClientAuthoritative` is not restored from server flags** on entities you *receive* (only `IsPersisted` is). Treat it as reliable only on the connection that created the entity.
 - **The `RunExclusive` handoff guarantee covers guaranteed fields only.** Fields written with `SetUnguaranteed` leave the ordered path for best-effort delivery, so they can arrive after the next holder's body has already run, or not at all. Do not carry state the next holder depends on in an unguaranteed field.
+- **A `TryLock` retry loop can starve under contention.** Waiters queued via `WaitForLock`/`RunExclusive` are served before anyone polling, and a handoff raises `OnLocked` rather than `OnUnlocked`, so a poller watching for the release is not woken at all. Queue instead of polling.
 - **A named lock shares its namespace with channels.** `TryToLock("foo")` when a channel named `foo` exists locks *that channel*, not a separate mutex. Waiting is not offered in that case (the request just fails), because the grant is entity-shaped and a caller waiting on a name has nothing to match it against.
 
 ---

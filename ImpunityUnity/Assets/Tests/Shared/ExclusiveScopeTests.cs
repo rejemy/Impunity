@@ -356,6 +356,75 @@ namespace Impunity.Tests
 			Assert.IsTrue(localRan);
 		}
 
+		/// <summary>
+		/// The handoff guarantee is not exclusive to RunExclusive: a hand-rolled TryLock / edit / Unlock must give
+		/// the next holder the same view, because Unlock flushes pending edits before releasing. Without that flush
+		/// the next holder deterministically reads stale values — the server hands the lock straight over, so
+		/// there is no re-race to give a late update time to land.
+		/// </summary>
+		[Test, Category("Locks")]
+		public async Task ManualUnlock_FlushesEditsBeforeReleasing()
+		{
+			var entities = await SetupClients("manual_handoff", 2);
+			var aEntity = entities[0];
+			var bEntity = entities[1];
+
+			Assert.IsTrue(await Pump(aEntity.TryLockAsync(), AllConnections()), "A should acquire the lock");
+
+			int bObserved = -1;
+			bool bGotLock = false;
+			bEntity.WaitForLock((err, res) =>
+			{
+				bObserved = bEntity.Health.Get();
+				bGotLock = true;
+			});
+
+			await PumpFor(TimeSpan.FromSeconds(0.3), AllConnections());
+			Assert.IsFalse(bGotLock, "B should still be queued while A holds the lock");
+
+			// The hand-rolled exit: write and release in one turn, with no Update() in between.
+			aEntity.Health.Set(7);
+			aEntity.Unlock(null);
+
+			await PumpUntil(() => bGotLock, TimeSpan.FromSeconds(5), AllConnections());
+			Assert.AreEqual(7, bObserved, "The next lock holder did not see the previous holder's edit");
+		}
+
+		/// <summary>
+		/// Documents the cost of the FIFO queue for hand-rolled retry loops: when the lock is handed straight to a
+		/// queued waiter it never becomes free, so listeners see OnLocked for the new holder and NOT OnUnlocked. A
+		/// client polling TryLock on the OnUnlocked signal will not be woken — use WaitForLock or RunExclusive,
+		/// which queue and are served in turn.
+		/// </summary>
+		[Test, Category("Locks")]
+		public async Task Handoff_DoesNotRaiseOnUnlockedForOtherListeners()
+		{
+			var entities = await SetupClients("manual_poller", 3);
+
+			Assert.IsTrue(await Pump(entities[0].TryLockAsync(), AllConnections()), "A should acquire the lock");
+
+			int unlockedEvents = 0;
+			int lockedEvents = 0;
+			entities[2].OnUnlockedEvent += () => unlockedEvents++;
+			entities[2].OnLockedEvent += () => lockedEvents++;
+
+			bool bGotLock = false;
+			entities[1].WaitForLock((err, res) => bGotLock = true);
+			await PumpFor(TimeSpan.FromSeconds(0.3), AllConnections());
+
+			await Pump(entities[0].UnlockAsync(), AllConnections());
+			await PumpUntil(() => bGotLock, TimeSpan.FromSeconds(5), AllConnections());
+
+			Assert.AreEqual(0, unlockedEvents, "A handed-off lock never becomes free, so OnUnlocked must not fire");
+			Assert.AreEqual(1, lockedEvents, "Other listeners should see the new holder take the lock");
+			Assert.IsTrue(entities[2].IsLocked, "The entity is still locked, now by the waiter");
+
+			// And once the last holder releases with nobody queued, OnUnlocked does fire.
+			await Pump(entities[1].UnlockAsync(), AllConnections());
+			await PumpUntil(() => unlockedEvents == 1, TimeSpan.FromSeconds(5), AllConnections());
+			Assert.IsFalse(entities[2].IsLocked);
+		}
+
 		/// <summary>WaitForLock now hands you the lock rather than telling you it is free to race for.</summary>
 		[Test, Category("Locks")]
 		public async Task WaitForLock_GrantsTheLock()

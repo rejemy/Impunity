@@ -770,8 +770,16 @@ namespace Impunity.Connection
 		/// <summary>Releases this connection's exclusive lock on a live entity.</summary>
 		/// <param name="entityId">The entity to unlock.</param>
 		/// <param name="onComplete">Invoked with <c>true</c> if this connection held the lock and it was released, <c>false</c> otherwise.</param>
+		/// <remarks>
+		/// Any changes made to the entity while the lock was held are flushed <em>before</em> the release is sent, so
+		/// the next holder is guaranteed to see them. Without that, a plain <c>Set(); UnlockEntity();</c> would put the
+		/// release on the wire first — field writes only mark dirty bits and are otherwise flushed on the next
+		/// <see cref="Update"/> — and the next holder would read stale values. Fields written with
+		/// <c>SetUnguaranteed</c> are sent unreliably and carry no such ordering.
+		/// </remarks>
 		public void UnlockEntity(uint entityId, ImpunityCallback<bool>? onComplete)
 		{
+			EntityManager.FlushEntityNow(entityId);
 			DoAction(new UnlockEntityAction(entityId, onComplete));
 		}
 

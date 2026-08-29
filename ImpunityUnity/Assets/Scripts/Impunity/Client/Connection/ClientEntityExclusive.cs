@@ -218,17 +218,9 @@ namespace Impunity.Connection
 				return;
 			}
 
-			// Flush before unlocking, so the next holder is guaranteed to see these edits. Even on a failed body:
-			// the entity has already been mutated locally, and leaving that unsent would diverge from the server.
-			try
-			{
-				FlushEntityNow(scope.Entity);
-			}
-			catch (Exception e)
-			{
-				ImpunityLogger.LogError("Exception flushing entity state at end of RunExclusive", e);
-			}
-
+			// UnlockEntity flushes the entity's pending edits before sending the release, so the next holder is
+			// guaranteed to see them. That happens even for a failed body: the entity has already been mutated
+			// locally, and leaving that unsent would diverge from the server.
 			Connection?.UnlockEntity(scope.Entity.DistributedEntityId, (err, released) =>
 			{
 				if (err != null)
@@ -495,6 +487,16 @@ namespace Impunity.Connection
 		/// under it. Fields written with <c>SetUnguaranteed</c> still go out unreliably and carry no such ordering.
 		/// No-op when the entity has nothing pending.</summary>
 		/// <param name="entity">The entity whose pending changes to send.</param>
+		internal void FlushEntityNow(uint entityId)
+		{
+			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);
+			if (entity != null)
+			{
+				FlushEntityNow(entity);
+			}
+		}
+
+		/// <inheritdoc cref="FlushEntityNow(uint)"/>
 		internal void FlushEntityNow(IDistributedEntity entity)
 		{
 			if (Connection == null || entity.DirtyBits == 0)
