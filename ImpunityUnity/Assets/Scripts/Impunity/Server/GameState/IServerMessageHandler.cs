@@ -21,6 +21,8 @@ namespace Impunity.GameState
 		void HandleEntityLocked(uint entityId);
 		/// <summary>Called when an entity lock is released.</summary>
 		void HandleEntityUnlocked(uint entityId);
+		/// <summary>Called when this connection is handed an entity's lock from the server's waiter queue.</summary>
+		void HandleEntityLockGranted(uint entityId);
 		/// <summary>Called when an entity is deleted.</summary>
 		void HandleEntityDelete(uint entityId, BsonValue? deleteData);
 
@@ -28,6 +30,8 @@ namespace Impunity.GameState
 		void HandleBroadcastMessage(int messageType, BsonValue messageBody, string sentBy);
 		/// <summary>Called when a named lock is released.</summary>
 		void HandleNamedLockUnlocked(string lockName);
+		/// <summary>Called when this connection is handed a named lock from the server's waiter queue.</summary>
+		void HandleNamedLockGranted(string lockName);
 	}
 
 }

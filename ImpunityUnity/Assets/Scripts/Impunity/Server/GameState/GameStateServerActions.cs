@@ -19,9 +19,11 @@ namespace Impunity.GameState
 		ENTITY_DELETE_MESSAGE = 104,
 		ENTITY_LOCKED_MESSAGE = 105,
 		ENTITY_UNLOCKED_MESSAGE = 106,
+		ENTITY_LOCK_GRANTED_MESSAGE = 107,
 
 		BROADCAST_MESSAGE = 200,
 		NAMED_LOCK_UNLOCKED_MESSAGE = 201,
+		NAMED_LOCK_GRANTED_MESSAGE = 202,
 	}
 
 
@@ -66,12 +68,16 @@ namespace Impunity.GameState
 					return typeof(EntityLockedMessageAction);
 				case ServerActionType.ENTITY_UNLOCKED_MESSAGE:
 					return typeof(EntityUnlockedMessageAction);
+				case ServerActionType.ENTITY_LOCK_GRANTED_MESSAGE:
+					return typeof(EntityLockGrantedMessageAction);
 
 				case ServerActionType.BROADCAST_MESSAGE:
 					return typeof(BroadcastMessageAction);
 
 				case ServerActionType.NAMED_LOCK_UNLOCKED_MESSAGE:
 					return typeof(NamedLockUnlockedMessageAction);
+				case ServerActionType.NAMED_LOCK_GRANTED_MESSAGE:
+					return typeof(NamedLockGrantedMessageAction);
 			}
 
 			throw new Exception("Action type id with no entry in factory: " + type);
@@ -250,6 +256,38 @@ namespace Impunity.GameState
 		}
 	}
 
+
+	/// <summary>Server push: this connection has been handed an entity's lock from the waiter queue. Sent only to
+	/// the new holder; every other listener sees the ordinary <see cref="EntityLockedMessageAction"/>. Always arrives
+	/// after the previous holder's field updates, which were relayed earlier on the same ordered stream.</summary>
+	public class EntityLockGrantedMessageAction : ServerActionBase
+	{
+		[BsonField("id")]
+		public uint EntityId;
+
+		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_LOCK_GRANTED_MESSAGE; }
+
+		// Called in client main thread
+		public override void DoAction(IServerMessageHandler handler)
+		{
+			handler.HandleEntityLockGranted(EntityId);
+		}
+	}
+
+	/// <summary>Server push: this connection has been handed a named lock from the waiter queue.</summary>
+	public class NamedLockGrantedMessageAction : ServerActionBase
+	{
+		[BsonField("ln")]
+		public string Name = null!;
+
+		public override ushort GetActionType() { return (ushort)ServerActionType.NAMED_LOCK_GRANTED_MESSAGE; }
+
+		// Called in client main thread
+		public override void DoAction(IServerMessageHandler handler)
+		{
+			handler.HandleNamedLockGranted(Name);
+		}
+	}
 
 	/// <summary>Server push: a named lock was released, notifying waiting clients.</summary>
 	public class NamedLockUnlockedMessageAction : ServerActionBase

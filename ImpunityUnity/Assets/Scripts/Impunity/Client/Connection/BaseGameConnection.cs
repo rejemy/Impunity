@@ -15,15 +15,17 @@ namespace Impunity.Connection
 	{
 		/// <summary>The request failed (an error response was returned).</summary>
 		Error,
-		/// <summary>The lock was free and is now held by this connection.</summary>
-		Locked,
 		/// <summary>
-		/// The lock was held by someone else and has since been released, so it is now <em>available</em>.
-		/// NOTE (flagged for review): this signals availability only — it does <em>not</em> re-acquire the lock.
-		/// Call <see cref="BaseGameConnection.TryToLock"/> again to claim it.
+		/// The lock is now held by this connection — either it was free on request, or the server handed it over
+		/// from its waiter queue when the previous holder released it. The waiter queue is first-come-first-served,
+		/// so there is no race to win once you are queued.
 		/// </summary>
+		Locked,
+		/// <summary>The lock was released and nobody was queued for it. Not produced for a caller that was itself
+		/// waiting — such a caller is handed the lock and gets <see cref="Locked"/> instead.</summary>
 		Unlocked,
-		/// <summary>Reserved for a wait that times out. NOTE (flagged for review): no timeout is currently applied, so this value is never produced.</summary>
+		/// <summary>The wait was abandoned before the lock was granted. Only produced by callers that impose a
+		/// deadline, such as <c>RunExclusive</c>.</summary>
 		Timeout
 	}
 	/// <summary>Handler for broadcast messages relayed from other clients.</summary>
@@ -237,6 +239,8 @@ namespace Impunity.Connection
 				}
 			}
 
+			// After the inbound drain, so a lock grant that landed this frame beats its own deadline.
+			EntityManager.TickExclusiveScopes();
 		}
 
 		/// <summary>Closes the connection and releases its resources. Implemented per transport.</summary>
@@ -300,6 +304,12 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
+		public void HandleEntityLockGranted(uint entityId)
+		{
+			EntityManager.HandleEntityLockGranted(entityId);
+		}
+
+		/// <inheritdoc/>
 		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
 		{
 			EntityManager.HandleEntityDelete(entityId, deleteData);
@@ -337,6 +347,29 @@ namespace Impunity.Connection
 			else
 			{
 				ImpunityLogger.LogWarning("Got NamedLock unlock for lock we weren't waiting for: " + lockName);
+			}
+		}
+
+		/// <inheritdoc/>
+		/// <remarks>Completes the pending <see cref="WaitForLock"/> callback for this lock name with
+		/// <see cref="LockWaitResult.Locked"/> — the server handed the lock to this connection, so it is held now.</remarks>
+		public void HandleNamedLockGranted(string lockName)
+		{
+			if (LockWaits.TryGetValue(lockName, out var onComplete))
+			{
+				LockWaits.Remove(lockName);
+				try
+				{
+					onComplete.Invoke(null, LockWaitResult.Locked);
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception in WaitForLock callback", e);
+				}
+			}
+			else
+			{
+				ImpunityLogger.LogWarning("Got NamedLock grant for lock we weren't waiting for: " + lockName);
 			}
 		}
 
@@ -535,16 +568,15 @@ namespace Impunity.Connection
 		/// </summary>
 		/// <param name="lockName">The lock's name.</param>
 		/// <param name="onComplete">
-		/// Invoked with <see cref="LockWaitResult.Locked"/> if acquired now; <see cref="LockWaitResult.Error"/> on failure;
-		/// or, when the lock was busy, later with <see cref="LockWaitResult.Unlocked"/> once it frees.
+		/// Invoked with <see cref="LockWaitResult.Locked"/> once the lock is held by this connection — immediately if it
+		/// was free, or later when the server hands it over from its waiter queue — or
+		/// <see cref="LockWaitResult.Error"/> on failure.
 		/// </param>
 		/// <remarks>
-		/// NOTE (flagged for review): the deferred <see cref="LockWaitResult.Unlocked"/> path signals availability only —
-		/// it does <em>not</em> re-acquire the lock for you; call <see cref="TryToLock"/> again to claim it (another
-		/// client may win the race in between). <see cref="LockWaitResult.Timeout"/> is never produced (no timeout is
-		/// applied), so a lock that never frees leaves the callback pending indefinitely. Only one waiter is tracked per
-		/// lock name per connection: a second <see cref="WaitForLock"/> for the same name before the first resolves
-		/// silently replaces the earlier callback.
+		/// The server's waiter queue is first-come-first-served: once queued you are guaranteed the lock in turn, with
+		/// no re-race against other waiters. No timeout is applied, so a holder that never releases leaves the callback
+		/// pending indefinitely. Only one waiter is tracked per lock name per connection: a second
+		/// <see cref="WaitForLock"/> for the same name before the first resolves silently replaces the earlier callback.
 		/// </remarks>
 		public void WaitForLock(string lockName, ImpunityCallback<LockWaitResult>? onComplete)
 		{
@@ -709,7 +741,30 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Invoked with <c>true</c> if the lock is held by this connection (including if it already held it), <c>false</c> if another connection holds it.</param>
 		public void TryToLockEntity(uint entityId, ImpunityCallback<bool>? onComplete)
 		{
-			DoAction(new LockEntityAction(entityId, onComplete));
+			DoAction(new LockEntityAction(entityId, false, onComplete));
+		}
+
+		/// <summary>Tries to acquire an exclusive lock on a live entity and, optionally, joins the server's waiter queue
+		/// when another connection holds it.</summary>
+		/// <param name="entityId">The entity to lock.</param>
+		/// <param name="waitForUnlock">When true and the lock is held elsewhere, queue for it. The reply is still
+		/// <c>false</c>; the lock arrives later as an entity-lock-granted push, which reaches the entity's
+		/// <c>OnLockGranted</c> handling. The queue is first-come-first-served.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the lock is held by this connection now, <c>false</c> if
+		/// another connection holds it (queued, when <paramref name="waitForUnlock"/> is set).</param>
+		public void TryToLockEntity(uint entityId, bool waitForUnlock, ImpunityCallback<bool>? onComplete)
+		{
+			DoAction(new LockEntityAction(entityId, waitForUnlock, onComplete));
+		}
+
+		/// <summary>Leaves the server's waiter queue for an entity lock.</summary>
+		/// <param name="entityId">The entity whose queue to leave.</param>
+		/// <param name="onComplete">Invoked with <c>true</c> if the wait was cancelled, or <c>false</c> if the lock had
+		/// already been granted to this connection — in which case the caller now holds it and must
+		/// <see cref="UnlockEntity"/>.</param>
+		public void CancelLockWait(uint entityId, ImpunityCallback<bool>? onComplete)
+		{
+			DoAction(new CancelLockWaitAction(entityId, onComplete));
 		}
 
 		/// <summary>Releases this connection's exclusive lock on a live entity.</summary>

@@ -33,6 +33,9 @@ namespace Impunity.GameState
 		public Dictionary<uint, GameStateEntity> EphemeralEntities;
 		/// <summary>Channels this connection is subscribed to, keyed by channel entity ID.</summary>
 		public Dictionary<uint, GameStateChannel> Subscriptions;
+		/// <summary>Ids of entities this connection is queued to lock (see <see cref="GameStateEntity.LockWaiters"/>).
+		/// Kept so <see cref="Cleanup"/> can deregister from every waiter queue without scanning all entities.</summary>
+		public HashSet<uint> WaitingOn;
 
 		/// <summary>The connection's unique ID.</summary>
 		public string Id { get { return ConnectionProxy.ConnectionId; } }
@@ -45,11 +48,22 @@ namespace Impunity.GameState
 			LocksHeld = new Dictionary<uint, GameStateEntity>();
 			EphemeralEntities = new Dictionary<uint, GameStateEntity>();
 			Subscriptions = new Dictionary<uint, GameStateChannel>();
+			WaitingOn = new HashSet<uint>();
 		}
 
 		/// <summary>Releases all locks and cleans up ephemeral entities owned by this replicant. Called on disconnect.</summary>
 		public void Cleanup(GameStateLive live)
 		{
+			// Leave every waiter queue first, so a lock this connection is about to release is never handed
+			// back to this same (now dead) connection.
+			HashSet<uint> waiting = WaitingOn;
+			WaitingOn = null!;
+			foreach (uint entityId in waiting)
+			{
+				live.FindEntity(entityId)?.RemoveLockWaiter(this);
+			}
+			waiting.Clear();
+
 			Dictionary<uint, GameStateEntity> locked = LocksHeld;
 			LocksHeld = null!;
 			foreach (GameStateEntity entity in locked.Values)
@@ -146,6 +160,12 @@ namespace Impunity.GameState
 		public GameStateReplicant? LockHeldBy;
 		public string? LockedWith { get; internal set; }
 
+		/// <summary>Connections queued for this entity's lock, in request order. When the lock is released it is
+		/// handed directly to the head of this queue rather than being thrown open for everyone to re-race, so a
+		/// waiter is guaranteed to receive the previous holder's field updates (relayed earlier on the same ordered
+		/// stream) before it is told it holds the lock. Null when nobody is waiting.</summary>
+		public List<GameStateReplicant>? LockWaiters;
+
 		public GameStateReplicant? EphemeralOwner;
 
 		private IStandardDistributableValueType[] Properties = null!;
@@ -221,12 +241,31 @@ namespace Impunity.GameState
 			return (Flags & ImpunityInstanceFlags.DeleteOnDisconnect) != 0;
 		}
 
+		/// <summary>Claims the lock for <paramref name="lockedBy"/>, or queues them for it.</summary>
+		/// <param name="lockedBy">The connection asking for the lock.</param>
+		/// <param name="waitForUnlock">When the lock is held by someone else, append to <see cref="LockWaiters"/>
+		/// instead of just failing. The caller is later handed the lock via <see cref="NotifyLockGranted"/>.</param>
+		/// <returns>True if this connection now holds the lock (including when it already did).</returns>
 		public virtual bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
 			if (LockedWith != null && LockedWith != lockedBy.ConnectionKey)
 			{
+				if (waitForUnlock)
+				{
+					AddLockWaiter(lockedBy);
+				}
 				return false;
 			}
+
+			// Already ours. Re-locking must not re-register the entity: LocksHeld.Add would throw on the
+			// duplicate key. The holding replicant can still differ from the caller with the same key (a
+			// reconnect, or two LocalGameConnections sharing "local_key"), in which case re-home the lock.
+			if (LockHeldBy == lockedBy)
+			{
+				return true;
+			}
+
+			LockHeldBy?.RemoveLockedEntity(this);
 
 			LockedWith = lockedBy.ConnectionKey;
 			lockedBy.AddLockedEntity(this);
@@ -245,6 +284,8 @@ namespace Impunity.GameState
 			return true;
 		}
 
+		/// <summary>Releases the lock and, if anyone is queued, hands it straight to the longest-waiting connection.
+		/// Only when the queue is empty does the entity actually become unlocked.</summary>
 		protected virtual void Unlock(GameStateReplicant? unlockedBy)
 		{
 			LockedWith = null;
@@ -252,6 +293,101 @@ namespace Impunity.GameState
 			{
 				LockHeldBy.RemoveLockedEntity(this);
 			}
+
+			GameStateReplicant? next = TakeNextLockWaiter();
+			if (next != null)
+			{
+				// Lock() is virtual: subclasses broadcast the "now locked" push to the other listeners.
+				Lock(next, false);
+				NotifyLockGranted(next);
+				return;
+			}
+
+			NotifyUnlocked(unlockedBy);
+		}
+
+		/// <summary>Tells <paramref name="grantedTo"/> that it now holds this entity's lock. Sent only to that one
+		/// connection; the rest of the channel sees the ordinary "locked" push from <see cref="Lock"/>.</summary>
+		protected virtual void NotifyLockGranted(GameStateReplicant grantedTo)
+		{
+			EntityLockGrantedMessageAction grantedMessage = new EntityLockGrantedMessageAction();
+			grantedMessage.EntityId = Id;
+
+			grantedTo.SendMessageViaConnection(grantedMessage);
+		}
+
+		/// <summary>Announces that the lock was released and nobody was queued for it.</summary>
+		protected virtual void NotifyUnlocked(GameStateReplicant? unlockedBy)
+		{
+		}
+
+		private void AddLockWaiter(GameStateReplicant waiter)
+		{
+			LockWaiters ??= new List<GameStateReplicant>();
+
+			if (LockWaiters.Contains(waiter))
+			{
+				return;
+			}
+
+			LockWaiters.Add(waiter);
+			waiter.WaitingOn?.Add(Id);
+		}
+
+		/// <summary>Removes a connection from this entity's waiter queue. Safe to call when it is not queued.</summary>
+		public void RemoveLockWaiter(GameStateReplicant waiter)
+		{
+			LockWaiters?.Remove(waiter);
+			waiter.WaitingOn?.Remove(Id);
+		}
+
+		/// <summary>Takes this connection out of the waiter queue. Returns false if it is too late — the lock was
+		/// already granted to it — in which case the caller now holds the lock and must release it.</summary>
+		public bool CancelLockWait(GameStateReplicant waiter)
+		{
+			if (LockHeldBy == waiter)
+			{
+				return false;
+			}
+
+			RemoveLockWaiter(waiter);
+			return true;
+		}
+
+		private GameStateReplicant? TakeNextLockWaiter()
+		{
+			if (LockWaiters == null || LockWaiters.Count == 0)
+			{
+				return null;
+			}
+
+			GameStateReplicant next = LockWaiters[0];
+			LockWaiters.RemoveAt(0);
+			next.WaitingOn?.Remove(Id);
+
+			if (LockWaiters.Count == 0)
+			{
+				LockWaiters = null;
+			}
+
+			return next;
+		}
+
+		/// <summary>Drops every queued waiter without granting. Used when the entity is going away — waiters learn
+		/// of it from the delete push instead.</summary>
+		protected void ClearLockWaiters()
+		{
+			if (LockWaiters == null)
+			{
+				return;
+			}
+
+			foreach (GameStateReplicant waiter in LockWaiters)
+			{
+				waiter.WaitingOn?.Remove(Id);
+			}
+
+			LockWaiters = null;
 		}
 
 		public bool IsLocked()
@@ -469,6 +605,8 @@ namespace Impunity.GameState
 
 		public void Cleanup()
 		{
+			// Drop waiters before releasing, so a dying entity's lock is never handed to one of them.
+			ClearLockWaiters();
 			Unlock(null);
 			if (EphemeralOwner != null)
 			{
@@ -610,22 +748,25 @@ namespace Impunity.GameState
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
+			bool wasLocked = IsLocked();
+
 			if (base.Lock(lockedBy, waitForUnlock))
 			{
-				EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
-				lockedMessage.EntityId = Id;
+				if (!wasLocked)
+				{
+					EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
+					lockedMessage.EntityId = Id;
 
-				SendToListeners(lockedMessage, lockedBy);
+					SendToListeners(lockedMessage, lockedBy);
+				}
 
 				return true;
 			}
 			return false;
 		}
 
-		protected override void Unlock(GameStateReplicant? unlockedBy)
+		protected override void NotifyUnlocked(GameStateReplicant? unlockedBy)
 		{
-			base.Unlock(unlockedBy);
-
 			EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
 			unlockedMessage.EntityId = Id;
 
@@ -858,9 +999,11 @@ namespace Impunity.GameState
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
 		{
+			bool wasLocked = IsLocked();
+
 			if (base.Lock(lockedBy, waitForUnlock))
 			{
-				if (Channel != null)
+				if (!wasLocked && Channel != null)
 				{
 					EntityLockedMessageAction lockedMessage = new EntityLockedMessageAction();
 					lockedMessage.EntityId = Id;
@@ -873,10 +1016,8 @@ namespace Impunity.GameState
 			return false;
 		}
 
-		protected override void Unlock(GameStateReplicant? unlockedBy)
+		protected override void NotifyUnlocked(GameStateReplicant? unlockedBy)
 		{
-			base.Unlock(unlockedBy);
-
 			if (Channel != null)
 			{
 				EntityUnlockedMessageAction unlockedMessage = new EntityUnlockedMessageAction();
@@ -909,45 +1050,19 @@ namespace Impunity.GameState
 	{
 		public override string ChannelName { get { return Name!; } }
 
-		public List<GameStateReplicant>? LockAwaitedBy;
-
 		public GameStateNamedLock(GameStateLive liveData, string name) : base(liveData, null, 0, name) { }
 
-		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
+		protected override void NotifyLockGranted(GameStateReplicant grantedTo)
 		{
-			if (!base.Lock(lockedBy, waitForUnlock))
-			{
-				if (waitForUnlock)
-				{
-					if (LockAwaitedBy == null)
-					{
-						LockAwaitedBy = new List<GameStateReplicant>();
-					}
-					LockAwaitedBy.Add(lockedBy);
-				}
+			// The placeholder is ephemeral state belonging to whoever holds the lock. Hand ownership over with
+			// the lock, so it is still cleaned up if the new holder disconnects without unlocking.
+			EphemeralOwner?.RemoveEphemeralEntity(this);
+			grantedTo.AddEphemeralEntity(this);
 
-				return false;
-			}
+			NamedLockGrantedMessageAction grantedAction = new NamedLockGrantedMessageAction();
+			grantedAction.Name = Name!;
 
-			return true;
-		}
-
-		protected override void Unlock(GameStateReplicant? unlockedBy)
-		{
-			base.Unlock(unlockedBy);
-
-			if (LockAwaitedBy != null)
-			{
-				NamedLockUnlockedMessageAction unlockedAction = new NamedLockUnlockedMessageAction();
-				unlockedAction.Name = Name!;
-
-				foreach (var replica in LockAwaitedBy)
-				{
-					replica.SendMessageViaConnection(unlockedAction);
-				}
-
-				LockAwaitedBy = null;
-			}
+			grantedTo.SendMessageViaConnection(grantedAction);
 		}
 	}
 
@@ -1553,7 +1668,14 @@ namespace Impunity.GameState
 			return true;
 		}
 
-		public bool LockEntity(GameStateReplicant origin, uint entityId)
+		/// <summary>Looks up a live entity by id, or null when there is none. Used by <see cref="GameStateReplicant"/>
+		/// to leave the waiter queues it is registered on during cleanup.</summary>
+		internal GameStateEntity? FindEntity(uint entityId)
+		{
+			return AllEntities.GetValueOrDefault(entityId);
+		}
+
+		public bool LockEntity(GameStateReplicant origin, uint entityId, bool waitForUnlock = false)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1561,13 +1683,28 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			if (!entity.Lock(origin, false))
+			if (!entity.Lock(origin, waitForUnlock))
 			{
-				// Already locked
+				// Already locked. When waitForUnlock was set the caller is now queued and will be handed the
+				// lock via an EntityLockGranted push once the current holder releases it.
 				return false;
 			}
 
 			return true;
+		}
+
+		/// <summary>Removes a connection from an entity's lock waiter queue. Returns false when the lock was already
+		/// granted to it, meaning the caller holds the lock and must release it.</summary>
+		public bool CancelLockWait(GameStateReplicant origin, uint entityId)
+		{
+			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
+			if (entity == null)
+			{
+				// Entity went away; nothing left to wait on and nothing left to hold.
+				return true;
+			}
+
+			return entity.CancelLockWait(origin);
 		}
 
 		public bool UnlockEntity(GameStateReplicant origin, uint entityId)
@@ -1592,7 +1729,11 @@ namespace Impunity.GameState
 				origin.AddEphemeralEntity(entity);
 			}
 
-			bool locked = entity.Lock(origin, waitForUnlock);
+			// Named locks share the NamedEntities namespace with channels, so `name` can resolve to a channel or a
+			// persisted object rather than a lock placeholder. Only queue on a real named lock: the waiter queue
+			// grants via NotifyLockGranted, and a channel would push an entity-shaped grant that a caller waiting
+			// on a *name* has no way to match. For a collision this keeps the old behavior — fail, do not queue.
+			bool locked = entity.Lock(origin, waitForUnlock && entity is GameStateNamedLock);
 
 			return locked;
 		}
@@ -1608,7 +1749,10 @@ namespace Impunity.GameState
 			bool unlocked = entity.TryUnlock(origin);
 			if (unlocked)
 			{
-				if (entity is GameStateNamedLock)
+				// Still locked means the release handed it straight to a queued waiter, so the placeholder is
+				// still in use — its ephemeral ownership moved to the new holder. Only tear it down when the
+				// lock is genuinely free.
+				if (entity is GameStateNamedLock && !entity.IsLocked())
 				{
 					DestroyEntity(entity, null);
 				}

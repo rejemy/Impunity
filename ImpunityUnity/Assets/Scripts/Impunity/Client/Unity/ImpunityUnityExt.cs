@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 
 using UnityEngine;
@@ -388,6 +389,77 @@ namespace Impunity.Unity
 			var t = new ImpunityYield<bool>();
 			entity.Unlock(t.OnComplete);
 			return t;
+		}
+
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.RunExclusive"/> with a synchronous body: yield
+		/// until the lock has been acquired, the body has run and the lock has been released. Check the yield's
+		/// <see cref="ImpunityYield{T}.Value"/> for the outcome.</summary>
+		/// <param name="entity">The entity to hold the lock on.</param>
+		/// <param name="body">The logic to run under the lock.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock; negative uses the manager's default, zero does
+		/// not wait.</param>
+		public static ImpunityYield<RunExclusiveResult> RunExclusiveYield(this IDistributedEntity entity, Action body, float timeoutSeconds = -1f)
+		{
+			var t = new ImpunityYield<RunExclusiveResult>();
+			entity.RunExclusive(body, t.OnComplete, timeoutSeconds);
+			return t;
+		}
+
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.RunExclusive"/> with a coroutine body, for work
+		/// that has to span frames. The lock is held for the whole of <paramref name="body"/>, so keep it short —
+		/// other clients sit in the server's waiter queue meanwhile.</summary>
+		/// <param name="entity">The entity to hold the lock on.</param>
+		/// <param name="host">The behaviour that runs the body coroutine. It must stay alive and enabled for the
+		/// duration of the scope; if it is destroyed mid-body the lock is only released when the connection drops.</param>
+		/// <param name="body">The coroutine to run under the lock. Started once the lock is held and run to completion
+		/// before the lock is released.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock; negative uses the manager's default, zero does
+		/// not wait. The body's own running time is never counted.</param>
+		public static ImpunityYield<RunExclusiveResult> RunExclusiveYield(this IDistributedEntity entity, MonoBehaviour host, Func<IEnumerator> body, float timeoutSeconds = -1f)
+		{
+			var t = new ImpunityYield<RunExclusiveResult>();
+
+			entity.Manager.RunExclusiveDeferred(entity, finish =>
+			{
+				try
+				{
+					host.StartCoroutine(RunBodyThenFinish(body(), finish));
+				}
+				catch (Exception e)
+				{
+					// The body factory threw, or the host is inactive/destroyed so the coroutine cannot start.
+					finish(e);
+				}
+			}, t.OnComplete, timeoutSeconds);
+
+			return t;
+		}
+
+		private static IEnumerator RunBodyThenFinish(IEnumerator body, Action<Exception?> finish)
+		{
+			// Unity coroutines cannot yield from inside a try/catch with a catch clause, so the body is driven by
+			// hand: each MoveNext is guarded, and whatever it yields is passed straight through to the scheduler.
+			while (true)
+			{
+				object current;
+				try
+				{
+					if (!body.MoveNext())
+					{
+						break;
+					}
+					current = body.Current;
+				}
+				catch (Exception e)
+				{
+					finish(e);
+					yield break;
+				}
+
+				yield return current;
+			}
+
+			finish(null);
 		}
 
 	}

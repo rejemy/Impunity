@@ -453,14 +453,56 @@ entity.Unlock((err, released) => { });
 ```
 
 - `TryLock` succeeds if the entity is unlocked or you already hold it; it fails (`false`) if another connection holds it.
-- `WaitForLock` tries to lock and, if another client holds it, defers your callback until the lock is released — then fires with `LockWaitResult.Unlocked`. **That result signals availability only; it does not re-acquire the lock for you.** Call `TryLock` again to claim it. *(See [§14](#14-known-caveats).)*
+- `WaitForLock` tries to lock and, if another client holds it, **queues you on the server**. When the current holder releases, the lock is handed to the longest-waiting connection and your callback fires with `LockWaitResult.Locked` — you hold it, there is no race to win. No timeout is applied, so a holder that never releases leaves the callback pending; use `RunExclusive` if you need a deadline.
 - `Unlock` releases a lock you hold (`released: false` if you didn't hold it).
-- `IsLocked` reflects whether the entity is currently locked by anyone; `OnLocked`/`OnUnlocked` fire as that state changes (and are kept in sync with the server).
-- Locks held by a connection are released automatically when it disconnects.
+- `IsLocked` reflects whether the entity is currently locked by anyone; `OnLocked`/`OnUnlocked` fire as that state changes (and are kept in sync with the server). `OnUnlocked` fires only when the lock is released with nobody queued — when it is handed straight to a waiter, listeners see `OnLocked` for the new holder instead.
+- Locks held by a connection are released automatically when it disconnects, and any queue it was sitting in is left cleanly.
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
 A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§12](#12-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.)
+
+### `RunExclusive` — the scoped form
+
+Taking a lock by hand means getting several things right: waiting for it, releasing it on every exit path including exceptions, and — the subtle one — making sure the edits you made under the lock actually reach the next holder before it starts. `RunExclusive` does all of that.
+
+```csharp
+chest.RunExclusive(() =>
+{
+    // Runs only while we hold the lock. No other client can be inside its own
+    // scope on this entity at the same time.
+    chest.Gold.Set(chest.Gold.Get() - 10);
+    chest.Contents.Add("torch");
+},
+(err, result) =>
+{
+    if (result == RunExclusiveResult.Ran)      { /* the logic ran, lock released */ }
+    else if (result == RunExclusiveResult.TimedOut) { /* never got the lock; nothing ran */ }
+    else                                       { /* Failed — err says why */ }
+},
+timeoutSeconds: 5f);
+```
+
+What it guarantees:
+
+- **Fair waiting.** If another client is inside its scope, you join the server's queue and are handed the lock in turn — first come, first served.
+- **The handoff guarantee.** Your body is guaranteed to observe every edit the *previous* holder's scope made. This is the reason to prefer `RunExclusive` over hand-rolled lock/unlock: field writes normally only mark dirty bits and are flushed on the next `Update()`, so a hand-written `Set(); Unlock();` puts the unlock on the wire *ahead* of the write and lets the next holder read stale values. `RunExclusive` flushes before it releases.
+- **The lock is always released** — when the body returns, and equally when it throws. A thrown exception is reported as `RunExclusiveResult.Failed` with the message in `err`; edits made before the throw are still flushed, since the entity has already been mutated locally.
+- **Your own scopes serialize.** Two `RunExclusive` calls on the same entity from the same connection run one after the other, in call order, never nested.
+
+The timeout covers **acquiring** the lock only — the body's own running time is never counted against it. A negative value (the default) uses `ClientEntityManager.DefaultExclusiveTimeoutSeconds` (10s); `0` means "only if the lock is free right now".
+
+`RunExclusiveAsync` and `RunExclusiveYield` also accept a body that spans frames — `Func<Task>` and, in Unity, `Func<IEnumerator>` with a host `MonoBehaviour` to run it on. The lock is held for the whole body, so keep it short: everyone else is sitting in the queue.
+
+```csharp
+var result = await chest.RunExclusiveAsync(async () =>
+{
+    var doc = await conn.FindDocumentAsync(Collections.LOOT, chest.LootId.Get());
+    chest.Contents.Add(doc["item"].AsString);
+}, timeoutSeconds: 5f);
+```
+
+Not covered: fields written with `SetUnguaranteed`. Those are sent unreliably, outside the ordered path the guarantee rests on, so they may reach the next holder late or not at all. That is by design — they exist for lossy client-authoritative movement data.
 
 ---
 
@@ -582,7 +624,8 @@ Call `connection.Update()` every frame. It dispatches inbound messages (firing y
 A few sharp edges to be aware of (these reflect the current implementation and are candidates for cleanup):
 
 - **`IsClientAuthoritative` is not restored from server flags** on entities you *receive* (only `IsPersisted` is). Treat it as reliable only on the connection that created the entity.
-- **`WaitForLock` does not re-acquire.** Its deferred `Unlocked` result means "the lock became free," not "you now hold it" — call `TryLock` again. `LockWaitResult.Timeout` is defined but not currently produced (no timeout is applied).
+- **The `RunExclusive` handoff guarantee covers guaranteed fields only.** Fields written with `SetUnguaranteed` leave the ordered path for best-effort delivery, so they can arrive after the next holder's body has already run, or not at all. Do not carry state the next holder depends on in an unguaranteed field.
+- **A named lock shares its namespace with channels.** `TryToLock("foo")` when a channel named `foo` exists locks *that channel*, not a separate mutex. Waiting is not offered in that case (the request just fails), because the grant is entity-shaped and a caller waiting on a name has nothing to match it against.
 
 ---
 

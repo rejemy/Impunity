@@ -158,20 +158,41 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
 		/// <c>false</c> if another client holds it; the error argument is non-null on failure. May be null.</param>
 		void TryLock(ImpunityCallback<bool> onComplete);
-		/// <summary>Attempts to acquire the exclusive lock and, if it is currently held by another client, waits for it
-		/// to become available. The callback fires with <see cref="LockWaitResult.Locked"/> if the lock is granted
-		/// immediately, <see cref="LockWaitResult.Error"/> on failure, or — if another client holds it — with
-		/// <see cref="LockWaitResult.Unlocked"/> once that client releases the lock. All current waiters are notified on
-		/// release. NOTE: the deferred <see cref="LockWaitResult.Unlocked"/> result signals availability only and does
-		/// NOT re-acquire the lock; call <see cref="TryLock"/> again to claim it. <see cref="LockWaitResult.Timeout"/> is
-		/// never produced by the current implementation (no timeout is applied) — flagged for review.</summary>
+		/// <summary>Acquires the exclusive lock, queueing for it on the server when another client holds it. The
+		/// callback fires with <see cref="LockWaitResult.Locked"/> once the lock is held — immediately if it was free,
+		/// or later when the server hands it over — or <see cref="LockWaitResult.Error"/> on failure. The queue is
+		/// first-come-first-served, so there is no race to win once queued, and no timeout is applied: use
+		/// <see cref="RunExclusive"/> if you need one.</summary>
 		/// <param name="onComplete">Receives the <see cref="LockWaitResult"/> and any error. May be null.</param>
 		void WaitForLock(ImpunityCallback<LockWaitResult> onComplete);
 		/// <summary>Releases the exclusive lock this client holds on the entity. On success all subscribers receive
-		/// <see cref="OnUnlocked"/>.</summary>
+		/// <see cref="OnUnlocked"/>, unless the lock was handed straight to a queued waiter.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was released, <c>false</c> if this client did not
 		/// hold the lock; the error argument is non-null on failure. May be null.</param>
 		void Unlock(ImpunityCallback<bool> onComplete);
+		/// <summary>
+		/// Acquires this entity's exclusive lock, runs <paramref name="body"/> while holding it, then flushes the
+		/// edits it made and releases the lock — the safe way to do a read-modify-write that must not interleave with
+		/// other clients.
+		/// </summary>
+		/// <remarks>
+		/// <para>Waiting is first-come-first-served: if another client holds the lock, this call queues on the server
+		/// and is handed the lock in turn, with no race against other waiters.</para>
+		/// <para>Handoff guarantee: the body is guaranteed to observe every guaranteed-field edit made by the previous
+		/// holder's scope. Fields written with <c>SetUnguaranteed</c> are <em>not</em> covered — they are sent
+		/// unreliably and may arrive after this body has run, or not at all.</para>
+		/// <para>The lock is released even if <paramref name="body"/> throws; the exception is reported as
+		/// <see cref="RunExclusiveResult.Failed"/> and any edits made before it threw are still flushed.</para>
+		/// <para>Scopes from this client on the same entity run one at a time, in call order.</para>
+		/// </remarks>
+		/// <param name="body">The logic to run under the lock, on the main thread.</param>
+		/// <param name="onComplete">Receives <see cref="RunExclusiveResult.Ran"/> if the body ran,
+		/// <see cref="RunExclusiveResult.TimedOut"/> if the lock never became available, or
+		/// <see cref="RunExclusiveResult.Failed"/> with an error. May be null.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock — the body's own running time is never counted.
+		/// Negative (the default) uses <see cref="ClientEntityManager.DefaultExclusiveTimeoutSeconds"/>; zero fails
+		/// immediately when the lock is held by someone else.</param>
+		void RunExclusive(Action body, ImpunityCallback<RunExclusiveResult>? onComplete, float timeoutSeconds = -1f);
 
 		// Distributed events server->client
 		/// <summary>Called once the entity has been created locally and its initial property values from the server
@@ -203,9 +224,9 @@ namespace Impunity.Connection
 		/// <summary>Raised by <see cref="OnLocked"/> when the entity becomes locked.</summary>
 		event Action? OnLockedEvent;
 
-		/// <summary>Called when the entity's lock is released on the server. <see cref="IsLocked"/> is set false before
-		/// this fires, and any pending <see cref="WaitForLock"/> callbacks are then completed with
-		/// <see cref="LockWaitResult.Unlocked"/>.</summary>
+		/// <summary>Called when the entity's lock is released on the server and nobody was queued for it.
+		/// <see cref="IsLocked"/> is set false before this fires. When the lock is instead handed to a queued waiter,
+		/// listeners see <see cref="OnLocked"/> for the new holder rather than this.</summary>
 		void OnUnlocked();
 		/// <summary>Raised by <see cref="OnUnlocked"/> when the entity's lock is released.</summary>
 		event Action? OnUnlockedEvent;
@@ -299,10 +320,6 @@ namespace Impunity.Connection
 		/// and seeded from the server's lock state when the entity is first received. While an entity is locked by
 		/// another client the server rejects this client's property updates and delete requests.</summary>
 		public bool IsLocked { get; set; }
-		/// <summary>Pending callbacks registered by <see cref="WaitForLock"/> while the lock was held by another client;
-		/// completed with <see cref="LockWaitResult.Unlocked"/> in <see cref="OnUnlocked"/>.</summary>
-		private event ImpunityCallback<LockWaitResult>? LockWaiter;
-
 		/// <summary>The <see cref="ClientEntityManager"/> that owns this entity. Assigned when the entity is registered;
 		/// entity operations (events, delete, lock/unlock) are routed through its connection.</summary>
 		public ClientEntityManager Manager { get; set; } = default!;
@@ -402,31 +419,42 @@ namespace Impunity.Connection
 			Manager.Connection?.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
-		/// <summary>Attempts to acquire the exclusive lock and, if it is currently held by another client, waits for it
-		/// to become available. The callback fires with <see cref="LockWaitResult.Locked"/> if the lock is granted
-		/// immediately, <see cref="LockWaitResult.Error"/> on failure, or — if another client holds it — with
-		/// <see cref="LockWaitResult.Unlocked"/> once that client releases the lock. All current waiters are notified on
-		/// release. NOTE: the deferred <see cref="LockWaitResult.Unlocked"/> result signals availability only and does
-		/// NOT re-acquire the lock; call <see cref="TryLock"/> again to claim it. <see cref="LockWaitResult.Timeout"/> is
-		/// never produced by the current implementation (no timeout is applied) — flagged for review.</summary>
+		/// <summary>Acquires the exclusive lock, queueing for it on the server when another client holds it. The
+		/// callback fires with <see cref="LockWaitResult.Locked"/> once the lock is held — immediately if it was free,
+		/// or later when the server hands it over — or <see cref="LockWaitResult.Error"/> on failure. The queue is
+		/// first-come-first-served, so there is no race to win once queued, and no timeout is applied: use
+		/// <see cref="RunExclusive"/> if you need one.</summary>
 		/// <param name="onComplete">Receives the <see cref="LockWaitResult"/> and any error. May be null.</param>
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
 		{
-			Manager.Connection?.TryToLockEntity(DistributedEntityId, (err, lockResult) =>
-			{
-				if (err != null)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Error);
-				}
-				else if (lockResult)
-				{
-					onComplete?.Invoke(err, LockWaitResult.Locked);
-				}
-				else
-				{
-					LockWaiter += onComplete;
-				}
-			});
+			Manager.WaitForEntityLock(this, onComplete);
+		}
+
+		/// <summary>
+		/// Acquires this entity's exclusive lock, runs <paramref name="body"/> while holding it, then flushes the
+		/// edits it made and releases the lock — the safe way to do a read-modify-write that must not interleave with
+		/// other clients.
+		/// </summary>
+		/// <remarks>
+		/// <para>Waiting is first-come-first-served: if another client holds the lock, this call queues on the server
+		/// and is handed the lock in turn, with no race against other waiters.</para>
+		/// <para>Handoff guarantee: the body is guaranteed to observe every guaranteed-field edit made by the previous
+		/// holder's scope. Fields written with <c>SetUnguaranteed</c> are <em>not</em> covered — they are sent
+		/// unreliably and may arrive after this body has run, or not at all.</para>
+		/// <para>The lock is released even if <paramref name="body"/> throws; the exception is reported as
+		/// <see cref="RunExclusiveResult.Failed"/> and any edits made before it threw are still flushed.</para>
+		/// <para>Scopes from this client on the same entity run one at a time, in call order.</para>
+		/// </remarks>
+		/// <param name="body">The logic to run under the lock, on the main thread.</param>
+		/// <param name="onComplete">Receives <see cref="RunExclusiveResult.Ran"/> if the body ran,
+		/// <see cref="RunExclusiveResult.TimedOut"/> if the lock never became available, or
+		/// <see cref="RunExclusiveResult.Failed"/> with an error. May be null.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock — the body's own running time is never counted.
+		/// Negative (the default) uses <see cref="ClientEntityManager.DefaultExclusiveTimeoutSeconds"/>; zero fails
+		/// immediately when the lock is held by someone else.</param>
+		public void RunExclusive(Action body, ImpunityCallback<RunExclusiveResult>? onComplete, float timeoutSeconds = -1f)
+		{
+			Manager.RunExclusive(this, body, onComplete, timeoutSeconds);
 		}
 
 
@@ -448,9 +476,9 @@ namespace Impunity.Connection
 		/// <summary>Raised by <see cref="OnLocked"/> when the entity becomes locked.</summary>
 		public event Action? OnLockedEvent;
 
-		/// <summary>Called when the entity's lock is released on the server. <see cref="IsLocked"/> is set false before
-		/// this fires, and any pending <see cref="WaitForLock"/> callbacks are then completed with
-		/// <see cref="LockWaitResult.Unlocked"/>.</summary>
+		/// <summary>Called when the entity's lock is released on the server and nobody was queued for it.
+		/// <see cref="IsLocked"/> is set false before this fires. When the lock is instead handed to a queued waiter,
+		/// listeners see <see cref="OnLocked"/> for the new holder rather than this.</summary>
 		public virtual void OnUnlocked()
 		{
 			try
@@ -462,15 +490,6 @@ namespace Impunity.Connection
 				ImpunityLogger.LogError("Exception in OnUnlockedEvent:", ex);
 			}
 
-			try
-			{
-				LockWaiter?.Invoke(null, LockWaitResult.Unlocked);
-			}
-			catch (Exception ex)
-			{
-				ImpunityLogger.LogError("Exception in entity WaitForLock callback handler:", ex);
-			}
-			LockWaiter = null;
 		}
 		/// <summary>Raised by <see cref="OnUnlocked"/> when the entity's lock is released.</summary>
 		public event Action? OnUnlockedEvent;

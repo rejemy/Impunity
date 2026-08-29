@@ -588,9 +588,11 @@ public class ImpunityTestComponent : MonoBehaviour
 
 		await Task.Delay(20);
 
+		// The server queues c2 and hands it the lock when c1 releases, so the deferred result is Locked
+		// ("you hold it now"), not Unlocked ("it's free, race for it").
 		c2.WaitForLock("waitLock", (err, lockResult) =>
 		{
-			if (lockResult != LockWaitResult.Unlocked)
+			if (lockResult != LockWaitResult.Locked)
 			{
 				ImpunityLogger.LogError("Got incorrect wait lock result " + lockResult.ToString());
 			}

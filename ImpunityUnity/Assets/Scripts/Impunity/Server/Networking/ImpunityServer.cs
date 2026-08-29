@@ -203,23 +203,27 @@ namespace Impunity.Networking
 			}
 
 			// Don't send on server thread, queue for send on network writer thread
-			NetworkServer.QueueNetworkAction(action);
+			NetworkServer.QueueNetworkAction(this, action);
 		}
 
 		/// <summary>Queues a server-originated message to be sent to the client. Called on the game server thread.</summary>
+		/// <remarks>
+		/// The recipient is carried alongside the action in the write queue rather than stamped onto the action, because
+		/// a single <see cref="ServerActionBase"/> instance is broadcast to every listener of a channel (see
+		/// <c>GameStateChannel.SendToListeners</c>). Mutating shared state on the action here would be read back later,
+		/// on the writer thread, after the next listener had already overwritten it.
+		/// </remarks>
 		public void SendMessageToClient(ServerActionBase message)
 		{
 			// Don't send on server thread, queue for send on network writer thread
-			message.Origin = this;
-			NetworkServer.QueueNetworkAction(message);
+			NetworkServer.QueueNetworkAction(this, message);
 		}
 
 		/// <summary>Requests the connection be closed by queuing a <see cref="CloseClientConnectionAction"/> to the network writer thread.</summary>
 		public void CloseConnectionRequest()
 		{
 			CloseClientConnectionAction action = new CloseClientConnectionAction();
-			action.Origin = this;
-			NetworkServer.QueueNetworkAction(action);
+			NetworkServer.QueueNetworkAction(this, action);
 		}
 
 		// Called on socket thread
@@ -253,6 +257,21 @@ namespace Impunity.Networking
 		}
 	}
 
+	/// <summary>One queued outbound write: the action to send and the connection to send it to. The recipient is kept
+	/// here rather than on the action because one action instance is broadcast to many listeners, and the writer thread
+	/// reads the queue entry long after the game server thread enqueued it.</summary>
+	internal readonly struct PendingSend
+	{
+		public readonly ServerSideNetworkConnectionProxy Target;
+		public readonly GameStateActionBase Action;
+
+		public PendingSend(ServerSideNetworkConnectionProxy target, GameStateActionBase action)
+		{
+			Target = target;
+			Action = action;
+		}
+	}
+
 	/// <summary>Top-level server that manages TCP connections, routes messages between clients and game state servers, and handles the network writer thread for outbound messages.</summary>
 	public class ImpunityServer : IDisposable, IGameStateListener
 	{
@@ -263,7 +282,7 @@ namespace Impunity.Networking
 		Dictionary<string, GameStateServer> GameServers;
 		ConcurrentDictionary<string, ServerSideNetworkConnectionProxy> ClientsByConnectionId;
 
-		BlockingCollection<GameStateActionBase> PendingWrite;
+		BlockingCollection<PendingSend> PendingWrite;
 
 		Thread? NetworkWriterThread;
 		bool Running;
@@ -288,7 +307,7 @@ namespace Impunity.Networking
 			TCPServer = new ImpunityTCPServer(Options);
 			TCPServer.OnClientConnected = ClientConnected;
 
-			PendingWrite = new BlockingCollection<GameStateActionBase>();
+			PendingWrite = new BlockingCollection<PendingSend>();
 
 			foreach (GameStateServer game in gameStates)
 			{
@@ -358,11 +377,11 @@ namespace Impunity.Networking
 		{
 			while (Running)
 			{
-				GameStateActionBase action;
+				PendingSend send;
 
 				try
 				{
-					action = PendingWrite.Take();
+					send = PendingWrite.Take();
 				}
 				catch (InvalidOperationException)
 				{
@@ -372,7 +391,7 @@ namespace Impunity.Networking
 
 				try
 				{
-					SendActionResults(action);
+					SendActionResults(send);
 				}
 				catch (Exception e)
 				{
@@ -384,9 +403,10 @@ namespace Impunity.Networking
 			PendingWrite.Dispose();
 		}
 
-		private void SendActionResults(GameStateActionBase action)
+		private void SendActionResults(PendingSend send)
 		{
-			ServerSideNetworkConnectionProxy clientInfo = (ServerSideNetworkConnectionProxy)action.Origin;
+			ServerSideNetworkConnectionProxy clientInfo = send.Target;
+			GameStateActionBase action = send.Action;
 
 			if (action is CloseClientConnectionAction)
 			{
@@ -427,9 +447,9 @@ namespace Impunity.Networking
 		}
 
 		// called on game server thread
-		internal void QueueNetworkAction(GameStateActionBase action)
+		internal void QueueNetworkAction(ServerSideNetworkConnectionProxy target, GameStateActionBase action)
 		{
-			PendingWrite.Add(action);
+			PendingWrite.Add(new PendingSend(target, action));
 		}
 
 

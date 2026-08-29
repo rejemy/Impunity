@@ -257,13 +257,13 @@ conn.Unlock("boss-spawn", (err, released) => { });
 ```
 
 - `TryToLock` is non-blocking: `true` if you now hold the lock, `false` if another connection does.
-- `WaitForLock` tries to take it and, if it's busy, **defers** your callback until the lock is released, then fires with `LockWaitResult.Unlocked`.
-- `Unlock` releases a lock you hold (`false` if you didn't hold it).
-- A connection's named locks are **released automatically when it disconnects** (they're tracked as ephemeral, per-connection state — the same mechanism that backs delete-on-disconnect entities).
+- `WaitForLock` tries to take it and, if it's busy, **queues you on the server**. When the holder releases, the lock is handed to the longest-waiting connection and your callback fires with `LockWaitResult.Locked` — you hold it at that point, with no race against the other waiters.
+- `Unlock` releases a lock you hold (`false` if you didn't hold it). If someone is queued, the lock passes straight to them rather than becoming free.
+- A connection's named locks are **released automatically when it disconnects**, and a connection that disconnects while queued is removed from the queue. (Locks are tracked as ephemeral, per-connection state — the same mechanism that backs delete-on-disconnect entities. When a held lock is handed to a waiter, that ownership moves with it.)
 
-> **`WaitForLock` signals availability, it does not re-acquire.** When the lock frees, *every* waiter is notified at once and the wait list is cleared, so `Unlocked` means "it's free, race for it" — call `TryToLock` again to actually claim it (someone else may win). There is no timeout. See [§13](#13-known-caveats).
+> **There is no timeout on `WaitForLock`.** A holder that never releases leaves your callback pending indefinitely. Only one waiter per lock name per connection is tracked: a second `WaitForLock` for the same name before the first resolves silently replaces the earlier callback.
 
-For locking a specific **live entity** (so the server rejects others' updates and deletes to it) use the entity lock API instead — `entity.TryLock` / `entity.Unlock`, covered in [`DistributedEntities.md`](DistributedEntities.md) §10.
+For locking a specific **live entity** (so the server rejects others' updates and deletes to it) use the entity lock API instead — `entity.TryLock` / `entity.Unlock`, or the scoped `entity.RunExclusive`, covered in [`DistributedEntities.md`](DistributedEntities.md) §10. Entity locks have no scoped equivalent for named locks: `RunExclusive` exists only on entities.
 
 ---
 
@@ -371,8 +371,8 @@ A few sharp edges in the current implementation (candidates for cleanup; the XML
 
 - **`GameStateDBCollection<T>.FindDocumentById` doesn't guard the not-found/error case** the way `ListDocuments` does — it maps the (possibly null) result unconditionally. Check `err` first and treat a null/default result as "not found".
 - **A clean, server-initiated disconnect is invisible to application code.** Only socket *errors* raise `OnNetworkError`; a graceful close is merely logged (and its reason code is always 0). Don't rely on a callback to learn the server hung up gracefully.
-- **`WaitForLock` does not re-acquire.** Its deferred `Unlocked` result means "the lock is free," not "you now hold it" — call `TryToLock` again. `LockWaitResult.Timeout` is defined but never produced (no timeout is applied), so a lock that never frees leaves the callback pending. Only one waiter per lock name per connection is tracked; a second `WaitForLock` for the same name replaces the first.
-- **Reply matching is positional.** Replies are paired to requests in send order with no per-message id. This is correct over TCP, but if an action is timed out and dropped while its reply is still in flight, that late reply is matched to the next waiting action.
+- **`WaitForLock` has no timeout.** A lock that never frees leaves the callback pending indefinitely, and there is no way to cancel a named-lock wait. Only one waiter per lock name per connection is tracked; a second `WaitForLock` for the same name replaces the first.
+- **Named locks share the `NamedEntities` namespace with channels.** A lock name that matches an existing channel locks *that channel* — broadcasting lock/unlock pushes to its subscribers and blocking their updates and deletes. Waiting is not offered for such a collision (the request simply fails). Keep lock names distinct from channel names.
 - **`GetServerTime` ignores network latency.** The clock offset doesn't subtract round-trip time, so it can be off by roughly the RTT plus drift between resyncs.
 
 ---

@@ -42,6 +42,7 @@ namespace Impunity.GameState
 		LOCK_NAMED_LOCK = 309,
 		UNLOCK_NAMED_LOCK = 310,
 		LIST_ACTIVE_CHANNELS = 311,
+		CANCEL_LOCK_WAIT = 313,
 		LIST_PERSISTED_CHANNELS = 312,
 
 		BROADCAST_MESSAGE = 400,
@@ -126,6 +127,8 @@ namespace Impunity.GameState
 					return typeof(LockEntityAction);
 				case ClientActionType.UNLOCK_ENTITY:
 					return typeof(UnlockEntityAction);
+				case ClientActionType.CANCEL_LOCK_WAIT:
+					return typeof(CancelLockWaitAction);
 				case ClientActionType.LOCK_NAMED_LOCK:
 					return typeof(LockNamedLockAction);
 				case ClientActionType.UNLOCK_NAMED_LOCK:
@@ -1089,18 +1092,50 @@ namespace Impunity.GameState
 		}
 	}
 
-	/// <summary>Acquires an exclusive lock on a live entity for this connection.</summary>
+	/// <summary>Acquires an exclusive lock on a live entity for this connection. Optionally queues for the lock if
+	/// it is currently held by another connection.</summary>
 	public class LockEntityAction : ClientActionResultBase<bool>
 	{
 		[BsonField("id")]
 		public uint EntityId;
+
+		/// <summary>When the lock is held by someone else, join the server's waiter queue instead of just failing.
+		/// The reply is still <c>false</c>; the lock arrives later as an <c>EntityLockGrantedMessageAction</c> push.
+		/// Absent in messages from older clients, which deserializes to false — their existing behavior.</summary>
+		[BsonField("w")]
+		public bool WaitForUnlock;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LOCK_ENTITY; }
 		public override bool IsDBOperation() { return false; }
 
 		public LockEntityAction() { }
 
-		public LockEntityAction(uint entityId, ImpunityCallback<bool>? onComplete = null)
+		public LockEntityAction(uint entityId, bool wait = false, ImpunityCallback<bool>? onComplete = null)
+		{
+			EntityId = entityId;
+			WaitForUnlock = wait;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			Result = game.Live.LockEntity(Origin.ConnectionReplicant, EntityId, WaitForUnlock);
+		}
+	}
+
+	/// <summary>Leaves the waiter queue for a live entity's lock. Replies <c>false</c> when the lock had already been
+	/// granted to this connection in the meantime — in which case the caller now holds it and must unlock.</summary>
+	public class CancelLockWaitAction : ClientActionResultBase<bool>
+	{
+		[BsonField("id")]
+		public uint EntityId;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.CANCEL_LOCK_WAIT; }
+		public override bool IsDBOperation() { return false; }
+
+		public CancelLockWaitAction() { }
+
+		public CancelLockWaitAction(uint entityId, ImpunityCallback<bool>? onComplete = null)
 		{
 			EntityId = entityId;
 			OnCompleteCallback = onComplete;
@@ -1108,7 +1143,7 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.LockEntity(Origin.ConnectionReplicant, EntityId);
+			Result = game.Live.CancelLockWait(Origin.ConnectionReplicant, EntityId);
 		}
 	}
 

@@ -212,6 +212,84 @@ namespace Impunity.Tests
 			await Pump(connB.UnlockAsync(lockName), AllConnections());
 		}
 
+		/// <summary>
+		/// The RunExclusive handoff guarantee, over each real transport: B's body must observe the edit A made
+		/// inside its own scope. A writes only after the gate opens, so the write and the scope exit happen in one
+		/// turn with no Update() between them — the case the flush-before-unlock exists for.
+		/// </summary>
+		[Test, Category("Transport")]
+		public async Task RunExclusiveHandsOffEdits()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("chan");
+
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var gate = new TaskCompletionSource<bool>();
+			bool aStarted = false;
+			var aScope = aChannel.RunExclusiveAsync(async () =>
+			{
+				aStarted = true;
+				await gate.Task;
+				aChannel.Status.Set("written-by-a");
+			}, 10f);
+
+			await PumpUntil(() => aStarted, TimeSpan.FromSeconds(5), AllConnections());
+
+			string bObserved = null;
+			var bScope = bChannel.RunExclusiveAsync(() => bObserved = bChannel.Status.Get(), 10f);
+
+			await PumpFor(TimeSpan.FromSeconds(0.5), AllConnections());
+			Assert.IsNull(bObserved, "B's body ran while A held the lock");
+
+			gate.SetResult(true);
+
+			Assert.AreEqual(RunExclusiveResult.Ran, await Pump(aScope, AllConnections()));
+			Assert.AreEqual(RunExclusiveResult.Ran, await Pump(bScope, AllConnections()));
+
+			Assert.AreEqual("written-by-a", bObserved, "B's body did not observe A's edit from the previous scope");
+		}
+
+		/// <summary>
+		/// Regression: a channel broadcast reaches EVERY listener, including the client that wrote it.
+		/// GameStateChannel.SendToListeners hands the SAME action instance to each listener, so the
+		/// outbound queue must carry the recipient alongside the action rather than stamping it onto
+		/// the shared instance — otherwise, with three listeners, all three queued copies resolve to
+		/// whichever recipient was stamped last and two clients receive nothing.
+		/// </summary>
+		[Test, Category("Transport")]
+		public async Task ChannelBroadcastReachesEveryListener()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+			var connC = await OpenConnectionAsync();
+
+			var channelName = Name("chan");
+
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+			var cChannel = await Pump(connC.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			// A writes. The channel is not client-authoritative, so A's own Get() only advances on the
+			// server's echo — making A a listener that must be served just like B and C.
+			aChannel.Status.Set("broadcast");
+
+			await PumpUntil(
+				() => aChannel.Status.Get() == "broadcast"
+					&& bChannel.Status.Get() == "broadcast"
+					&& cChannel.Status.Get() == "broadcast",
+				TimeSpan.FromSeconds(3), AllConnections());
+
+			Assert.AreEqual("broadcast", aChannel.Status.Get(), "Writer never received its own echo");
+			Assert.AreEqual("broadcast", bChannel.Status.Get(), "Second listener never received the update");
+			Assert.AreEqual("broadcast", cChannel.Status.Get(), "Third listener never received the update");
+		}
+
 		[Test, Category("Transport")]
 		public async Task UnsubscribeStopsReplication()
 		{

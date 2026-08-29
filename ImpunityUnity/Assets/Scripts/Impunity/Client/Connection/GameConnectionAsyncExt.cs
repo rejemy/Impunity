@@ -482,6 +482,66 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.RunExclusive"/> with a synchronous body.</summary>
+		/// <param name="entity">The entity to hold the lock on.</param>
+		/// <param name="body">The logic to run under the lock.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock; negative uses the manager's default, zero does
+		/// not wait. The body's own running time is never counted.</param>
+		/// <returns>A task for the scope's outcome. It faults with <see cref="ImpunityErrorResponseException"/> only
+		/// when the request itself failed; a body that throws completes the task with
+		/// <see cref="RunExclusiveResult.Failed"/>.</returns>
+		public static Task<RunExclusiveResult> RunExclusiveAsync(this IDistributedEntity entity, Action body, float timeoutSeconds = -1f)
+		{
+			var t = new ImpunityTaskCompletionSource<RunExclusiveResult>();
+			entity.RunExclusive(body, t.OnComplete, timeoutSeconds);
+			return t.Task;
+		}
+
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.RunExclusive"/> with an awaitable body. The
+		/// lock is held for as long as <paramref name="body"/> takes, so the scope may span many frames — keep it short
+		/// or other clients will sit in the waiter queue.</summary>
+		/// <param name="entity">The entity to hold the lock on.</param>
+		/// <param name="body">The logic to run under the lock. Awaited to completion before the lock is released.</param>
+		/// <param name="timeoutSeconds">How long to wait for the lock; negative uses the manager's default, zero does
+		/// not wait. The body's own running time is never counted.</param>
+		public static Task<RunExclusiveResult> RunExclusiveAsync(this IDistributedEntity entity, Func<Task> body, float timeoutSeconds = -1f)
+		{
+			var t = new ImpunityTaskCompletionSource<RunExclusiveResult>();
+
+			entity.Manager.RunExclusiveDeferred(entity, finish =>
+			{
+				Task running;
+				try
+				{
+					running = body();
+				}
+				catch (Exception e)
+				{
+					// The body threw before returning a task.
+					finish(e);
+					return;
+				}
+
+				if (running == null)
+				{
+					finish(null);
+					return;
+				}
+
+				// Run the continuation inline on whichever thread completed the task. Every Impunity async result is
+				// completed from BaseGameConnection.Update(), so a body that only awaits Impunity operations (or
+				// already-completed tasks) resumes here on the main thread — which is required, because this
+				// releases the lock and touches entity state. Awaiting something that completes on a pool thread
+				// would break that, exactly as ConfigureAwait(false) does elsewhere in this API.
+				running.ContinueWith(completed =>
+				{
+					finish(completed.Exception?.GetBaseException());
+				}, TaskContinuationOptions.ExecuteSynchronously);
+			}, t.OnComplete, timeoutSeconds);
+
+			return t.Task;
+		}
+
 	}
 
 	/// <summary>Async/await extension methods for <see cref="IDistributedChannel"/>.</summary>

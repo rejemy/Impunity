@@ -125,7 +125,7 @@ namespace Impunity.Connection
 	/// Client-side manager for distributed entities. Handles type registration, entity creation/subscription,
 	/// dirty tracking, property serialization/deserialization, and dispatching server state updates to entity instances.
 	/// </summary>
-	public class ClientEntityManager
+	public partial class ClientEntityManager
 	{
 		/// <summary>The connection this manager sends actions through.</summary>
 		public BaseGameConnection? Connection = default;
@@ -1272,6 +1272,9 @@ namespace Impunity.Connection
 				ImpunityLogger.LogWarning("Got delete for entity we don't know about: " + entityId);
 				return;
 			}
+
+			// Anything queued on this entity's lock can never be granted now.
+			AbandonLockWaitsForEntity(entityId);
 
 			if (entity is IDistributedChannel channel)
 			{
