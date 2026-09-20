@@ -37,6 +37,8 @@ Run the test suite with `./test.sh` (see Tests below).
 > Companion manual for the connection & database model (local vs. remote connections, the connect handshake, the action request/reply system, the `Update()` loop, the document database, named locks, broadcasts): [`docs/guides/Connections.md`](docs/guides/Connections.md).
 >
 > Guide to schema versioning & migration (version+checksum guard, adopt-when-safe, and the implemented client-driven **data migration** flow: a higher-version client is *offered* a migration, runs it via raw name-addressed DB ops through `MigrationContext`, then commits — with server-side snapshot/restore, an ephemeral lock, idle timeout, and crash recovery): [`docs/guides/SchemaMigration.md`](docs/guides/SchemaMigration.md).
+>
+> Any format change (adopt *or* migration commit) unloads live memory: `UpdateFormat` calls `Live.UnloadAllEntities()` before `Live.SetFormat(...)`, because a live entity captures its `GameStateEntityType` at construction and sizes its property arrays from it, so nothing may survive a `SetFormat`. Persisted rows are untouched (unloading goes through `DestroyEntity`, which never writes to the DB) and reload on the next subscribe; replicated-only values and non-persisted channels are lost, as with the idle reaper. In-flight channel loads are discarded via `GameStateLive.FormatGeneration`.
 
 - **Wire protocol**: 4-byte length prefix + 12-byte header + BSON body over TCP
 - **Serialization**: UltraLiteDB's `BsonMapper` for documents; custom binary serializers (readonly structs) for distributed field types

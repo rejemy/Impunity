@@ -25,6 +25,9 @@ namespace Impunity.Tests
 	public class MigrationTests : ImpunityTestHarness
 	{
 		GameStateFormat FormatV2;
+		// Same schema version as the harness Format, but an extra collection — so version matches and the
+		// checksum does not, which is the "adopt when alone" path rather than the migration path.
+		GameStateFormat FormatV1Alt;
 
 		const string MigrationBackupFile = "Game.db.migration.bak";
 		const string MigrationMarkerFile = "migration.dat";
@@ -59,6 +62,15 @@ namespace Impunity.Tests
 		{
 			FormatV2 = new GameStateFormat(
 				2,
+				new GameStateCollection[]
+				{
+					new GameStateCollection { Index = MigTestCollections.ITEMS, Name = MigTestCollections.ITEMS_NAME },
+					new GameStateCollection { Index = MigTestCollections.PLAYERS, Name = MigTestCollections.PLAYERS_NAME }
+				},
+				MigEntityTypes());
+
+			FormatV1Alt = new GameStateFormat(
+				1,
 				new GameStateCollection[]
 				{
 					new GameStateCollection { Index = MigTestCollections.ITEMS, Name = MigTestCollections.ITEMS_NAME },
@@ -317,7 +329,7 @@ namespace Impunity.Tests
 		// 8. Migrate a persisted live entity
 		// ═══════════════════════════════════════════════════════════
 
-		[Test, Category("Migration"), Category("Slow")]
+		[Test, Category("Migration")]
 		public async Task MigratePersistedLiveEntity()
 		{
 			CreateServerV1();
@@ -338,13 +350,11 @@ namespace Impunity.Tests
 			DisposeConnection(seeder);
 			await Task.Delay(300);
 
-			// Restart the server so its live state is empty and the persisted entity lives only in the database. This
-			// mirrors the real migration scenario (a new build opening an existing save): migration rewrites the DB, and
-			// nothing is cached in memory to shadow it. (Channels stay loaded for a process's lifetime, so without a restart
-			// the in-memory copy from the seeder's session would mask the migrated value.)
-			GameServer.Dispose();
-			await Task.Delay(100);
-			GameServer = GameStateServer.Open("migtest", null, GameStatePath, Options);
+			// The server is deliberately NOT restarted here. Channels outlive their last subscriber, so "zone1" is
+			// still in live memory with the seeder's copy of the data — the warm-world case. Committing the
+			// migration unloads it (GameStateLive.UnloadAllEntities) so the resubscribe below has to reload from
+			// the migrated database rather than being served the stale in-memory copy.
+			Assert.AreEqual(1, GameServer.GetLiveChannelCount(), "Channel should still be loaded after the seeder leaves");
 
 			// Migrate: bump the persisted "score" of the hero object from 10 to 25.
 			var clientB = NewLocal(FormatV2);
@@ -369,6 +379,9 @@ namespace Impunity.Tests
 			Assert.AreEqual(10, observedScore, "Migration should have read the original persisted score");
 			Assert.AreEqual(2, GameServer.GetGameMetadata().Version);
 
+			// Committing the migration must have emptied live memory, so nothing can shadow the migrated rows.
+			Assert.AreEqual(0, GameServer.GetLiveChannelCount(), "Commit should have unloaded the stale live channel");
+
 			// Reload the persisted channel through the now-normal v2 connection and verify the new score.
 			var chan2 = await Pump(clientB.EntityManager.SubscribeToChannelAsync<MigTestChannel>("zone1", null), clientB);
 
@@ -385,6 +398,135 @@ namespace Impunity.Tests
 			}
 			Assert.IsNotNull(reloaded, "Persisted object should reload after migration");
 			Assert.AreEqual(25, reloaded.Score.Get(), "Migrated persisted score should be 25");
+		}
+
+		// ═══════════════════════════════════════════════════════════
+		// 9. Adopting a new format on a warm world unloads live state
+		// ═══════════════════════════════════════════════════════════
+
+		// Not a migration: a same-version client with a different checksum adopts the new format outright
+		// (GameStateServer.EstablishConnection -> UpdateFormat). The guard there only establishes that no OTHER
+		// connection is present, which says nothing about what is still loaded — channels outlive their last
+		// subscriber. Without the unload, the adopting client would be served entities still bound to the
+		// outgoing entity-type registry.
+		[Test, Category("Migration")]
+		public async Task AdoptOnWarmWorldUnloadsLiveState()
+		{
+			CreateServerV1();
+
+			var seeder = NewLocal(Format);
+			await Connect(seeder);
+
+			var chan = await Pump(seeder.EntityManager.SubscribeToChannelAsync("zone1", new MigTestChannel { IsPersisted = true }), seeder);
+			chan.Label.Set("original");
+
+			var obj = new MigTestObject { IsPersisted = true, UniqueName = "hero" };
+			await Pump(seeder.EntityManager.CreateObjectAsync(obj, chan, false), seeder);
+			obj.Score.Set(7);
+			await PumpFor(TimeSpan.FromSeconds(0.5), seeder);
+
+			DisposeConnection(seeder);
+			await Task.Delay(300);
+
+			// World is now warm but unattended: the channel and its object are still resident.
+			Assert.AreEqual(1, GameServer.GetLiveChannelCount(), "Channel should outlive its last subscriber");
+			string checksumBefore = GameServer.GetGameMetadata().DataFormatChecksum;
+
+			// Same version, extra collection => same version number, different checksum => the adopt path.
+			var adopter = NewLocal(FormatV1Alt);
+			await Connect(adopter);
+
+			Assert.IsNull(adopter.PendingMigration, "A same-version checksum change adopts rather than migrating");
+			Assert.AreEqual(1, GameServer.GetGameMetadata().Version);
+			Assert.AreNotEqual(checksumBefore, GameServer.GetGameMetadata().DataFormatChecksum,
+				"World should have adopted the new checksum");
+			Assert.AreEqual(0, GameServer.GetLiveEntityCount(),
+				"Adopting a new format must unload every live entity bound to the outgoing registry");
+
+			// The persisted data is untouched by the unload and reloads through the freshly-installed registry.
+			var reloadedChan = await Pump(adopter.EntityManager.SubscribeToChannelAsync<MigTestChannel>("zone1", null), adopter);
+			await PumpUntil(() => reloadedChan.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), adopter);
+
+			Assert.AreEqual("original", reloadedChan.Label.Get(), "Persisted channel field should survive the unload");
+
+			MigTestObject reloadedObj = null;
+			foreach (var kv in reloadedChan.DistributedObjects)
+			{
+				if (kv.Value is MigTestObject m)
+				{
+					reloadedObj = m;
+					break;
+				}
+			}
+			Assert.IsNotNull(reloadedObj, "Persisted object should reload after the format change");
+			Assert.AreEqual(7, reloadedObj.Score.Get(), "Persisted object field should survive the unload");
+		}
+
+		// ═══════════════════════════════════════════════════════════
+		// 10. An offer alone must not unload anything
+		// ═══════════════════════════════════════════════════════════
+
+		// The offer is non-destructive by design, and the unload hangs off the format change rather than off the
+		// migration machinery. Declining must leave the warm world exactly as it was.
+		[Test, Category("Migration")]
+		public async Task OfferAndDeclineLeaveLiveStateIntact()
+		{
+			CreateServerV1();
+
+			var seeder = NewLocal(Format);
+			await Connect(seeder);
+			await Pump(seeder.EntityManager.SubscribeToChannelAsync("zone1", new MigTestChannel { IsPersisted = true }), seeder);
+			await PumpFor(TimeSpan.FromSeconds(0.3), seeder);
+
+			DisposeConnection(seeder);
+			await Task.Delay(300);
+
+			int liveBefore = GameServer.GetLiveEntityCount();
+			Assert.AreEqual(1, GameServer.GetLiveChannelCount(), "Channel should still be loaded");
+
+			var clientB = NewLocal(FormatV2);
+			await Connect(clientB);
+			Assert.IsNotNull(clientB.PendingMigration);
+			Assert.AreEqual(liveBefore, GameServer.GetLiveEntityCount(), "An offer must not unload live state");
+
+			await Pump(clientB.DeclineMigrationAsync(), TimeSpan.FromSeconds(15), clientB);
+			Assert.AreEqual(MigrationPhase.None, GameServer.GetMigrationPhase());
+			Assert.AreEqual(liveBefore, GameServer.GetLiveEntityCount(), "Declining must not unload live state");
+			Assert.AreEqual(1, GameServer.GetGameMetadata().Version, "Declining leaves the world at its old version");
+		}
+
+		// ═══════════════════════════════════════════════════════════
+		// 11. Replicated-only state does not survive a format change
+		// ═══════════════════════════════════════════════════════════
+
+		// The documented cost of the unload (see docs/guides/SchemaMigration.md §8): a channel with no persisted
+		// rows behind it is simply gone, the same way the idle reaper drops one. Nobody observes it in practice
+		// because a format change requires a world with no other connections, but pin the behaviour down so a
+		// future change to it is deliberate.
+		[Test, Category("Migration")]
+		public async Task NonPersistedChannelDoesNotSurviveFormatChange()
+		{
+			CreateServerV1();
+
+			var seeder = NewLocal(Format);
+			await Connect(seeder);
+			await Pump(seeder.EntityManager.SubscribeToChannelAsync("scratch", new MigTestChannel()), seeder);
+			await PumpFor(TimeSpan.FromSeconds(0.3), seeder);
+
+			DisposeConnection(seeder);
+			await Task.Delay(300);
+
+			Assert.AreEqual(1, GameServer.GetLiveChannelCount(), "Non-persisted channel is still resident");
+
+			var adopter = NewLocal(FormatV1Alt);
+			await Connect(adopter);
+			Assert.AreEqual(0, GameServer.GetLiveEntityCount(), "Format change unloads the non-persisted channel");
+
+			// It had no database rows, so there is nothing to reload it from.
+			var error = await PumpExpectingError(
+				adopter.EntityManager.SubscribeToChannelAsync<MigTestChannel>("scratch", null), adopter);
+			Assert.AreEqual(ImpunityErrorCode.ActionNotFound, error.ErrorId,
+				"A non-persisted channel is gone for good after a format change");
 		}
 	}
 }

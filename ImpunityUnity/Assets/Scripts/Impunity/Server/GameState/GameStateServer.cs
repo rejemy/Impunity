@@ -369,6 +369,17 @@ namespace Impunity.GameState
 				}
 			}
 
+			// Every live entity's shape — the sizing of its property/sequence arrays, the property indices it
+			// serializes, the type index it announces to clients — is derived from the GameStateEntityType it
+			// captured when it was constructed. SetFormat replaces those descriptors wholesale, so nothing may
+			// survive it. Unloading is safe for stored data (it never touches a database row) and persisted
+			// channels reload lazily on the next subscribe, through the new format.
+			//
+			// This runs after the guards above, so a rejected format change leaves the live world intact. Both
+			// callers have already established that no other connection is present: EstablishConnection checks
+			// HasOtherConnections and runs before ConnectionOpened, and a migration commit holds the world
+			// reserved until ClearMigrationState, so nothing can re-subscribe before the new format is in place.
+			Live.UnloadAllEntities();
 			Live.SetFormat(format.EntityTypes);
 
 			Metadata.Version = format.Version;
@@ -395,6 +406,22 @@ namespace Impunity.GameState
 		public GameMetadata GetGameMetadata()
 		{
 			return Metadata;
+		}
+
+		/// <summary>Number of entities currently held in live memory. A diagnostic snapshot: the live thread owns
+		/// this state, so a read taken while it is working may be momentarily stale.</summary>
+		public int GetLiveEntityCount()
+		{
+			return Live.LiveEntityCount;
+		}
+
+		/// <summary>Number of channels currently loaded into live memory. Channels stay loaded after their last
+		/// subscriber leaves until the idle reaper collects them or a format change unloads them, so this is the
+		/// way to tell a warm world from a cold one. Diagnostic snapshot, as with
+		/// <see cref="GetLiveEntityCount"/>.</summary>
+		public int GetLiveChannelCount()
+		{
+			return Live.LiveChannelCount;
 		}
 
 		// Called from various threads

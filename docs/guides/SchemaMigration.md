@@ -86,13 +86,14 @@ When the guard decides adoption is safe it calls `GameStateServer.UpdateFormat`,
 
 1. Refuses to **downgrade** — `format.Version < Metadata.Version` is a fatal error ("Can't revert savegame to earlier version").
 2. For a remote client, refuses to change the format at all unless the server opted in with `ImpunityOptions.RemoteUpgradeAllowed` (fatal otherwise). A `LocalGameConnection` is always allowed.
-3. Updates the in-memory live `SetFormat(...)` and the `GameMetadata` (version, checksum, collections, entity types).
+3. **Unloads all live entities** (`Live.UnloadAllEntities()`), then updates the in-memory live `SetFormat(...)` and the `GameMetadata` (version, checksum, collections, entity types). Nothing may survive a `SetFormat`, because a live entity's runtime shape is derived from the entity type it captured at construction — see [§8](#8-notes--remaining-sharp-edges) note 6. Persisted data is untouched and reloads on demand.
 4. Queues an `UpdateDBFormatAction`, which on the DB thread calls `DB.SetFormat(collections)` and `SaveMetadata(...)`.
 5. Notifies `IGameStateListener.OnGameMetadataChanged`.
 
 **What this does and does not do is the crux of the whole document:**
 
 - ✅ It records the new version/checksum and rebuilds the set of document collections (`GameStateDB.SetFormat`). New collections become available.
+- ✅ It empties live memory, so the world is re-read through the new format rather than served from entities built against the old one.
 - ❌ It does **not** transform a single byte of existing data. Old documents keep their old shape. A removed collection's documents are simply orphaned in the underlying file (no longer surfaced). A renamed collection appears as a new, empty one and orphans the old. Persisted live entities are untouched.
 
 So "adopt" means "accept the new schema label and make room for new collections" — **not** "migrate the data." For additive changes (new collection, new field, new entity type) that is often fine, because old data is read through code that simply finds the new field absent. For destructive or transforming changes (rename, retype, split/merge a field), use the **migration flow** ([§7](#7-the-migration-flow)), which adopts the new format only after the client has rewritten the data.
@@ -207,7 +208,13 @@ Because the client does the work, the dangerous case is it going away mid-migrat
 
 5. **Stepwise vs. single delegate.** The engine runs your one delegate once with the full `From`/`To` range; if you ship many versions you branch on `ctx.FromVersion` yourself (e.g. a `switch` that falls through X→X+1→…→Y). There is no built-in per-version step registry.
 
-6. **Migration rewrites the database, not already-loaded live entities.** The persisted-entity helpers (and raw access to the `"Entities"` collection) operate on stored BSON. A persisted channel that is *already loaded into server memory* (channels stay loaded for the server process's lifetime, even after their last subscriber leaves) is **not** updated by those writes — a subsequent subscribe returns the cached in-memory copy, not the migrated DB value. This is a non-issue in the real flows, where migration runs against a freshly-opened world: a standalone server that restarted on the new build, or an embedded client that migrates at connect time before subscribing to anything (and the gate forbids the migrator from subscribing mid-migration anyway). The practical rule: **migrate before any channel is loaded.** A process that loaded a channel and then migrates in-place (without a restart) would need the world reopened for the change to surface.
+6. **A format change unloads live state.** Migration's persisted-entity helpers (and raw access to the `"Entities"` collection) operate on stored BSON, so a channel already loaded into server memory would otherwise shadow the migrated rows — channels stay loaded after their last subscriber leaves, until the idle reaper collects them. More fundamentally, a live entity captures its `GameStateEntityType` at construction and sizes its property arrays from it, so an entity that survived a format change would keep serializing the *old* property indices and announcing the *old* type index.
+
+   So `GameStateServer.UpdateFormat` calls `GameStateLive.UnloadAllEntities()` immediately before `Live.SetFormat(...)`, on both paths (adopt-at-connect and migration commit). This is safe for stored data — unloading goes through `DestroyEntity`, which never writes to the database — so persisted channels simply reload lazily on the next subscribe, through the new format. **What is lost** is anything with no database representation: replicated-only field values on persisted entities, and wholly non-persisted channels, exactly as the idle reaper drops them. Nobody observes the loss in practice, because a format change is only permitted into a world with no other connections.
+
+   Ordering at commit: the delegate's writes are all applied and acked before the client sends commit; the commit reply is deferred (`AwaitingTask`) until the DB thread has drained `UpdateDBFormatAction` and `MigrationFinalizeDBAction`; and the world stays reserved (`CheckMigrationGate` rejects subscribes) until `ClearMigrationState` runs after that. So when `RunMigrationAsync` returns, the data is migrated, live memory is empty, and the new format is installed on both `Live` and `DB`. A subscribe issued afterwards queues its `LoadChannelAction` behind all of it on the same FIFO DB queue, so it reads migrated rows and resolves its type through the new registry.
+
+   A channel load already in flight when the format changes is failed rather than allowed to land: `GameStateChannelLoadProxy` captures `GameStateLive.FormatGeneration` when the read is issued and discards a reply whose generation no longer matches (the listener sees a retryable `ServerUnavailable` and re-subscribes). This matters because the DB reply path goes through `SwapOutEntity`, which would otherwise re-register a channel built from pre-migration data.
 
 ---
 
@@ -220,7 +227,8 @@ Because the client does the work, the dangerous case is it going away mid-migrat
 | `ImpunityUtil.MakeDataChecksum` | MD5 over the serialized format |
 | `GameMetadata` (`Version`, `DataFormatChecksum`) | The world's currently-adopted schema, persisted |
 | `GameStateServer.EstablishConnection` | The connect-time guard + migration offer ([§3](#3-the-connect-time-guard)) |
-| `GameStateServer.UpdateFormat` | Stamps a new schema (metadata + collections) ([§4](#4-adopting-a-new-schema)) |
+| `GameStateServer.UpdateFormat` | Stamps a new schema (metadata + collections) and unloads live state ([§4](#4-adopting-a-new-schema)) |
+| `GameStateLive.UnloadAllEntities` / `FormatGeneration` | Drops live entities before a `SetFormat`; the generation discards in-flight channel loads |
 | `MigrationPhase` (`None`/`Offered`/`Migrating`) | Per-world migration state machine |
 | `GameStateDB.BackupForMigration` / `RestoreFromMigrationBackup` / `ReadMigrationMarker` | Snapshot, restore, crash-recovery marker |
 | `GameStateDB.GetAllCollectionNames` / `ScanCollectionByName` / `UpsertByName` … | Name-addressed raw API used by migration |

@@ -1,7 +1,7 @@
 ﻿<Solution>
-  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="Impunity.csproj" />
   <Project Path="ImpunityUnityEditorTests.csproj" />
   <Project Path="ImpunitySharedTests.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
   <Project Path="ImpunityUnityPlayModeTests.csproj" />
 </Solution>

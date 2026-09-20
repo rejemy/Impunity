@@ -833,10 +833,17 @@ namespace Impunity.GameState
 
 		List<GameStateChannelLoadListener> LoadListeners;
 
+		/// <summary>The <see cref="GameStateLive.FormatGeneration"/> this load was issued under. If the world's
+		/// format changes while the database read is in flight, the data it returns predates the change (and any
+		/// migration writes that came with it) and must not be turned into a live entity — see
+		/// <see cref="OnDataLoaded"/>.</summary>
+		private readonly int LoadFormatGeneration;
+
 		public GameStateChannelLoadProxy(GameStateLive liveData, string name)
 										: base(liveData, null, 0, name)
 		{
 			InLoadingState = true;
+			LoadFormatGeneration = liveData.FormatGeneration;
 			LoadListeners = new List<GameStateChannelLoadListener>();
 		}
 
@@ -861,8 +868,33 @@ namespace Impunity.GameState
 			CreateObjects = objects;
 		}
 
+		/// <summary>Fails this pending load because the world's format is changing underneath it. Called by
+		/// <see cref="GameStateLive.UnloadAllEntities"/>; notifies the waiting listeners and unregisters the proxy.
+		/// A reply already in flight for this load is discarded by the generation check in
+		/// <see cref="OnDataLoaded"/>.</summary>
+		public void CancelLoad()
+		{
+			OnDataLoaded(MakeFormatChangedError(), null!);
+		}
+
+		private ImpunityErrorResponse MakeFormatChangedError()
+		{
+			return new ImpunityErrorResponse(ImpunityErrorCode.ServerUnavailable,
+				"Game format changed while loading channel " + Name + ", retry");
+		}
+
 		public void OnDataLoaded(ImpunityErrorResponse? error, LiveChannelData channelData)
 		{
+			// The format changed while this read was in flight: whatever came back predates the change — and any
+			// migration writes made alongside it — and would be rebuilt against a registry that no longer matches.
+			// Fail the load instead; the client re-subscribes and gets a clean read through the new format. This
+			// check is what stops a late reply from re-registering a stale channel via SwapOutEntity, so it matters
+			// even for a proxy that CancelLoad already unregistered.
+			if (error == null && LoadFormatGeneration != LiveData.FormatGeneration)
+			{
+				error = MakeFormatChangedError();
+			}
+
 			if (error == null && channelData == null && !CreateIfMissing)
 			{
 				error = new ImpunityErrorResponse(ImpunityErrorCode.ActionNotFound, "No channel with name " + Name);
@@ -1082,6 +1114,18 @@ namespace Impunity.GameState
 		HashSet<GameStateReplicant> ConnectedReplicas;
 		public int NumConnections { get { return ConnectedReplicas.Count; } }
 
+		/// <summary>Incremented every time <see cref="SetFormat"/> installs a new entity-type registry. In-flight
+		/// channel loads capture it so a database reply that crosses a format change can be discarded rather than
+		/// rebuilt against a registry it no longer matches.</summary>
+		public int FormatGeneration { get; private set; }
+
+		/// <summary>Number of entities currently held in live memory (channels, their member objects, named locks
+		/// and pending channel-load proxies).</summary>
+		public int LiveEntityCount { get { return AllEntities.Count; } }
+
+		/// <summary>Number of channels currently loaded into live memory.</summary>
+		public int LiveChannelCount { get { return Channels.Count; } }
+
 		uint NextId;
 
 		private BinaryReader TempBufferReader;
@@ -1107,6 +1151,10 @@ namespace Impunity.GameState
 
 		public void SetFormat(GameStateEntityTypeDef[]? entityTypes)
 		{
+			// Bumped before the early-out: the generation marks "the live world was reset", which an in-flight
+			// channel load must detect even when the incoming format declares no entity types at all.
+			FormatGeneration++;
+
 			if (entityTypes == null || entityTypes.Length < 1)
 			{
 				return;
@@ -1136,6 +1184,86 @@ namespace Impunity.GameState
 
 			EntityTypes = newEntityTypes;
 			EntityTypesByPersistKey = newEntityTypesByPersistKey;
+		}
+
+		/// <summary>Drops every live entity whose shape is derived from the entity-type registry, so that a
+		/// following <see cref="SetFormat"/> cannot leave entities bound to an orphaned
+		/// <see cref="GameStateEntityType"/>. An entity captures its type descriptor at construction and sizes its
+		/// property/sequence arrays from it, so a surviving entity would keep serializing the old property indices
+		/// and announcing the old type index to clients that have moved on.
+		/// <para>Database rows are untouched — unloading goes through <c>DestroyEntity</c>, which never writes to
+		/// the database — so persisted channels reload lazily on the next subscribe, exactly as the idle reaper
+		/// leaves them. Replicated-only field values and wholly non-persisted channels are lost, which is safe only
+		/// because every caller requires a world with no other connections.</para>
+		/// <para>Live thread only.</para></summary>
+		public void UnloadAllEntities()
+		{
+			// Snapshot first: destroying mutates AllEntities, so we can't unload during iteration
+			// (same pattern as CleanupIdleChannels).
+			List<GameStateEntity> toUnload = new List<GameStateEntity>(AllEntities.Values);
+
+			int unloaded = 0;
+			foreach (GameStateEntity entity in toUnload)
+			{
+				if (entity is GameStateChannelLoadProxy proxy)
+				{
+					// Issued against the outgoing registry, and reading data that a migration may be about to
+					// replace. Fail it rather than let it land as a live entity.
+					proxy.CancelLoad();
+					continue;
+				}
+
+				if (entity is GameStateNamedLock)
+				{
+					// No TypeInfo and no properties: format-independent, and its lifetime is bound to the
+					// connection holding it. Leave it alone.
+					continue;
+				}
+
+				if (entity is GameStateObject)
+				{
+					// Destroyed as a member of its owning channel; the sweep below catches any orphan.
+					continue;
+				}
+
+				if (entity is GameStateChannel channel && channel.ListenerCount > 0)
+				{
+					// Both callers are supposed to have established that nobody else is connected.
+					ImpunityLogger.LogError("Unloading channel " + channel.ChannelName + " for a format change with "
+						+ channel.ListenerCount + " listener(s) still subscribed");
+				}
+
+				DestroyEntity(entity, null);
+				unloaded++;
+			}
+
+			// Objects are expected to have gone with their channels above. Anything still holding a type descriptor
+			// would silently outlive the registry it was built against, so sweep it and make the leak visible.
+			List<GameStateEntity>? stragglers = null;
+			foreach (GameStateEntity entity in AllEntities.Values)
+			{
+				if (entity.TypeInfo != null)
+				{
+					stragglers ??= new List<GameStateEntity>();
+					stragglers.Add(entity);
+				}
+			}
+
+			if (stragglers != null)
+			{
+				foreach (GameStateEntity entity in stragglers)
+				{
+					ImpunityLogger.LogError("Entity " + entity.Name + " (" + entity.TypeInfo!.Name
+						+ ") outlived its channel during a format-change unload");
+					DestroyEntity(entity, null);
+					unloaded++;
+				}
+			}
+
+			if (unloaded > 0)
+			{
+				ImpunityLogger.LogInformation("Unloaded " + unloaded + " live entity/entities for a format change");
+			}
 		}
 
 		private GameStateEntityType ConvertEntityTypeDef(GameStateEntityTypeDef def)

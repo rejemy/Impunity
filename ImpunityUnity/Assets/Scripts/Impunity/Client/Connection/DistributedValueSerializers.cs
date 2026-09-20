@@ -774,27 +774,33 @@ namespace Impunity.Connection
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
+		public static BsonMapper? Mapper = null;
+
+		private static BsonMapper GetMapper()
+		{
+			return Mapper ?? ImpunityUtil.GetBsonMapper();
+		}
 		public void WriteTo(T value, BinaryWriter w)
 		{
-			w.Write(BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value)));
+			w.Write(BsonSerializer.Serialize(GetMapper().SerializeObject(value)));
 		}
 
 		public T ReadFrom(BinaryReader r, int byteCount)
 		{
 			byte[] bytes = r.ReadBytes(byteCount);
-			return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
+			return GetMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 		}
 
 		/// <summary>Converts value to BsonValue</summary>
 		public BsonValue ToBsonValue(T value)
 		{
-			return ImpunityUtil.GetBsonMapper().SerializeObject(value);
+			return GetMapper().SerializeObject(value);
 		}
 
 		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
 		public T FromBsonValue(BsonValue value)
 		{
-			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
+			return GetMapper().ToObject<T>(value.AsDocument!);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
@@ -806,27 +812,34 @@ namespace Impunity.Connection
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
+		public static BsonMapper? Mapper = null;
+
+		private static BsonMapper GetMapper()
+		{
+			return Mapper ?? ImpunityUtil.GetBsonMapper();
+		}
+
 		public void WriteTo(T value, BinaryWriter w)
 		{
-			w.Write(BsonSerializer.Serialize(ImpunityUtil.GetBsonMapper().SerializeObject(value)));
+			w.Write(BsonSerializer.Serialize(GetMapper().SerializeObject(value)));
 		}
 
 		public T ReadFrom(BinaryReader r, int byteCount)
 		{
 			byte[] bytes = r.ReadBytes(byteCount);
-			return ImpunityUtil.GetBsonMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
+			return GetMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 		}
 
 		/// <summary>Converts value to BsonValue</summary>
 		public BsonValue ToBsonValue(T value)
 		{
-			return ImpunityUtil.GetBsonMapper().SerializeObject(value);
+			return GetMapper().SerializeObject(value);
 		}
 
 		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
 		public T FromBsonValue(BsonValue value)
 		{
-			return ImpunityUtil.GetBsonMapper().ToObject<T>(value.AsDocument!);
+			return GetMapper().ToObject<T>(value.AsDocument!);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
