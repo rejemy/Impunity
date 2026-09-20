@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Reflection;
 using UltraLiteDB;
 
 
@@ -44,24 +45,120 @@ namespace Impunity.Connection
 		}
 	}
 
-	/// <summary>Marks a field as a distributed property with a unique byte ID (1-63). Optionally specifies a persistence key.</summary>
+	/// <summary>Stores a distributed field's value in the database under the given key.
+	/// <para>Every field whose type implements <see cref="IDistributedField"/> is replicated automatically — that is
+	/// what those types are for — so there is no attribute to opt a field <i>into</i> replication. This attribute adds
+	/// the one thing the type cannot express: that the value should also be <b>persisted</b>, and under what key.</para>
+	/// <para>The declaring entity type must itself be persisted (have its own <c>PersistAs</c>), the field must not be
+	/// temporal, and the key must be non-empty and not start with '_'. A subclass that is not itself persisted may
+	/// inherit persisted fields from a persisted base type; on that subclass the inherited fields are
+	/// replicated-only.</para>
+	/// <para>Unlike a wire id, this key is the field's <b>durable</b> identity and must never change once data
+	/// exists — see the guide's discussion of wire ids vs. durable keys.</para></summary>
 	[AttributeUsage(AttributeTargets.Field)]
-	public class Distributed : Attribute
+	public class PersistAs : Attribute
 	{
-		internal byte FieldId;
-		/// <summary>Optional database key under which this field's value is persisted. When non-null the value is saved
-		/// to the database; the declaring entity type must also be persisted (have its own <c>PersistAs</c>), the field
-		/// must not be temporal, and the key must be non-empty and not start with '_'. Null to leave the field
-		/// replicated-only (not persisted). A subclass that is not itself persisted may inherit persisted fields from a
-		/// persisted base type; on that subclass the inherited fields are replicated-only.</summary>
-		public string? PersistAs { get; set; }
+		/// <summary>The database key this field's value is stored under.</summary>
+		public string Key { get; private set; }
 
-		/// <summary>Marks the annotated field as a distributed (replicated) property.</summary>
-		/// <param name="fieldId">Unique field id in the range 1–63 identifying this field on the wire. Must be unique
-		/// among the declaring type's distributed fields.</param>
-		public Distributed(byte fieldId)
+		/// <summary>Persists the annotated distributed field under <paramref name="key"/>.</summary>
+		/// <param name="key">Durable storage key. Must be non-empty, must not start with '_', and must never change
+		/// once saved data exists.</param>
+		public PersistAs(string key)
 		{
-			FieldId = fieldId;
+			Key = key;
+		}
+	}
+
+	/// <summary>Assigns each distributed field its wire id.
+	/// <para>A field is distributed if — and only if — its type implements <see cref="IDistributedField"/>. There is
+	/// no opt-in attribute: those types exist to be replicated, so declaring one is the declaration of intent.</para>
+	/// <para>Ids are assigned per <b>concrete runtime type</b> over that type's entire inheritance chain: base classes
+	/// first, then by ordinal field name within each class, numbered from 1. Because each registered entity type gets
+	/// its own property table on the server, sibling subclasses never have to agree on numbering — an inherited field
+	/// may hold a different id in each subclass — which is what removes the old "unique across a class and all its
+	/// parents" burden.</para>
+	/// <para>Consequences worth knowing: adding a field to a subclass never renumbers its base's fields; reordering or
+	/// moving declarations is free; <b>renaming</b> a field renumbers and so is a schema change (the format checksum
+	/// changes — bump the version). Numeric ids are wire-only and never stored, so no renumbering ever touches saved
+	/// data.</para>
+	/// <para>The ordering is imposed rather than taken from reflection: <c>Type.GetFields</c> does not guarantee an
+	/// order, and the flattened call also omits a base type's private fields, so the chain is walked one level at a
+	/// time with <see cref="BindingFlags.DeclaredOnly"/> and sorted.</para></summary>
+	public static class DistributedFieldIds
+	{
+		/// <summary>Highest assignable field id. Each field maps to one bit of the 64-bit dirty mask
+		/// (<c>1UL &lt;&lt; (id - 1)</c>), so a concrete type may have at most 63 distributed fields in total.</summary>
+		public const int MaxFieldId = 63;
+
+		private static readonly ConcurrentDictionary<Type, Dictionary<string, byte>> Cache
+			= new ConcurrentDictionary<Type, Dictionary<string, byte>>();
+
+		/// <summary>Returns this type's distributed field ids, keyed by CLR field name. Built once per type and
+		/// cached; safe to call from an entity constructor, so offline instances that are never registered still get
+		/// correct ids.</summary>
+		public static Dictionary<string, byte> ForType(Type entityType)
+		{
+			return Cache.GetOrAdd(entityType, BuildIds);
+		}
+
+		/// <summary>Returns the id assigned to a single field, or 0 if the type has no distributed field by that
+		/// name.</summary>
+		public static byte GetFieldId(Type entityType, string fieldName)
+		{
+			return ForType(entityType).TryGetValue(fieldName, out byte id) ? id : (byte)0;
+		}
+
+		private static Dictionary<string, byte> BuildIds(Type entityType)
+		{
+			// Base first, so adding a field to a subclass never renumbers the fields it inherited.
+			List<Type> chain = new List<Type>();
+			for (Type? level = entityType; level != null && level != typeof(object); level = level.BaseType)
+			{
+				chain.Add(level);
+			}
+			chain.Reverse();
+
+			Dictionary<string, byte> ids = new Dictionary<string, byte>();
+			int next = 1;
+
+			foreach (Type level in chain)
+			{
+				// DeclaredOnly one level at a time: a flattened GetFields omits a base type's private fields, and its
+				// ordering is not contractual, so gather per level and sort by name for a stable assignment.
+				List<FieldInfo> declared = new List<FieldInfo>();
+				foreach (FieldInfo field in level.GetFields(BindingFlags.Instance | BindingFlags.Public
+															| BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+				{
+					if (typeof(IDistributedField).IsAssignableFrom(field.FieldType))
+					{
+						declared.Add(field);
+					}
+				}
+
+				declared.Sort((f1, f2) => string.CompareOrdinal(f1.Name, f2.Name));
+
+				foreach (FieldInfo field in declared)
+				{
+					if (ids.ContainsKey(field.Name))
+					{
+						throw new Exception("Distributed entity " + entityType.Name + " declares a distributed field '"
+							+ field.Name + "' that shadows an inherited one; distributed field names must be unique "
+							+ "across the whole inheritance chain");
+					}
+
+					if (next > MaxFieldId)
+					{
+						throw new Exception("Distributed entity " + entityType.Name + " has more than " + MaxFieldId
+							+ " distributed fields across its inheritance chain; each field needs one bit of the "
+							+ "64-bit dirty mask");
+					}
+
+					ids[field.Name] = (byte)next++;
+				}
+			}
+
+			return ids;
 		}
 	}
 

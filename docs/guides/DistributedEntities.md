@@ -11,7 +11,7 @@ This document covers the essentials. It assumes you already have a working `Game
 ## Contents
 
 1. [Mental model](#1-mental-model)
-2. [The annotation system: durable type and field ids](#2-the-annotation-system-durable-type-and-field-ids)
+2. [Type ids, field detection, and automatic field ids](#2-type-ids-field-detection-and-automatic-field-ids)
 3. [Declaring an entity type](#3-declaring-an-entity-type)
 4. [Distributed fields](#4-distributed-fields)
 5. [Information flow: client → server → client](#5-information-flow-client--server--client)
@@ -48,9 +48,9 @@ Each client drives the system by calling `connection.Update()` once per frame. T
 
 ---
 
-## 2. The annotation system: durable type and field ids
+## 2. Type ids, field detection, and automatic field ids
 
-Every distributed type and every distributed field is identified on the wire by a small **numeric id**, not by its name. This keeps updates compact, but it makes those numbers a **permanent contract**: once an id ships, it must never change or be reused — see [below](#why-these-ids-are-immutable).
+Every distributed type and every distributed field is identified on the wire by a small **numeric id**, not by its name, which keeps updates compact. You assign the **type** id; fields need no annotation at all — they are recognised by their type and numbered automatically (see [below](#how-field-ids-are-assigned)). Both id kinds are wire-only — neither is ever written into saved data.
 
 ### `[DistributedEntity(typeId)]`
 
@@ -61,45 +61,84 @@ Marks a class as a distributed entity type and assigns its **type id**.
 public partial class Player : DistributedObjectBase { … }
 ```
 
-- `typeId` must be a **positive integer**, unique across all entity types you register, and **permanent** — once shipped it can never change or be reused (see [below](#why-these-ids-are-immutable)). **Id `0` is reserved** for the built-in untyped channel (`GenericDistributedChannel`).
+- `typeId` must be a **positive integer**, unique across all entity types you register, and **permanent** — once shipped it can never change or be reused (see [below](#wire-ids-vs-durable-keys)). **Id `0` is reserved** for the built-in untyped channel (`GenericDistributedChannel`).
 - Optional `FactoryMethod = "Name"` — the name of a `public static` parameterless method on the type returning an `IDistributedEntity`. The manager calls it to construct received instances instead of `Activator.CreateInstance`. Use it for types without a public default constructor or that need custom setup.
 - Optional `PersistAs = "key"` — marks the type **persisted** and gives it a database key. See [§9](#9-persistent-objects).
 - The class **must be `partial`** (the source generator adds a second part — see below) and must derive from one of the base classes in [§3](#3-declaring-an-entity-type).
 
-### `[Distributed(fieldId)]`
+### Declaring a distributed field
 
-Marks a field as replicated and assigns its **field id**.
+**There is no attribute.** A field is distributed if — and only if — its type implements `IDistributedField`, which every `DistributedValue` / `DistributedArray` / `DistributedQueue` / `DistributedStack` / `Distributed*Dictionary` (and their `Temporal` variants) does. Declaring one *is* the declaration of intent; there was never a reason to hold such a field and not replicate it.
 
 ```csharp
-[Distributed((byte)DistributedPropIds.POSITION)]       // fieldId = 1
-public DistributedValue<Vector3, Vector3Serializer> Position;
+public DistributedValue<Vector3, Vector3Serializer> Position;      // replicated
+
+[PersistAs("name")]
+public DistributedValue<string, StringSerializer> Name;            // replicated AND stored
 ```
 
-- `fieldId` is a **byte in the range 1–63**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (fieldId - 1)`), so a type may have at most 63 distributed fields. Like the type id, a field id is **wire identity** — fixed for every build sharing a schema version (see [below](#why-these-ids-are-immutable)).
-- Optional `PersistAs = "key"` — persists this field's value under the given key. The containing type must itself be persisted, and the field may not be temporal. See [§9](#9-persistent-objects).
-- A common convention (see the test entities) is a nested `enum DistributedPropIds : byte { … }` so the ids read meaningfully at the declaration site.
+- Only **instance** fields count. A `static` or `const` field of a distributed type is ignored, not replicated.
+- Field visibility is irrelevant — a `private` distributed field replicates like any other.
+- A type may have at most **63 distributed fields across its whole inheritance chain**. The limit is hard: each field maps to one bit of a 64-bit dirty mask (`1UL << (id - 1)`). Exceeding it throws at registration, naming the type.
+- Distributed field names must be **unique across the inheritance chain** — a subclass may not shadow an inherited distributed field (throws at registration).
 
-### Why these ids are immutable
+> **Adding a distributed field changes the wire schema.** With no attribute in the way, a new field declaration is a schema declaration: it shifts ids, changes the format checksum, and needs a version bump. That is the deliberate trade for not having to mark anything up.
 
-The two id systems split cleanly by medium — **short numbers identify things on the wire, `PersistAs` strings identify things at rest** — and carry different immutability rules. Keeping this straight is the single most important thing to understand before you ship:
+### `[PersistAs("key")]`
+
+Stores a distributed field's value in the database under `key`. This is the one thing a field's *type* cannot express, so it is the only field-level attribute left.
+
+```csharp
+[PersistAs("hp")]
+public DistributedValue<int, Int32Serializer> Health;
+```
+
+- The declaring entity type must itself be persisted (have its own `PersistAs`), and the field may not be temporal. See [§9](#9-persistent-objects).
+- The key must be non-empty and must not start with `_`.
+- Applying it to a field that is not a distributed field is a compile error (`IMP5`).
+
+Note the two spellings are different things: `[DistributedEntity(id, PersistAs = "…")]` is a *named property* on the type-level attribute, while `[PersistAs("…")]` is the field-level attribute.
+
+### How field ids are assigned
+
+`Impunity.Connection.DistributedFieldIds` derives every field's wire id from the entity type itself, walking the inheritance chain **base class first**, then by **ordinal field name** within each class, numbered from 1.
+
+The ids are **per concrete entity type**. Because each registered type gets its own property table on the server, sibling subclasses never have to agree: an inherited field may hold a different id in each subclass, and that is fine. This is what removes the old requirement that ids be unique across a class *and all of its parents* — the bookkeeping that made deep hierarchies painful.
+
+What follows from the ordering:
+
+| You do this | Effect |
+|---|---|
+| Add a field to a subclass | Inherited fields keep their ids; the new field is numbered after them |
+| Reorder or move declarations in source | Nothing changes — declaration order is not used |
+| Add or remove a distributed field | Later fields *in the same class* renumber — a schema change (bump the version) |
+| **Rename** a field | It renumbers — a schema change (bump the version) |
+
+Two details worth knowing. The ordering is **imposed, not inherited from reflection**: `Type.GetFields` does not guarantee an order, so the chain is walked one level at a time and sorted. And the walk uses `BindingFlags.DeclaredOnly` per level, because a flattened `GetFields` silently omits a base type's `private` fields — which would leave such a field holding a dirty bit that nothing ever serializes.
+
+The same table is used in both places a field id is needed, so they cannot disagree: the generated `InitializeDistributedFields` (which turns the id into the field's dirty bitmask) and `ClientEntityManager.RegisterEntityType` (which puts it on the wire).
+
+### Wire ids vs. durable keys
+
+The two identity systems split cleanly by medium — **numbers identify things on the wire, `PersistAs` strings identify things at rest** — and carry very different rules. Keeping this straight is the single most important thing to understand before you ship:
 
 | Identity | What it identifies | Rule |
 |---|---|---|
-| **Numeric ids** (`[DistributedEntity(n)]`, `[Distributed(n)]`) | The **wire identity** of every type and field, exchanged on the connect handshake and carried compactly in every update. Numeric ids are never written into saved data. | **Fixed per schema version.** Every build sharing a schema version must agree on the numbers; changing one is a schema change like any other (bump the version and move all builds together). Saved data is unaffected. |
+| **Numeric ids** (`[DistributedEntity(n)]`, and the auto-assigned field ids) | The **wire identity** of every type and field, exchanged on the connect handshake and carried compactly in every update. Numeric ids are never written into saved data. | **Fixed per schema version.** Every build sharing a schema version must agree on the numbers; changing one is a schema change like any other (bump the version and move all builds together). Saved data is unaffected. |
 | **`PersistAs` string keys** | The **durable identity** of everything stored in the database: each persisted entity row records its type's key (the stored `t`), and each persisted field value is stored under the field's key. | **Immutable forever** once data exists. Renaming a key orphans everything stored under the old one (recoverable only via a data migration). Entity-level keys must be **unique across all entity types**. |
 
 Practical consequences:
 
 - **The split is deliberate:** compact numbers keep replication traffic small; longer meaningful strings make the data at rest self-describing (and easy to identify in migration code, which sees raw BSON rows).
-- **Renaming and reorganizing code is free** — and is the whole reason identity isn't the class or field name. You can rename a `[DistributedEntity]` class or a `[Distributed]` field, move it to a different namespace, or rename the `enum` that labels the ids, and neither the wire nor the database notices.
+- **Moving and reorganizing code is free.** You can move a `[DistributedEntity]` class to a different namespace or reorder its fields and neither the wire nor the database notices. Renaming is *nearly* free: renaming a **class** changes nothing, but renaming a **field** renumbers it, which is a wire change (bump the version) though never a data change.
 - **Treat `PersistAs` keys as your permanent storage schema.** Choose them deliberately; once a save exists they can never change. Keys may not be empty and may not start with `_` (reserved), and a type's key may not be shared with another type (throws at registration).
-- **Renumbering a numeric id is a coordinated wire change, not a data change** — it alters the format checksum, so it needs a version bump and all builds updated together, but existing saves reload untouched. Reusing a number *within* a version, or between builds that must interoperate, silently misreads updates — don't.
+- **Renumbering is a coordinated wire change, not a data change** — it alters the format checksum, so it needs a version bump and all builds updated together, but existing saves reload untouched. A format change also unloads the server's live state so the world is re-read through the new schema (see [`SchemaMigration.md`](SchemaMigration.md) §8).
 
 ### The source generator
 
 Entity types are `partial` because the `ImpunityCodeGenerator` Roslyn source generator emits the other half at compile time. For each `[DistributedEntity]` class it generates:
 
-- An `override void InitializeDistributedFields()` that wires every `[Distributed]` field to its owning entity and id: `Position._imp_Initialize(this, 1);`. This runs from the entity's base constructor, so fields are ready to use immediately after `new`.
+- An `override void InitializeDistributedFields()` that wires every distributed field to its owning entity and its assigned id, resolved through `DistributedFieldIds.ForType(GetType())`. It uses the *runtime* type, because an inherited field's id depends on the full field set of the object actually being constructed. This runs from the entity's base constructor, so fields are ready to use immediately after `new` — including on offline instances that are never registered.
 - Six private `_imp_…Wrapper_<FieldName>` methods per field that the `ClientEntityManager` invokes by reflection to (de)serialize the field (write changes, read initial, read change, skip, get-as-BSON, set-from-BSON).
 
 You never write or call these. You only need to remember: **the class must be `partial`, and a field becomes live the moment its entity is constructed** (so it is safe to subscribe to a field's `OnChanged` in your constructor — the test entities do exactly this).
@@ -123,17 +162,12 @@ A complete object:
 [DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "Create")]
 public partial class Player : DistributedObjectBase
 {
-    enum FieldIds : byte { Position = 1, Health = 2, Inventory = 3 }
-
     public static IDistributedEntity Create() => new Player();
 
-    [Distributed((byte)FieldIds.Position)]
     public DistributedValue<Vector3, Vector3Serializer> Position;
 
-    [Distributed((byte)FieldIds.Health)]
     public DistributedValue<int, Int32Serializer> Health;
 
-    [Distributed((byte)FieldIds.Inventory)]
     public DistributedStringDictionary<int, Int32Serializer> Inventory;   // itemName → count
 
     public Player()
@@ -150,12 +184,8 @@ A channel is the same, deriving from `DistributedChannelBase`:
 [DistributedEntity(TestEntityTypes.ZONE)]
 public partial class Zone : DistributedChannelBase
 {
-    enum FieldIds : byte { Status = 1, Chat = 2 }
-
-    [Distributed((byte)FieldIds.Status)]
     public DistributedValue<string, StringSerializer> Status;
 
-    [Distributed((byte)FieldIds.Chat)]
     public DistributedQueue<string, StringSerializer> Chat;   // last N chat lines
 }
 ```
@@ -174,7 +204,7 @@ var connection = RemoteGameConnection.MakeTCPRemoteConnection(endpoint, "MyGame"
 connection.Connect(err => { /* connected */ });
 ```
 
-Under the hood the manager's `RegisterEntityTypes(Type[])` walks each type by reflection, validates ids, and produces the `GameStateEntityTypeDef[]` sent to the server during the handshake. The server adopts that format, so client and server share one definition of every type.
+Under the hood the manager's `RegisterEntityTypes(Type[])` walks each type by reflection, assigns every field its wire id, and produces the `GameStateEntityTypeDef[]` sent to the server during the handshake. The server adopts that format, so client and server share one definition of every type.
 
 > A type with **no** distributed fields is legal (see `TestEmptyObj`) — useful as a bare presence/identity object or a marker channel.
 
@@ -185,8 +215,8 @@ Under the hood the manager's `RegisterEntityTypes(Type[])` walks each type by re
 A distributed field is a generic struct `Field<T, S>` where `T` is the value type and `S` is a **serializer struct** that knows how to read/write `T`. You always supply both:
 
 ```csharp
-[Distributed(1)] public DistributedValue<int, Int32Serializer> Score;
-[Distributed(2)] public DistributedValue<Vector3, Vector3Serializer> Position;
+public DistributedValue<int, Int32Serializer> Score;
+public DistributedValue<Vector3, Vector3Serializer> Position;
 ```
 
 ### The field types
@@ -402,16 +432,16 @@ Persistence stores an entity's marked fields in the server's database so they su
 To make a type persistent:
 
 1. Give the **type** a `PersistAs` key: `[DistributedEntity(id, PersistAs = "player")]`.
-2. Give each field you want stored a `PersistAs` key: `[Distributed(id, PersistAs = "hp")]`.
+2. Give each field you want stored a `PersistAs` key: `[PersistAs("hp")]`.
 
 ```csharp
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE_OBJECT, PersistAs = "zobj")]
 public partial class ZoneObject : DistributedObjectBase
 {
-    [Distributed(1, PersistAs = "pos")]   // stored
+    [PersistAs("pos")]                     // stored
     public DistributedValue<Vector2Int, Vector2IntSerializer> Position;
 
-    [Distributed(2)]                       // replicated but NOT stored
+                                           // replicated but NOT stored
     public DistributedValue<Vector3, Vector3Serializer> Direction;
 }
 ```
@@ -559,7 +589,6 @@ Details worth knowing:
 A temporal value is a single value that also carries the server timestamp of its last modification — for state where a late joiner cares *how old* the value is.
 
 ```csharp
-[Distributed(15)]
 public DistributedTemporalValue<MovementState, MovementSerializer> Movement;
 
 // On first load you learn how old the value is:
@@ -592,7 +621,7 @@ Use it for client-side prediction, cosmetic/interpolated state, or any value you
 [DistributedEntity(typeId, FactoryMethod = "…", PersistAs = "…")]   // typeId > 0, 0 reserved
 public partial class Foo : DistributedObjectBase   // or DistributedChannelBase, or the MonoBehaviour bases
 {
-    [Distributed(fieldId, PersistAs = "…")]        // fieldId 1–63
+    [PersistAs("…")]                               // optional: also store it
     public DistributedValue<T, TSerializer> Bar;
 }
 ```

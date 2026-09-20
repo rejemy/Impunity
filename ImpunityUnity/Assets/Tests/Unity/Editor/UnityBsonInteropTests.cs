@@ -18,9 +18,9 @@ using UnityEngine;
 [DistributedEntity(60, PersistAs = "uent")]
 public partial class UnityBsonTestEntity : DistributedObjectBase
 {
-	[Distributed(1, PersistAs = "pos")] public DistributedValue<Vector3, Vector3Serializer> Position;
-	[Distributed(2, PersistAs = "rot")] public DistributedValue<Quaternion, QuaternionSerializer> Rotation;
-	[Distributed(3, PersistAs = "tint")] public DistributedValue<Color, ColorSerializer> Tint;
+	[PersistAs("pos")] public DistributedValue<Vector3, Vector3Serializer> Position;
+	[PersistAs("rot")] public DistributedValue<Quaternion, QuaternionSerializer> Rotation;
+	[PersistAs("tint")] public DistributedValue<Color, ColorSerializer> Tint;
 }
 
 public class UnityBsonInteropTests

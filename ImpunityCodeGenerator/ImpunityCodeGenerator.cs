@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace SourceGenerator
@@ -13,17 +14,10 @@ namespace SourceGenerator
 	public class DistributedPropertyInfo
 	{
 		public string PropertyName { get; set; }
-		public string PropertyFieldType { get; set; }
-		public string PropertyDType { get; set; }
-		public string PropertyId { get; set; }
 
-
-		public DistributedPropertyInfo(string name, string fieldType, string dtype, string propId)
+		public DistributedPropertyInfo(string name)
 		{
 			PropertyName = name;
-			PropertyFieldType = fieldType;
-			PropertyDType = dtype;
-			PropertyId = propId;
 		}
 
 	}
@@ -48,9 +42,6 @@ namespace SourceGenerator
 		public static HashSet<string> IgnoreAssemblies = new HashSet<string>(new[]
 			{ "UnityEngine.TestRunner", "UnityEditor.TestRunner", "Unity.VisualStudio.Editor", "Assembly-CSharp-Editor" });
 
-		public static HashSet<string> ValidDistributedFieldTypes = new HashSet<string>(new[]
-			{ "DistributedValue", "DistributedArray", "DistributedQueue", "DistributedStack", "DistributedIntDictionary", "DistributedStringDictionary",
-			  "DistributedTemporalValue", "DistributedTemporalArray", "DistributedTemporalQueue", "DistributedTemporalIntDictionary", "DistributedTemporalStringDictionary" });
 
 
 		// IDE compilers (VS / VS Code's Roslyn language server) cache and reuse a single
@@ -237,9 +228,17 @@ namespace SourceGenerator
 			Output.AppendLine("\t\tpublic override void InitializeDistributedFields()\n\t\t{");
 			Output.AppendLine("\t\tbase.InitializeDistributedFields();");
 
-			foreach (DistributedPropertyInfo propInfo in classInfo.Properties)
+			if (classInfo.Properties.Count > 0)
 			{
-				Output.AppendLine($"\t\t\t{propInfo.PropertyName}._imp_Initialize(this, {propInfo.PropertyId});");
+				// Wire ids are assigned per concrete runtime type over its whole inheritance chain, so resolve
+				// through GetType() rather than this class: an inherited field's id depends on the full field set of
+				// the object actually being constructed. ClientEntityManager.RegisterEntityType reads the same table.
+				Output.AppendLine("\t\t\tvar _imp_fieldIds = Impunity.Connection.DistributedFieldIds.ForType(GetType());");
+
+				foreach (DistributedPropertyInfo propInfo in classInfo.Properties)
+				{
+					Output.AppendLine($"\t\t\t{propInfo.PropertyName}._imp_Initialize(this, _imp_fieldIds[\"{propInfo.PropertyName}\"]);");
+				}
 			}
 
 			Output.AppendLine("\t\t}\n");
@@ -319,7 +318,85 @@ namespace SourceGenerator
 				}
 			}
 
+			if (!generated)
+			{
+				WarnAboutStrandedDistributedFields(context, cd);
+			}
+
 			return generated;
+		}
+
+		// A distributed field only replicates if it lives on a [DistributedEntity] type — nothing else generates the
+		// serialization helpers or registers it. Since fields are now detected by their type rather than an attribute,
+		// a field that has strayed onto an ordinary class would otherwise be silently inert, so say so.
+		private void WarnAboutStrandedDistributedFields(GeneratorExecutionContext context, ClassDeclarationSyntax cd)
+		{
+			SemanticModel model = context.Compilation.GetSemanticModel(cd.SyntaxTree);
+
+			// Check the merged type symbol, so another part of a partial class carrying the attribute counts.
+			INamedTypeSymbol classSymbol = model.GetDeclaredSymbol(cd) as INamedTypeSymbol;
+			if (classSymbol != null)
+			{
+				foreach (AttributeData attr in classSymbol.GetAttributes())
+				{
+					if (attr.AttributeClass != null && attr.AttributeClass.Name == "DistributedEntity")
+					{
+						return;
+					}
+				}
+			}
+
+			foreach (var fieldDecl in cd.ChildNodes().OfType<FieldDeclarationSyntax>())
+			{
+				if (!IsDistributedField(context, model, fieldDecl))
+				{
+					continue;
+				}
+
+				var msg = new DiagnosticDescriptor("IMP4", "Distributed field outside a distributed entity",
+					"Field '" + fieldDecl.Declaration.Variables.First().Identifier.Text + "' is a distributed field, but "
+					+ cd.Identifier.Text + " has no [DistributedEntity] attribute, so it will never be replicated",
+					"Mismatch", DiagnosticSeverity.Warning, true);
+				context.ReportDiagnostic(Diagnostic.Create(msg, fieldDecl.GetLocation()));
+			}
+		}
+
+		// A field is distributed if — and only if — its type implements IDistributedField. Resolved through the
+		// semantic model rather than by matching type names, so qualified names, aliases and any future field
+		// container all work, and so the generator agrees exactly with the runtime's reflection check.
+		private bool IsDistributedField(GeneratorExecutionContext context, SemanticModel model, FieldDeclarationSyntax fd)
+		{
+			foreach (SyntaxToken modifier in fd.Modifiers)
+			{
+				// Only instance fields replicate; the runtime enumerates with BindingFlags.Instance.
+				if (modifier.IsKind(SyntaxKind.StaticKeyword) || modifier.IsKind(SyntaxKind.ConstKeyword))
+				{
+					return false;
+				}
+			}
+
+			INamedTypeSymbol distributedFieldInterface =
+				context.Compilation.GetTypeByMetadataName("Impunity.Connection.IDistributedField");
+			if (distributedFieldInterface == null)
+			{
+				return false;
+			}
+
+			ITypeSymbol fieldType = model.GetTypeInfo(fd.Declaration.Type).Type;
+			if (fieldType == null)
+			{
+				return false;
+			}
+
+			foreach (INamedTypeSymbol iface in fieldType.AllInterfaces)
+			{
+				if (SymbolEqualityComparer.Default.Equals(iface.OriginalDefinition, distributedFieldInterface))
+				{
+					return true;
+				}
+			}
+
+			return false;
 		}
 
 		private void AnalyseDistributedClass(GeneratorExecutionContext context, ClassDeclarationSyntax cd)
@@ -330,53 +407,38 @@ namespace SourceGenerator
 
 			WriteInfo("Found distributed class " + classInfo.Namespace + "." + classInfo.ClassName);
 
+			SemanticModel model = context.Compilation.GetSemanticModel(cd.SyntaxTree);
+
 			foreach (var fieldDecl in cd.ChildNodes().OfType<FieldDeclarationSyntax>())
 			{
-				foreach (var attribute in fieldDecl.DescendantNodes().OfType<AttributeSyntax>())
+				bool isDistributed = IsDistributedField(context, model, fieldDecl);
+
+				if (!isDistributed)
 				{
-					if (attribute.Name.ToString() == "Distributed")
+					// [PersistAs] only means anything on a distributed field; anywhere else it is a mistake that
+					// would otherwise store nothing.
+					foreach (var attribute in fieldDecl.DescendantNodes().OfType<AttributeSyntax>())
 					{
-						AnalyseDistributedField(context, fieldDecl, attribute, classInfo);
+						string attrName = attribute.Name.ToString();
+						if (attrName == "PersistAs" || attrName == "PersistAsAttribute")
+						{
+							var msg = new DiagnosticDescriptor("IMP5", "PersistAs on a non-distributed field",
+								"[PersistAs] can only be applied to a distributed field (one whose type implements IDistributedField)",
+								"Mismatch", DiagnosticSeverity.Error, true);
+							context.ReportDiagnostic(Diagnostic.Create(msg, attribute.GetLocation()));
+						}
 					}
+					continue;
 				}
+
+				AnalyseDistributedField(context, fieldDecl, classInfo);
 			}
 
 			DistributedClasses.Add(classInfo);
 		}
 
-		private void AnalyseDistributedField(GeneratorExecutionContext context, FieldDeclarationSyntax fd, AttributeSyntax attr, DistributedClassInfo classInfo)
+		private void AnalyseDistributedField(GeneratorExecutionContext context, FieldDeclarationSyntax fd, DistributedClassInfo classInfo)
 		{
-			string? distributedPropertyId = null;
-
-			var distributeArguments = attr.DescendantNodes().OfType<AttributeArgumentSyntax>();
-			foreach (AttributeArgumentSyntax argSyntax in distributeArguments)
-			{
-				string? argName = null;
-				if (argSyntax.NameEquals != null)
-				{
-					IdentifierNameSyntax argIdentifier = argSyntax.NameEquals.ChildNodes().OfType<IdentifierNameSyntax>().FirstOrDefault();
-					if (argIdentifier != null)
-					{
-						argName = argIdentifier.Identifier.Text;
-					}
-				}
-
-				string? argValue = argSyntax.Expression?.ToString();
-
-				if (argName == null)
-				{
-					// propertyId
-					distributedPropertyId = argValue;
-				}
-			}
-
-			if (distributedPropertyId == null)
-			{
-				var msg = new DiagnosticDescriptor("IMP2", "Missing distributed property id", "Distributed property must have an id", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, distributeArguments.First().GetLocation()));
-				return;
-			}
-
 			VariableDeclarationSyntax vd = fd.ChildNodes().OfType<VariableDeclarationSyntax>().First();
 			if (vd.Variables.Count != 1)
 			{
@@ -388,41 +450,11 @@ namespace SourceGenerator
 
 			VariableDeclaratorSyntax varDef = vd.Variables.First();
 
-			GenericNameSyntax genericField = vd.ChildNodes().OfType<GenericNameSyntax>().FirstOrDefault();
-			if (genericField == null)
-			{
-				var msg = new DiagnosticDescriptor("IMP2", "Invalid Distributed Type", "Distributed attribute on an unsupported field type", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, vd.GetLocation()));
-
-				return;
-			}
-
-			string fieldType = genericField.Identifier.Text;
-			if (!ValidDistributedFieldTypes.Contains(fieldType))
-			{
-				var msg = new DiagnosticDescriptor("IMP1", "Unknown Distributed Type", "Type " + fieldType + " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
-
-				return;
-			}
-
-			TypeArgumentListSyntax genericArgsList = genericField.ChildNodes().OfType<TypeArgumentListSyntax>().First();
-			if (genericArgsList == null)
-			{
-				var msg = new DiagnosticDescriptor("IMP1", "Generic types not defined", "Type " + fieldType + " is not a supported distributed field type", "Mismatch", DiagnosticSeverity.Error, true);
-				context.ReportDiagnostic(Diagnostic.Create(msg, genericField.GetLocation()));
-
-				return;
-			}
-
-			var dTypeIdentifier = genericArgsList.Arguments.First();
-
-			DistributedPropertyInfo propInfo = new DistributedPropertyInfo(varDef.Identifier.ToString(),
-													fieldType, dTypeIdentifier.ToString(), distributedPropertyId);
+			DistributedPropertyInfo propInfo = new DistributedPropertyInfo(varDef.Identifier.ToString());
 
 			classInfo.Properties.Add(propInfo);
 
-			WriteInfo("Found distributed field " + propInfo.PropertyDType + " " + propInfo.PropertyName + " (" + propInfo.PropertyId + ", " + ")");
+			WriteInfo("Found distributed field " + propInfo.PropertyName);
 		}
 
 		// determine the namespace the class/enum/struct is declared in, if any

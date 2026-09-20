@@ -319,52 +319,65 @@ namespace Impunity.Tests
 		public void GetFieldSchema_ClassifiesKindsAndClrTypes()
 		{
 			var em = MakeManager();
-			var byId = em.GetFieldSchema(typeof(BsonTestEntity)).ToDictionary(f => f.FieldId);
+			// Keyed by name, not id: wire ids are assigned automatically now, so the CLR field name is the
+			// identity a caller writes down.
+			var byName = em.GetFieldSchema(typeof(BsonTestEntity)).ToDictionary(f => f.FieldName);
 
-			Assert.AreEqual(15, byId.Count);
+			Assert.AreEqual(15, byName.Count);
 
 			// Scalar, persisted
-			Assert.AreEqual("Name", byId[1].FieldName);
-			Assert.AreEqual("name", byId[1].PersistAs);
-			Assert.AreEqual(GameStateEntityFieldType.Value, byId[1].FieldType);
-			Assert.AreEqual(GameStateEntityPropertyValueType.String, byId[1].ValueType);
-			Assert.AreEqual(typeof(string), byId[1].ValueClrType);
-			Assert.IsFalse(byId[1].IsTemporal);
+			Assert.AreEqual("name", byName["Name"].PersistAs);
+			Assert.AreEqual(GameStateEntityFieldType.Value, byName["Name"].FieldType);
+			Assert.AreEqual(GameStateEntityPropertyValueType.String, byName["Name"].ValueType);
+			Assert.AreEqual(typeof(string), byName["Name"].ValueClrType);
+			Assert.IsFalse(byName["Name"].IsTemporal);
 
 			// Non-persisted → PersistAs null
-			Assert.IsNull(byId[7].PersistAs);
+			Assert.IsNull(byName["Transient"].PersistAs);
 
 			// Temporal (and never persisted)
-			Assert.IsTrue(byId[8].IsTemporal);
-			Assert.IsNull(byId[8].PersistAs);
+			Assert.IsTrue(byName["Ephemeral"].IsTemporal);
+			Assert.IsNull(byName["Ephemeral"].PersistAs);
 
 			// Collections expose the element/value CLR type
-			Assert.AreEqual(GameStateEntityFieldType.Array, byId[9].FieldType);
-			Assert.AreEqual(typeof(int), byId[9].ValueClrType);
-			Assert.AreEqual(GameStateEntityFieldType.IntDictionary, byId[10].FieldType);
-			Assert.AreEqual(typeof(string), byId[10].ValueClrType);   // value type, not the int key
-			Assert.AreEqual(GameStateEntityFieldType.StringDictionary, byId[11].FieldType);
-			Assert.AreEqual(GameStateEntityFieldType.Queue, byId[12].FieldType);
-			Assert.AreEqual(typeof(string), byId[12].ValueClrType);
-			Assert.AreEqual(GameStateEntityFieldType.Stack, byId[15].FieldType);
-			Assert.AreEqual(typeof(string), byId[15].ValueClrType);
+			Assert.AreEqual(GameStateEntityFieldType.Array, byName["Scores"].FieldType);
+			Assert.AreEqual(typeof(int), byName["Scores"].ValueClrType);
+			Assert.AreEqual(GameStateEntityFieldType.IntDictionary, byName["Items"].FieldType);
+			Assert.AreEqual(typeof(string), byName["Items"].ValueClrType);   // value type, not the int key
+			Assert.AreEqual(GameStateEntityFieldType.StringDictionary, byName["Tags"].FieldType);
+			Assert.AreEqual(GameStateEntityFieldType.Queue, byName["Log"].FieldType);
+			Assert.AreEqual(typeof(string), byName["Log"].ValueClrType);
+			Assert.AreEqual(GameStateEntityFieldType.Stack, byName["Undo"].FieldType);
+			Assert.AreEqual(typeof(string), byName["Undo"].ValueClrType);
 
 			// Complex classification via ValueType (no BsonSerializer<> sniffing)
-			Assert.AreEqual(GameStateEntityPropertyValueType.CustomNullable, byId[13].ValueType);
-			Assert.AreEqual(typeof(BsonTestPoco), byId[13].ValueClrType);
-			Assert.AreEqual(GameStateEntityPropertyValueType.CustomSmall, byId[14].ValueType);
-			Assert.AreEqual(typeof(TestVec3), byId[14].ValueClrType);
+			Assert.AreEqual(GameStateEntityPropertyValueType.CustomNullable, byName["Data"].ValueType);
+			Assert.AreEqual(typeof(BsonTestPoco), byName["Data"].ValueClrType);
+			Assert.AreEqual(GameStateEntityPropertyValueType.CustomSmall, byName["Position"].ValueType);
+			Assert.AreEqual(typeof(TestVec3), byName["Position"].ValueClrType);
 		}
 
 		[Test, Category("BsonSchema")]
 		public void GetFieldSchema_IncludesInheritedFields()
 		{
 			var em = MakeManager();
-			var byId = em.GetFieldSchema(typeof(BsonTestSubEntity)).ToDictionary(f => f.FieldId);
+			var byName = em.GetFieldSchema(typeof(BsonTestSubEntity)).ToDictionary(f => f.FieldName);
 
-			Assert.AreEqual(16, byId.Count);             // 15 inherited + Extra
-			Assert.IsTrue(byId.ContainsKey(1));          // inherited Name
-			Assert.AreEqual("extra", byId[20].PersistAs); // subclass-declared field
+			Assert.AreEqual(16, byName.Count);                 // 15 inherited + Extra
+			Assert.IsTrue(byName.ContainsKey("Name"));         // inherited
+			Assert.AreEqual("extra", byName["Extra"].PersistAs); // subclass-declared field
+
+			// Ids are assigned base-first, so the inherited fields keep the ids they have on the base type and the
+			// subclass's own field lands after them. That is what lets a subclass add fields without disturbing
+			// (or having to know) its base's numbering.
+			var baseByName = em.GetFieldSchema(typeof(BsonTestEntity)).ToDictionary(f => f.FieldName);
+			foreach (var kv in baseByName)
+			{
+				Assert.AreEqual(kv.Value.FieldId, byName[kv.Key].FieldId,
+					"Inherited field " + kv.Key + " should keep its base-type id on the subclass");
+			}
+			Assert.AreEqual(baseByName.Count + 1, byName["Extra"].FieldId,
+				"A subclass-declared field is numbered after everything it inherits");
 		}
 
 		[Test, Category("BsonSchema")]

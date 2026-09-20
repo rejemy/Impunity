@@ -138,15 +138,11 @@ namespace Impunity.Tests
 	[DistributedEntity(IntegrationTestTypes.ENTITY)]
 	public partial class IntegrationTestEntity : DistributedObjectBase
 	{
-		public enum Props : byte { HEALTH = 1, NAME = 2, ACTION = 3 }
 
-		[Distributed((byte)Props.HEALTH)]
 		public DistributedValue<int, Int32Serializer> Health;
 
-		[Distributed((byte)Props.NAME)]
 		public DistributedValue<string, StringSerializer> DisplayName;
 
-		[Distributed((byte)Props.ACTION)]
 		public DistributedTemporalValue<int, Int32Serializer> Action;
 
 		public bool WasDeleted;
@@ -166,21 +162,15 @@ namespace Impunity.Tests
 	[DistributedEntity(IntegrationTestTypes.CHANNEL)]
 	public partial class IntegrationTestChannel : DistributedChannelBase
 	{
-		public enum Props : byte { STATUS = 1, GRID = 2, CHAT = 3, FLAGS = 4, HISTORY = 5 }
 
-		[Distributed((byte)Props.STATUS)]
 		public DistributedValue<string, StringSerializer> Status;
 
-		[Distributed((byte)Props.GRID)]
 		public DistributedArray<int, Int32Serializer> Grid;
 
-		[Distributed((byte)Props.CHAT)]
 		public DistributedQueue<string, StringSerializer> Chat;
 
-		[Distributed((byte)Props.FLAGS)]
 		public DistributedIntDictionary<string, StringSerializer> Flags;
 
-		[Distributed((byte)Props.HISTORY)]
 		public DistributedStack<string, StringSerializer> History;
 
 		public int UndistributedCount;
@@ -207,18 +197,16 @@ namespace Impunity.Tests
 	[DistributedEntity(MigTestTypes.PCHANNEL, PersistAs = "mchan")]
 	public partial class MigTestChannel : DistributedChannelBase
 	{
-		public enum Props : byte { LABEL = 1 }
 
-		[Distributed((byte)Props.LABEL, PersistAs = "label")]
+		[PersistAs("label")]
 		public DistributedValue<string, StringSerializer> Label;
 	}
 
 	[DistributedEntity(MigTestTypes.POBJECT, PersistAs = "mobj")]
 	public partial class MigTestObject : DistributedObjectBase
 	{
-		public enum Props : byte { SCORE = 1 }
 
-		[Distributed((byte)Props.SCORE, PersistAs = "score")]
+		[PersistAs("score")]
 		public DistributedValue<int, Int32Serializer> Score;
 	}
 
@@ -261,33 +249,33 @@ namespace Impunity.Tests
 	[DistributedEntity(BsonTestIds.ENTITY, PersistAs = "ent")]
 	public partial class BsonTestEntity : DistributedObjectBase
 	{
-		[Distributed(1, PersistAs = "name")] public DistributedValue<string, StringSerializer> Name;
-		[Distributed(2, PersistAs = "count")] public DistributedValue<int, Int32Serializer> Count;
-		[Distributed(3, PersistAs = "ratio")] public DistributedValue<float, FloatSerializer> Ratio;
-		[Distributed(4, PersistAs = "bigId")] public DistributedValue<ulong, UInt64Serializer> BigId;
-		[Distributed(5, PersistAs = "when")] public DistributedValue<DateTimeOffset, DateTimeOffsetSerializer> When;
-		[Distributed(6, PersistAs = "active")] public DistributedValue<bool, BoolSerializer> Active;
+		[PersistAs("name")] public DistributedValue<string, StringSerializer> Name;
+		[PersistAs("count")] public DistributedValue<int, Int32Serializer> Count;
+		[PersistAs("ratio")] public DistributedValue<float, FloatSerializer> Ratio;
+		[PersistAs("bigId")] public DistributedValue<ulong, UInt64Serializer> BigId;
+		[PersistAs("when")] public DistributedValue<DateTimeOffset, DateTimeOffsetSerializer> When;
+		[PersistAs("active")] public DistributedValue<bool, BoolSerializer> Active;
 
 		// Not persisted (no PersistAs) — must be absent from the produced document.
-		[Distributed(7)] public DistributedValue<int, Int32Serializer> Transient;
+		public DistributedValue<int, Int32Serializer> Transient;
 		// Temporal, not persisted — proves the persisted path skips temporal fields (no Connection needed).
-		[Distributed(8)] public DistributedTemporalValue<int, Int32Serializer> Ephemeral;
+		public DistributedTemporalValue<int, Int32Serializer> Ephemeral;
 
-		[Distributed(9, PersistAs = "scores")] public DistributedArray<int, Int32Serializer> Scores;
-		[Distributed(10, PersistAs = "items")] public DistributedIntDictionary<string, StringSerializer> Items;
-		[Distributed(11, PersistAs = "tags")] public DistributedStringDictionary<string, StringSerializer> Tags;
-		[Distributed(12, PersistAs = "log")] public DistributedQueue<string, StringSerializer> Log;
+		[PersistAs("scores")] public DistributedArray<int, Int32Serializer> Scores;
+		[PersistAs("items")] public DistributedIntDictionary<string, StringSerializer> Items;
+		[PersistAs("tags")] public DistributedStringDictionary<string, StringSerializer> Tags;
+		[PersistAs("log")] public DistributedQueue<string, StringSerializer> Log;
 
-		[Distributed(13, PersistAs = "data")] public DistributedValue<BsonTestPoco, BsonSerializer<BsonTestPoco>> Data;
-		[Distributed(14, PersistAs = "pos")] public DistributedValue<TestVec3, TestVec3Serializer> Position;
-		[Distributed(15, PersistAs = "undo")] public DistributedStack<string, StringSerializer> Undo;
+		[PersistAs("data")] public DistributedValue<BsonTestPoco, BsonSerializer<BsonTestPoco>> Data;
+		[PersistAs("pos")] public DistributedValue<TestVec3, TestVec3Serializer> Position;
+		[PersistAs("undo")] public DistributedStack<string, StringSerializer> Undo;
 
 	}
 
 	[DistributedEntity(BsonTestIds.SUBENTITY, PersistAs = "subent")]
 	public partial class BsonTestSubEntity : BsonTestEntity
 	{
-		[Distributed(20, PersistAs = "extra")] public DistributedValue<string, StringSerializer> Extra;
+		[PersistAs("extra")] public DistributedValue<string, StringSerializer> Extra;
 	}
 
 	/// <summary>Non-persisted subclass of a persisted base — allowed; the inherited persisted fields become
@@ -295,13 +283,13 @@ namespace Impunity.Tests
 	[DistributedEntity(BsonTestIds.EPHEMERAL_SUBENTITY)]
 	public partial class BsonTestEphemeralSubEntity : BsonTestEntity
 	{
-		[Distributed(21)] public DistributedValue<int, Int32Serializer> Runtime;
+		public DistributedValue<int, Int32Serializer> Runtime;
 	}
 
 	/// <summary>Shares BsonTestEntity's PersistAs key — only referenced by the duplicate-key registration test.</summary>
 	[DistributedEntity(BsonTestIds.DUPKEY_ENTITY, PersistAs = "ent")]
 	public partial class BsonTestDupKeyEntity : DistributedObjectBase
 	{
-		[Distributed(1, PersistAs = "other")] public DistributedValue<int, Int32Serializer> Other;
+		[PersistAs("other")] public DistributedValue<int, Int32Serializer> Other;
 	}
 }

@@ -115,14 +115,9 @@ public partial class TestEmptyObj : DistributedObjectBase
 [DistributedEntity(TestEntityTypes.OBJ, FactoryMethod = "DistributedObjFactory")]
 public partial class TestDistObj : DistributedObjectBase
 {
-	enum DistributedPropIds : byte
-	{
-		POS = 1
-	}
 
 	public static IDistributedEntity DistributedObjFactory() { return new TestDistObj(); }
 
-	[Distributed((byte)DistributedPropIds.POS)]
 	public DistributedValue<Vector3, Vector3Serializer> Position;
 
 	public TestDistObj()
@@ -141,15 +136,6 @@ public partial class TestDistObj : DistributedObjectBase
 [DistributedEntity(TestEntityTypes.PLAYER, FactoryMethod = "TestPlayerFactory")]
 public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 {
-	enum DistributedPropIds : byte
-	{
-		TESTBOOL = 10,
-		DIRECTION = 11,
-		FLAGS = 12,
-		QUESTS = 13,
-		BIGDATA = 14,
-		MOVEMENT = 15
-	}
 
 	public static IDistributedEntity TestPlayerFactory() { return new TestPlayer(); }
 
@@ -164,7 +150,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 	}
 
 
-	[Distributed((byte)DistributedPropIds.TESTBOOL)]
 	public DistributedValue<bool, BoolSerializer> TestBool;
 
 	private void OnTestBoolChanged(bool oldValue, bool newValue)
@@ -172,7 +157,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityLogger.LogInformation("Got testbool change on TestPlayer, from " + oldValue.ToString() + " to " + newValue.ToString());
 	}
 
-	[Distributed((byte)DistributedPropIds.DIRECTION)]
 	public DistributedValue<Vector3, Vector3Serializer> Direction;
 
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
@@ -181,7 +165,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((byte)DistributedPropIds.FLAGS)]
 	public DistributedIntDictionary<string, StringSerializer> Flags;
 
 	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
@@ -189,7 +172,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityLogger.LogInformation("Got flags change on TestPlayer, key " + key + " from " + oldFlag + " to " + newFlag);
 	}
 
-	[Distributed((byte)DistributedPropIds.QUESTS)]
 	public DistributedStringDictionary<string, StringSerializer> Quests;
 
 	private void OnQuestsChanged(string key, string oldQuest, string newQuest)
@@ -197,10 +179,8 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityLogger.LogInformation("Got quests change on TestPlayer, key " + key + " from " + oldQuest + " to " + newQuest);
 	}
 
-	[Distributed((byte)DistributedPropIds.BIGDATA)]
 	public DistributedValue<BsonDataRecord, BsonSerializer<BsonDataRecord>> BigData;
 
-	[Distributed((byte)DistributedPropIds.MOVEMENT)]
 	public DistributedTemporalValue<CustomMovementStateData, CustomMovementStateDataSerializer> MovementState;
 
 	private void OnBigDataChanged(BsonDataRecord oldData, BsonDataRecord newData)
@@ -241,13 +221,6 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 [DistributedEntity(TestEntityTypes.ZONE)]
 public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 {
-	enum DistributedPropIds : byte
-	{
-		STATUS = 1,
-		SCALAR = 2,
-		GRID = 3,
-		CHAT = 4
-	}
 
 	public TestZone()
 	{
@@ -257,14 +230,11 @@ public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 		Chat.OnReplaced += OnChatReplaced;
 	}
 
-	[Distributed((byte)DistributedPropIds.STATUS)]
 	public DistributedValue<string, StringSerializer> Status;
 
 
-	[Distributed((byte)DistributedPropIds.SCALAR)]
 	public DistributedValue<float, FloatSerializer> Scalar;
 
-	[Distributed((byte)DistributedPropIds.GRID)]
 	public DistributedArray<int, Int32Serializer> Grid;
 
 	private void OnGridChanged(int index, int oldValue, int newValue)
@@ -279,7 +249,6 @@ public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((byte)DistributedPropIds.CHAT)]
 	public DistributedQueue<string, StringSerializer> Chat;
 
 	private void OnChatChanged(string newValue)
@@ -305,13 +274,6 @@ public partial class TestZone : DistributedChannelBase, IEquatable<TestZone>
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE, PersistAs = "zone")]
 public partial class PersistedTestZone : DistributedChannelBase
 {
-	enum DistributedPropIds : byte
-	{
-		STATUS = 1,
-		SCALAR = 2,
-		GRID = 3,
-		CHAT = 4
-	}
 
 
 	public PersistedTestZone()
@@ -322,13 +284,11 @@ public partial class PersistedTestZone : DistributedChannelBase
 		Chat.OnReplaced += OnChatReplaced;
 	}
 
-	[Distributed((byte)DistributedPropIds.STATUS)]
 	public DistributedValue<string, StringSerializer> Status;
 
-	[Distributed((byte)DistributedPropIds.SCALAR)]
 	public DistributedValue<float, FloatSerializer> Scalar;
 
-	[Distributed((byte)DistributedPropIds.GRID, PersistAs = "grid")]
+	[PersistAs("grid")]
 	public DistributedArray<int, Int32Serializer> Grid;
 
 	private void OnGridChanged(int index, int oldValue, int newValue)
@@ -343,7 +303,6 @@ public partial class PersistedTestZone : DistributedChannelBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((byte)DistributedPropIds.CHAT)]
 	public DistributedQueue<string, StringSerializer> Chat;
 
 	private void OnChatChanged(string newValue)
@@ -362,13 +321,6 @@ public partial class PersistedTestZone : DistributedChannelBase
 [DistributedEntity(TestEntityTypes.PERSISTED_ZONE_OBJECT, PersistAs = "zobj")]
 public partial class ZonePersistedObject : DistributedObjectBase
 {
-	enum DistributedPropIds : byte
-	{
-		POSITION = 1,
-		DIRECTION = 2,
-		FLAGS = 3,
-		QUESTS = 4
-	}
 
 	public ZonePersistedObject()
 	{
@@ -378,7 +330,7 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		Quests.OnChanged += OnQuestsChanged;
 	}
 
-	[Distributed((byte)DistributedPropIds.POSITION, PersistAs = "pos")]
+	[PersistAs("pos")]
 	public DistributedValue<Vector2Int, Vector2IntSerializer> Position;
 
 	private void OnPositionChanged(Vector2Int oldValue, Vector2Int newValue)
@@ -386,7 +338,6 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		ImpunityLogger.LogInformation("Got position change on ZonePersistedObject, from " + oldValue.ToString() + " to " + newValue.ToString());
 	}
 
-	[Distributed((byte)DistributedPropIds.DIRECTION)]
 	public DistributedValue<Vector3, Vector3Serializer> Direction;
 
 	private void OnDirectionChanged(Vector3 oldValue, Vector3 newValue)
@@ -395,7 +346,7 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	[Distributed((byte)DistributedPropIds.FLAGS, PersistAs = "flags")]
+	[PersistAs("flags")]
 	public DistributedIntDictionary<string, StringSerializer> Flags;
 
 	private void OnFlagsChanged(int key, string oldFlag, string newFlag)
@@ -403,7 +354,6 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		ImpunityLogger.LogInformation("Got flags change on ZonePersistedObject, key " + key + " from " + oldFlag + " to " + newFlag);
 	}
 
-	[Distributed((byte)DistributedPropIds.QUESTS)]
 	public DistributedStringDictionary<string, StringSerializer> Quests;
 
 	private void OnQuestsChanged(string key, string oldQuest, string newQuest)

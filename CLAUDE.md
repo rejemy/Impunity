@@ -66,7 +66,7 @@ Run the test suite with `./test.sh` (see Tests below).
 - All client-facing APIs use callback delegates (`ImpunityCallback<T>`), with async/await and Unity coroutine yield extensions provided separately
 - netstandard2.1 compatibility is required for all runtime code (Unity constraint)
 - Public APIs have XML doc comments (`/// <summary>`)
-- Distributed entity types are annotated with `[DistributedEntity]` and fields with `[Distributed]`
+- Distributed entity types are annotated with `[DistributedEntity(typeId)]`. **Fields carry no attribute at all** — a field is distributed iff its type implements `IDistributedField` (instance fields only; `static`/`const` are ignored). The only field-level attribute is `[PersistAs("key")]`, which additionally stores the value. Wire ids are assigned by `DistributedFieldIds` per concrete type, walking the inheritance chain base-first and sorting by field name within each class, so ids never have to be coordinated across a class hierarchy. Adding or renaming a distributed field renumbers and is therefore a schema change (bump the version); reordering or moving declarations is free. The generator detects fields through the semantic model (`Compilation.GetTypeByMetadataName` + `AllInterfaces`), matching the runtime's reflection check exactly; it warns (`IMP4`) about a distributed field on a class with no `[DistributedEntity]`, and errors (`IMP5`) on `[PersistAs]` applied to a non-distributed field.
 
 ## Tests
 

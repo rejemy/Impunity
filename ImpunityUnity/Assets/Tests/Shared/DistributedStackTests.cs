@@ -20,10 +20,8 @@ namespace Impunity.Tests
 	{
 		public const int TYPE_ID = 60;
 
-		[Distributed(1)]
 		public DistributedStack<string, StringSerializer> History;
 
-		[Distributed(2)]
 		public DistributedStack<int, Int32Serializer> Numbers;
 	}
 

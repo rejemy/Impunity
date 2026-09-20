@@ -21,7 +21,7 @@ namespace Impunity.Connection
 		public UInt64 FieldBitmask;
 		/// <summary>The CLR field name on the entity type.</summary>
 		public string FieldName;
-		/// <summary>The database key from <c>[Distributed(PersistAs=…)]</c>, or null if the field is not persisted.</summary>
+		/// <summary>The database key from <c>[PersistAs("…")]</c>, or null if the field is not persisted.</summary>
 		public string? PersistedAs;
 		/// <summary>True if the field is temporal (a transient value; never persisted).</summary>
 		public bool IsTemporal;
@@ -44,7 +44,7 @@ namespace Impunity.Connection
 		/// <summary>Generated wrapper that sets the field's value from a persisted <see cref="BsonValue"/>.</summary>
 		public MethodInfo SetFromBsonMethod;
 
-		/// <summary>Creates field metadata from the field's <c>[Distributed]</c> attribute, resolved value/container
+		/// <summary>Creates field metadata from the field's assigned wire id, resolved value/container
 		/// types, and the entity type's generated serialization wrapper methods.</summary>
 		public DistributedTypeFieldInfo(byte fieldId, UInt64 fieldBitmask, string fieldName, string? persistedAs, bool isTemporal,
 			GameStateEntityFieldType fieldType, GameStateEntityPropertyValueType fieldValueType,
@@ -108,7 +108,7 @@ namespace Impunity.Connection
 		public byte FieldId;
 		/// <summary>The CLR field name on the entity.</summary>
 		public string FieldName = null!;
-		/// <summary>The persistence key from <c>[Distributed(PersistAs=…)]</c>, or null if the field is not persisted.</summary>
+		/// <summary>The persistence key from <c>[PersistAs("…")]</c>, or null if the field is not persisted.</summary>
 		public string? PersistAs;
 		/// <summary>True for temporal fields (never persisted).</summary>
 		public bool IsTemporal;
@@ -736,31 +736,31 @@ namespace Impunity.Connection
 
 			bool hasPersistedField = false;
 
+			// Wire ids are assigned from the type itself, over its whole inheritance chain. The generated
+			// InitializeDistributedFields resolves each field's bitmask through the same table, so the two agree
+			// without either of them naming a number.
+			Dictionary<string, byte> fieldIds = DistributedFieldIds.ForType(entityType);
+
 			IEnumerable<FieldInfo> distributedFieldInfos = GetDistributedFields(entityType);
 			foreach (var fieldInfo in distributedFieldInfos)
 			{
 
-				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
-
-				if (fieldAttr.FieldId <= 0 || fieldAttr.FieldId >= 64)
+				if (!fieldIds.TryGetValue(fieldInfo.Name, out byte assignedFieldId))
 				{
-					throw new Exception("Field ID must be positive integer under 64");
+					throw new Exception("No wire id assigned for distributed field " + entityType.Name + "."
+						+ fieldInfo.Name);
 				}
 
 				Type fieldType = fieldInfo.FieldType;
-				if (fieldType.GetInterface(nameof(IDistributedField)) == null)
-				{
-					throw new Exception("Distributed fields must implement IDistributedField");
-				}
-
 				bool isTemporalValue = fieldType.GetInterface(nameof(IDistributedTemporalField)) != null;
 
 
 				// Create a throw-away instance so we can get its type info
 				IDistributedField tempFieldValue = (IDistributedField)Activator.CreateInstance(fieldType);
 
-				var fieldBitmask = 1ul << (fieldAttr.FieldId - 1);
-				var fieldPersistedAs = fieldAttr.PersistAs?.Trim();
+				var fieldBitmask = 1ul << (assignedFieldId - 1);
+				PersistAs persistAttr = (PersistAs)fieldInfo.GetCustomAttribute(typeof(PersistAs));
+				var fieldPersistedAs = persistAttr?.Key?.Trim();
 
 				if (fieldPersistedAs != null)
 				{
@@ -832,7 +832,7 @@ namespace Impunity.Connection
 				}
 
 
-				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(fieldAttr.FieldId, fieldBitmask, fieldInfo.Name, fieldPersistedAs,
+				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(assignedFieldId, fieldBitmask, fieldInfo.Name, fieldPersistedAs,
 																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType,
 																				writeMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
 
@@ -895,20 +895,40 @@ namespace Impunity.Connection
 			return entityData;
 		}
 
+		/// <summary>Returns every distributed field on a type, including inherited ones, in wire-id order.
+		/// <para>The inheritance chain is walked one level at a time with <see cref="BindingFlags.DeclaredOnly"/>
+		/// rather than relying on a flattened <c>GetFields</c>, for two reasons: a flattened call silently omits a
+		/// base type's <c>private</c> fields (which would leave them holding a dirty bit that nothing ever
+		/// serializes), and its ordering is not contractual. This mirrors
+		/// <see cref="DistributedFieldIds"/> exactly, so registration and the generated field initializers can
+		/// never disagree about which fields exist or what they are numbered.</para></summary>
 		private static IEnumerable<FieldInfo> GetDistributedFields(Type typeInfo)
 		{
-			List<FieldInfo> fields = new List<FieldInfo>();
-
-			foreach (var fieldInfo in typeInfo.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+			List<Type> chain = new List<Type>();
+			for (Type level = typeInfo; level != null && level != typeof(object); level = level.BaseType)
 			{
+				chain.Add(level);
+			}
+			chain.Reverse();
 
-				Distributed fieldAttr = (Distributed)fieldInfo.GetCustomAttribute(typeof(Distributed));
-				if (fieldAttr == null)
+			List<FieldInfo> fields = new List<FieldInfo>();
+			foreach (Type level in chain)
+			{
+				List<FieldInfo> declared = new List<FieldInfo>();
+				foreach (var fieldInfo in level.GetFields(BindingFlags.Instance | BindingFlags.Public
+															| BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
 				{
-					continue;
+					// The field's type is the declaration of intent — no opt-in attribute.
+					if (!typeof(IDistributedField).IsAssignableFrom(fieldInfo.FieldType))
+					{
+						continue;
+					}
+
+					declared.Add(fieldInfo);
 				}
 
-				fields.Add(fieldInfo);
+				declared.Sort((f1, f2) => string.CompareOrdinal(f1.Name, f2.Name));
+				fields.AddRange(declared);
 			}
 
 			return fields;

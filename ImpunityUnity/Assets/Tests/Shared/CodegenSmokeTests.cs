@@ -10,7 +10,6 @@ namespace Impunity.Tests
 	[DistributedEntity(999)]
 	public partial class CodegenSmokeEntity : DistributedObjectBase
 	{
-		[Distributed(1)]
 		public DistributedValue<int, Int32Serializer> Value;
 	}
 
