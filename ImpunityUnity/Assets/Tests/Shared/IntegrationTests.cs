@@ -35,7 +35,9 @@ namespace Impunity.Tests
 				new Type[]
 				{
 					typeof(IntegrationTestEntity),
-					typeof(IntegrationTestChannel)
+					typeof(IntegrationTestChannel),
+					typeof(MigTestChannel),
+					typeof(MigTestObject)
 				}
 			);
 		}
@@ -1111,6 +1113,166 @@ namespace Impunity.Tests
 			var recreated = await Pump(LocalGame.EntityManager.CreateChannelAsync(
 				"ghost", new IntegrationTestChannel(), false, null), LocalGame);
 			Assert.IsTrue(recreated, "Channel name was not freed after the creator disconnected");
+		}
+
+		// ═══════════════════════════════════════════════════════════
+		// 10. Unique-name replace
+		// ═══════════════════════════════════════════════════════════
+
+		static IntegrationTestEntity NamedEntity(string uniqueName, int health, string displayName)
+		{
+			var e = new IntegrationTestEntity { UniqueName = uniqueName };
+			e.Health.Set(health);
+			e.DisplayName.Set(displayName);
+			return e;
+		}
+
+		[Test, Category("UniqueName")]
+		public async Task CreateObject_ReplaceTrue_ReplacesExistingNamedObject()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("replace", new IntegrationTestChannel()), AllConnections());
+			var observer = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("replace", null), AllConnections());
+
+			var original = NamedEntity("boss", 1, "old");
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(original, channel, false), AllConnections());
+			await PumpUntil(() => observer.DistributedObjects.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+			var observedOriginal = FirstEntity(observer);
+
+			// Before the fix this always failed with ActionUniqueNameExists — after already deleting the original.
+			var replacement = NamedEntity("boss", 2, "new");
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(replacement, channel, true), AllConnections());
+
+			await PumpUntil(() => observedOriginal.WasDeleted && observer.DistributedObjects.Count == 1,
+				TimeSpan.FromSeconds(3), AllConnections());
+
+			var observed = FirstEntity(observer);
+			Assert.AreNotSame(observedOriginal, observed, "Observer still holds the original object");
+			Assert.AreEqual("boss", observed.UniqueName);
+			Assert.AreEqual(2, observed.Health.Get(), "Observer did not receive the replacement's values");
+			Assert.AreEqual("new", observed.DisplayName.Get());
+
+			Assert.IsTrue(original.WasDeleted, "Creator's original instance was not deleted");
+			Assert.AreEqual(1, channel.DistributedObjects.Count, "Creator's channel should hold only the replacement");
+			Assert.AreSame(replacement, FirstEntity(channel));
+		}
+
+		[Test, Category("UniqueName")]
+		public async Task CreateObject_ReplaceFalse_NameTaken_FailsAndKeepsOriginal()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("noreplace", new IntegrationTestChannel()), AllConnections());
+			var observer = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("noreplace", null), AllConnections());
+
+			var original = NamedEntity("boss", 1, "old");
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(original, channel, false), AllConnections());
+			await PumpUntil(() => observer.DistributedObjects.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+			var observedOriginal = FirstEntity(observer);
+
+			var err = await PumpExpectingError(
+				LocalGame.EntityManager.CreateObjectAsync(NamedEntity("boss", 2, "new"), channel, false), AllConnections());
+			Assert.IsNotNull(err, "Creating over a taken unique name without replace should fail");
+			Assert.AreEqual(ImpunityErrorCode.ActionUniqueNameExists, err.ErrorId);
+
+			// Let any stray delete/create broadcast arrive before checking nothing changed.
+			await PumpFor(TimeSpan.FromSeconds(0.3), AllConnections());
+
+			Assert.IsFalse(original.WasDeleted, "Original was deleted by a failed non-replace create");
+			Assert.IsFalse(observedOriginal.WasDeleted, "Observer saw the original deleted");
+			Assert.AreEqual(1, observer.DistributedObjects.Count);
+			Assert.AreSame(observedOriginal, FirstEntity(observer));
+			Assert.AreEqual(1, observedOriginal.Health.Get());
+			Assert.AreEqual("old", observedOriginal.DisplayName.Get());
+			Assert.AreEqual(1, channel.DistributedObjects.Count);
+		}
+
+		[Test, Category("UniqueName")]
+		public async Task CreateObject_ReplaceTrue_Persisted_SurvivesRestart()
+		{
+			CreateServer();
+			await ConnectLocal();
+
+			var channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync(
+				"preplace", new MigTestChannel { IsPersisted = true }), LocalGame);
+
+			var original = new MigTestObject { IsPersisted = true, UniqueName = "slot" };
+			original.Score.Set(10);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(original, channel, false), LocalGame);
+
+			// Replace queues DeletePersistedObjectAction then CreatePersistedEntityAction for the same _id.
+			var replacement = new MigTestObject { IsPersisted = true, UniqueName = "slot" };
+			replacement.Score.Set(20);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(replacement, channel, true), LocalGame);
+
+			// DB actions run in FIFO order on one worker, so once this read replies both writes above have landed.
+			await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "flush"), LocalGame);
+
+			DisposeConnection(LocalGame);
+			GameServer.Dispose();
+			GameServer = GameStateServer.Open("test", null, GameStatePath, Options);
+			await ConnectLocal();
+
+			var reloaded = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync<MigTestChannel>("preplace", null), LocalGame);
+			Assert.IsNotNull(reloaded, "Persisted channel did not reload");
+			Assert.AreEqual(1, reloaded.DistributedObjects.Count,
+				"Expected exactly the replacement object in the DB (0 means the delete ran after the create)");
+
+			MigTestObject reloadedObj = null;
+			foreach (var obj in reloaded.DistributedObjects.Values)
+			{
+				reloadedObj = obj as MigTestObject;
+			}
+			Assert.IsNotNull(reloadedObj);
+			Assert.AreEqual("slot", reloadedObj.UniqueName);
+			Assert.AreEqual(20, reloadedObj.Score.Get(), "Reloaded object has the original's persisted value");
+		}
+
+		[Test, Category("UniqueName")]
+		public async Task DeletePersistedObject_DoesNotDeleteObjectsSharingNamePrefix()
+		{
+			CreateServer();
+			await ConnectLocal();
+
+			var channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync(
+				"pprefix", new MigTestChannel { IsPersisted = true }), LocalGame);
+
+			var slot = new MigTestObject { IsPersisted = true, UniqueName = "slot" };
+			slot.Score.Set(1);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(slot, channel, false), LocalGame);
+
+			var slot2 = new MigTestObject { IsPersisted = true, UniqueName = "slot2" };
+			slot2.Score.Set(2);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(slot2, channel, false), LocalGame);
+
+			await Pump(slot.DeleteAsync(null), LocalGame);
+
+			// DB actions run in FIFO order on one worker, so once this read replies the delete has landed.
+			await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "flush"), LocalGame);
+
+			DisposeConnection(LocalGame);
+			GameServer.Dispose();
+			GameServer = GameStateServer.Open("test", null, GameStatePath, Options);
+			await ConnectLocal();
+
+			var reloaded = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync<MigTestChannel>("pprefix", null), LocalGame);
+			Assert.IsNotNull(reloaded, "Persisted channel did not reload");
+			Assert.AreEqual(1, reloaded.DistributedObjects.Count,
+				"Expected only \"slot2\" to survive (0 means deleting \"slot\" also deleted \"slot2\")");
+
+			MigTestObject survivor = null;
+			foreach (var obj in reloaded.DistributedObjects.Values)
+			{
+				survivor = obj as MigTestObject;
+			}
+			Assert.IsNotNull(survivor);
+			Assert.AreEqual("slot2", survivor.UniqueName);
+			Assert.AreEqual(2, survivor.Score.Get(), "Surviving object lost its persisted property");
 		}
 	}
 }

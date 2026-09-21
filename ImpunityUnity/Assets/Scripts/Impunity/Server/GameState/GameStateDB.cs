@@ -447,7 +447,9 @@ namespace Impunity.GameState
 		{
 			var collection = Collections[(int)ImpunityInternalCollectionIds.Entities];
 
-			collection.Collection.Delete(Query.StartsWith("_id", entityId));
+			// The entity doc is "<id>" and each persisted property is "<id>/<prop>". Match on the "/" separator,
+			// not a bare prefix, or deleting "slot" would also delete "slot2" and its properties.
+			collection.Collection.Delete(Query.Or(Query.EQ("_id", entityId), Query.StartsWith("_id", entityId + "/")));
 		}
 
 		public LiveChannelData? LoadChannelData(string channelName)

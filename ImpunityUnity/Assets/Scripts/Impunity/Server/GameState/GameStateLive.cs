@@ -1640,23 +1640,23 @@ namespace Impunity.GameState
 
 			if (uniqueName != null && channel.HasUniqueName(uniqueName))
 			{
-				if (replace)
+				if (!replace)
 				{
-					GameStateObject existing = channel.GetNamedObject(uniqueName)!;
-
-					if (force)
-					{
-						DestroyEntity(existing, null);
-					}
-					else
-					{
-						if (!DeleteEntity(origin, existing.Id, null))
-						{
-							throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Couldn't replace object " + uniqueName + " because existing object was locked by someone else");
-						}
-					}
+					throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Channel already has object with name " + uniqueName);
 				}
-				throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Channel already has object with name " + uniqueName);
+
+				// Remove the existing object, then fall through to create the new one under the now-free name.
+				// Destroying it drops the name from the channel's UniqueNames and from NamedEntities.
+				GameStateObject existing = channel.GetNamedObject(uniqueName)!;
+
+				if (force)
+				{
+					DestroyEntity(existing, null);
+				}
+				else if (!DeleteEntity(origin, existing.Id, null))
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Couldn't replace object " + uniqueName + " because existing object was locked by someone else");
+				}
 			}
 
 			string? dbid = uniqueName;
