@@ -485,8 +485,9 @@ namespace Impunity.Connection
 		/// per-frame sweep in <see cref="SendUpdates"/>. Actions leave the connection in call order, so anything sent
 		/// after this call is ordered behind the update — which is what lets a lock release carry the writes made
 		/// under it. Fields written with <c>SetUnguaranteed</c> still go out unreliably and carry no such ordering.
-		/// No-op when the entity has nothing pending.</summary>
-		/// <param name="entity">The entity whose pending changes to send.</param>
+		/// No-op when the entity has nothing pending, or when no entity is registered under
+		/// <paramref name="entityId"/>.</summary>
+		/// <param name="entityId">The id of the entity whose pending changes to send.</param>
 		internal void FlushEntityNow(uint entityId)
 		{
 			IDistributedEntity entity = DistributedObjects.GetValueOrDefault(entityId);

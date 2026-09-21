@@ -7,6 +7,28 @@ namespace Impunity.Connection
 {
 
 	/// <summary>
+	/// Whether a serializer's value type can be modified in place behind the distributed field's back.
+	/// Declared per serializer rather than inferred from the value type, because the CLR type alone
+	/// does not answer the question: <see cref="BlobSerializer"/>'s <see cref="ArraySegment{T}"/> is a struct
+	/// that wraps a mutable array, while <see cref="StringSerializer"/>'s <c>string</c> is a class that cannot
+	/// be mutated at all.
+	/// </summary>
+	public enum DistributedValueSemantics
+	{
+		/// <summary>The value cannot change without producing a different value (primitives, <c>string</c>,
+		/// <see cref="DateTime"/>, and custom serializers for immutable types). A field holding one of these can
+		/// trust an equality comparison to decide whether a <c>Set</c> actually changed anything.</summary>
+		Immutable,
+
+		/// <summary>The value's contents can be modified in place through a reference the caller still holds —
+		/// an object graph, or a struct wrapping a mutable buffer. A field holding one of these cannot prove a
+		/// <c>Set</c> is a no-op (the incoming value may be the field's own state, already mutated), so it skips
+		/// the unchanged-value short-circuit and always marks itself dirty. See the mutable-value rules in
+		/// <c>docs/guides/DistributedEntities.md</c>.</summary>
+		Mutable,
+	}
+
+	/// <summary>
 	/// Interface for binary serializers used by distributed field types. Each implementation reads and
 	/// writes just the <em>payload</em> of its value type — the wire framing (length prefix for the
 	/// <c>Custom*</c> types, and the null indicator for the nullable ones) is applied by
@@ -36,6 +58,15 @@ namespace Impunity.Connection
 		/// <summary>The property value type tag used in the wire protocol for this serializer's type.
 		/// <see cref="FramingSerializer"/> uses this to decide the framing applied around <see cref="WriteTo"/>.</summary>
 		GameStateEntityPropertyValueType ValueType { get; }
+
+		/// <summary>Whether <typeparamref name="T"/> can be modified in place behind a distributed field's back.
+		/// Distributed fields use this to decide whether an equality comparison can be trusted to detect an
+		/// unchanged <c>Set</c>; <see cref="DistributedValueSemantics.Mutable"/> makes every <c>Set</c> dirty.
+		/// Like <see cref="ValueType"/> this is a compile-time constant for a concrete serializer struct, so the
+		/// branch folds away in specialized generics. Answer
+		/// <see cref="DistributedValueSemantics.Mutable"/> for any serializer over a type whose contents a caller
+		/// could change without constructing a new value.</summary>
+		DistributedValueSemantics ValueSemantics { get; }
 	}
 
 	/// <summary>
@@ -50,6 +81,25 @@ namespace Impunity.Connection
 	/// </summary>
 	public static class FramingSerializer
 	{
+		/// <summary>Whether a value type can represent null. True for the two explicitly nullable custom
+		/// tags, and for <see cref="GameStateEntityPropertyValueType.String"/> and
+		/// <see cref="GameStateEntityPropertyValueType.Blob"/>, whose serializers frame their own null
+		/// indicator. Everything else is a value type that has no null to represent — handing one a BSON null
+		/// would unbox null onto a struct and throw.</summary>
+		public static bool IsNullable(GameStateEntityPropertyValueType valueType)
+		{
+			switch (valueType)
+			{
+				case GameStateEntityPropertyValueType.String:
+				case GameStateEntityPropertyValueType.Blob:
+				case GameStateEntityPropertyValueType.CustomSmallNullable:
+				case GameStateEntityPropertyValueType.CustomNullable:
+					return true;
+				default:
+					return false;
+			}
+		}
+
 		/// <summary>Writes <paramref name="value"/> with whatever framing its serializer's
 		/// <see cref="IDistributableValueSerializer{T}.ValueType"/> requires.</summary>
 		public static void Write<T, S>(S serializer, T value, BinaryWriter w) where S : IDistributableValueSerializer<T>
@@ -210,6 +260,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Boolean; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="sbyte"/> values.</summary>
@@ -238,6 +289,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int8; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="byte"/> values.</summary>
@@ -266,6 +318,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt8; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="short"/> values.</summary>
@@ -294,6 +347,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int16; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="ushort"/> values.</summary>
@@ -322,6 +376,7 @@ namespace Impunity.Connection
 		}
 
 		public readonly GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt16; }
+		public readonly DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="int"/> values.</summary>
@@ -350,6 +405,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int32; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="uint"/> values.</summary>
@@ -378,6 +434,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt32; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="long"/> values.</summary>
@@ -406,6 +463,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Int64; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="ulong"/> values.</summary>
@@ -436,6 +494,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.UInt64; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="float"/> values.</summary>
@@ -466,6 +525,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Float; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="double"/> values.</summary>
@@ -494,6 +554,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Double; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="decimal"/> values.</summary>
@@ -522,6 +583,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Decimal; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="char"/> values.</summary>
@@ -550,6 +612,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Char; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for nullable <see cref="string"/> values. Prefixes with a boolean null indicator.</summary>
@@ -595,6 +658,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.String; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 
@@ -636,13 +700,27 @@ namespace Impunity.Connection
 			return value;
 		}
 
-		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types. A null reads back as an
+		/// empty segment — <see cref="BsonValue"/>'s conversion would unbox a null onto a struct and throw, and
+		/// a null blob is a value this serializer writes (its null indicator on the wire, and
+		/// <see cref="BsonType.Null"/> in a document).</summary>
 		public ArraySegment<byte> FromBsonValue(BsonValue value)
 		{
+			if (value == null || value.IsNull)
+			{
+				return default;
+			}
+
 			return value;
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Blob; }
+
+		/// <summary>Mutable: <see cref="ArraySegment{T}"/> is a struct, but it only points at a byte array whose
+		/// contents a caller can rewrite in place. Its <c>Equals</c> compares the array reference, offset and
+		/// count — never the bytes — so an equal comparison means "the same buffer", which is precisely the case
+		/// the field cannot treat as unchanged.</summary>
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Mutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="DateTime"/> values, stored as binary ticks.</summary>
@@ -672,6 +750,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTime; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="DateTimeOffset"/> values, stored as ticks plus offset in minutes.</summary>
@@ -711,6 +790,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.DateTimeOffset; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="TimeSpan"/> values, stored as ticks.</summary>
@@ -739,6 +819,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.TimeSpan; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for <see cref="Guid"/> values, stored as 16 raw bytes.</summary>
@@ -767,6 +848,7 @@ namespace Impunity.Connection
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.Guid; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>BSON serializer for small custom objects (max 255 bytes). CustomSmall value type — framing
@@ -791,19 +873,36 @@ namespace Impunity.Connection
 			return GetMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 		}
 
-		/// <summary>Converts value to BsonValue</summary>
+		/// <summary>Converts value to BsonValue. Null maps to <see cref="BsonValue.Null"/> — the mapper's
+		/// SerializeObject throws on a null, and these field types are nullable on the wire, so the BSON path
+		/// has to carry a null just as the <see cref="FramingSerializer"/> null indicator does.</summary>
 		public BsonValue ToBsonValue(T value)
 		{
+			if (value == null)
+			{
+				return BsonValue.Null;
+			}
+
 			return GetMapper().SerializeObject(value);
 		}
 
-		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types. A null or missing value
+		/// reads back as null.</summary>
 		public T FromBsonValue(BsonValue value)
 		{
+			if (value == null || value.IsNull)
+			{
+				return null!;
+			}
+
 			return GetMapper().ToObject<T>(value.AsDocument!);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
+
+		/// <summary>Mutable: <typeparamref name="T"/> is an arbitrary object graph whose members a caller can
+		/// change through a reference obtained from the field.</summary>
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Mutable; }
 	}
 
 
@@ -830,18 +929,35 @@ namespace Impunity.Connection
 			return GetMapper().ToObject<T>(BsonSerializer.Deserialize(bytes));
 		}
 
-		/// <summary>Converts value to BsonValue</summary>
+		/// <summary>Converts value to BsonValue. Null maps to <see cref="BsonValue.Null"/> — the mapper's
+		/// SerializeObject throws on a null, and these field types are nullable on the wire, so the BSON path
+		/// has to carry a null just as the <see cref="FramingSerializer"/> null indicator does.</summary>
 		public BsonValue ToBsonValue(T value)
 		{
+			if (value == null)
+			{
+				return BsonValue.Null;
+			}
+
 			return GetMapper().SerializeObject(value);
 		}
 
-		/// <summary>Converts BsonValue to C# type, might throw if incompatible types</summary>
+		/// <summary>Converts BsonValue to C# type, might throw if incompatible types. A null or missing value
+		/// reads back as null.</summary>
 		public T FromBsonValue(BsonValue value)
 		{
+			if (value == null || value.IsNull)
+			{
+				return null!;
+			}
+
 			return GetMapper().ToObject<T>(value.AsDocument!);
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
+
+		/// <summary>Mutable: <typeparamref name="T"/> is an arbitrary object graph whose members a caller can
+		/// change through a reference obtained from the field.</summary>
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Mutable; }
 	}
 }

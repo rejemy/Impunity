@@ -32,6 +32,48 @@ namespace Impunity.Connection
 		GameStateEntityPropertyValueType ValueType { get; }
 	}
 
+	/// <summary>
+	/// The single place distributed fields decide whether a <c>Set</c> can be skipped as a no-op.
+	/// </summary>
+	public static class DistributedFieldPolicy
+	{
+		/// <summary>
+		/// Returns true only when a <c>Set</c> provably changes nothing and can be skipped without marking the
+		/// field dirty.
+		/// <para>
+		/// For a serializer declaring <see cref="DistributedValueSemantics.Mutable"/> this is always false. Such
+		/// a value may be the field's own state, already modified in place through a reference the caller
+		/// obtained from <c>Get()</c> — in which case <paramref name="newValue"/> and
+		/// <paramref name="currentValue"/> are the same object (or, for a blob, the same buffer) and any equality
+		/// comparison, however carefully written, compares the value with itself and reports "unchanged". The
+		/// field has no retained baseline to compare against, so it cannot distinguish a genuine no-op re-set
+		/// from an in-place modification, and always treats the value as changed. The cost is a redundant update
+		/// when a caller re-sets a mutable value that really did not change; the alternative is silently dropping
+		/// a real one.
+		/// </para>
+		/// <para>
+		/// Equality for <see cref="DistributedValueSemantics.Immutable"/> values goes through
+		/// <see cref="EqualityComparer{T}.Default"/>, which uses <see cref="IEquatable{T}"/> when the type
+		/// implements it and <see cref="object.Equals(object)"/> otherwise. Declaring a serializer
+		/// <c>Immutable</c> is therefore an assertion that its type has meaningful value equality — a type
+		/// relying on the default reference equality of a class will not deduplicate correctly.
+		/// </para>
+		/// </summary>
+		public static bool IsUnchanged<T, S>(S serializer, T newValue, T currentValue)
+			where S : IDistributableValueSerializer<T>
+		{
+			// ValueSemantics is a compile-time constant for a concrete serializer struct, so this branch folds
+			// away in specialized generics, exactly like the FramingSerializer switch on ValueType.
+			if (serializer.ValueSemantics == DistributedValueSemantics.Mutable)
+			{
+				return false;
+			}
+
+			// Handles null on either side, and dispatches to IEquatable<T> without boxing when available.
+			return EqualityComparer<T>.Default.Equals(newValue, currentValue);
+		}
+	}
+
 	/// <summary>Extended distributed field that tracks the server timestamp of the last modification. Used for time-sensitive interpolation or age-based logic.</summary>
 	public interface IDistributedTemporalField : IDistributedField
 	{
@@ -47,7 +89,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type (must be equatable for dirty detection).</typeparam>
 	/// <typeparam name="S">The serializer struct used for binary read/write.</typeparam>
-	public struct DistributedValue<T, S> : IDistributedField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedValue<T, S> : IDistributedField where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when the value changes, providing old and new values.</summary>
 		public event Action<T, T> OnChanged;
@@ -65,16 +107,24 @@ namespace Impunity.Connection
 			FieldBitmask = 1ul << (fieldId - 1);
 		}
 
-		/// <summary>Returns the last server-confirmed value. Pending local changes made via <see cref="Set"/> are not reflected here unless the entity is client-authoritative.</summary>
+		/// <summary>Returns the last server-confirmed value. Pending local changes made via <see cref="Set"/> are not reflected here unless the entity is client-authoritative.
+		/// <para><b>Treat the returned value as read-only when <typeparamref name="T"/> is mutable</b> (an object,
+		/// or a blob sharing its buffer). This hands back the field's own state, not a copy: modifying it in place
+		/// writes straight through the field's records. Copy it, change the copy, and <see cref="Set"/> the copy.
+		/// See the mutable-value rules in <c>docs/guides/DistributedEntities.md</c>.</para></summary>
 		public readonly T Get()
 		{
 			return CurrentValue;
 		}
 
-		/// <summary>Queues the value to be sent to the server and marks the field dirty. Applied to the local current value immediately only when the entity is client-authoritative. Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
+		/// <summary>Queues the value to be sent to the server and marks the field dirty. Applied to the local current value immediately only when the entity is client-authoritative. Returns false if the value is unchanged (unless <paramref name="force"/> is true).
+		/// <para>The unchanged check is skipped entirely when the serializer declares
+		/// <see cref="DistributedValueSemantics.Mutable"/>, so every <c>Set</c> of an object or blob marks the
+		/// field dirty and returns true — the field cannot tell a genuine no-op from a value the caller modified
+		/// in place. Re-setting an unchanged mutable value each frame therefore costs an update every frame.</para></summary>
 		public bool Set(T newValue, bool force = false)
 		{
-			if (!force && Equals(newValue, CurrentValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue))
 			{
 				return false;
 			}
@@ -96,7 +146,7 @@ namespace Impunity.Connection
 		/// <summary>Same as <see cref="Set(T, bool)"/> but flushed as an unguaranteed (best-effort) update when possible.</summary>
 		public bool SetUnguaranteed(T newValue, bool force = false)
 		{
-			if (!force && Equals(newValue, CurrentValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue))
 			{
 				return false;
 			}
@@ -118,7 +168,7 @@ namespace Impunity.Connection
 		/// <summary>Updates the value locally without sending to the server. Useful for client-side prediction or cosmetic state.</summary>
 		public bool SetLocalOnly(T newValue, bool force = false)
 		{
-			if (!force && Equals(newValue, CurrentValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue))
 			{
 				return false;
 			}
@@ -172,13 +222,15 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Value equality for <typeparamref name="T"/>, via <see cref="EqualityComparer{T}.Default"/>
+		/// (<see cref="IEquatable{T}"/> when the type implements it, <see cref="object.Equals(object)"/>
+		/// otherwise). Note this is a plain comparison: it does not consult the serializer's
+		/// <see cref="DistributedValueSemantics"/>, so for a mutable type it answers "are these the same
+		/// value right now", which is not the same question as "should a Set replicate" — see
+		/// <see cref="DistributedFieldPolicy.IsUnchanged"/>.</summary>
 		public static bool Equals(T obj1, T obj2)
 		{
-			if (obj1 == null)
-			{
-				return obj2 == null;
-			}
-			return obj1.Equals(obj2);
+			return EqualityComparer<T>.Default.Equals(obj1, obj2);
 		}
 
 		public bool Equals(T other)
@@ -195,6 +247,17 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			// A missing value and a stored BSON null mean the same thing here, so normalize before deciding.
+			val ??= BsonValue.Null;
+
+			// Mirrors the collection fields, which ignore a stored value they cannot represent. A null is
+			// applied to the nullable value types and ignored by the rest, whose serializers would unbox a
+			// null onto a struct and throw.
+			if (val.IsNull && !FramingSerializer.IsNullable(Serializer.ValueType))
+			{
+				return;
+			}
+
 			Set(Serializer.FromBsonValue(val));
 		}
 
@@ -210,7 +273,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedTemporalValue<T, S> : IDistributedTemporalField where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedTemporalValue<T, S> : IDistributedTemporalField where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised on initial load with the current value and its age (time since last server modification).</summary>
 		public event Action<T, TimeSpan> OnInitialized;
@@ -225,7 +288,7 @@ namespace Impunity.Connection
 		T CurrentValue;
 		T? PendingValue;
 
-		public object RawCurrentValue => CurrentValue;
+		public object? RawCurrentValue => CurrentValue;
 
 		/// <inheritdoc/>
 		public long LastModifiedTime { get; set; }
@@ -247,7 +310,7 @@ namespace Impunity.Connection
 		/// Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
 		public bool Set(T newValue, bool force = false)
 		{
-			if (!force && Equals(newValue, CurrentValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue))
 			{
 				return false;
 			}
@@ -273,7 +336,7 @@ namespace Impunity.Connection
 		/// Returns false if the value is unchanged (unless <paramref name="force"/> is true).</summary>
 		public bool SetUnguaranteed(T newValue, bool force = false)
 		{
-			if (!force && Equals(newValue, CurrentValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue))
 			{
 				return false;
 			}
@@ -368,13 +431,15 @@ namespace Impunity.Connection
 			}
 		}
 
+		/// <summary>Value equality for <typeparamref name="T"/>, via <see cref="EqualityComparer{T}.Default"/>
+		/// (<see cref="IEquatable{T}"/> when the type implements it, <see cref="object.Equals(object)"/>
+		/// otherwise). Note this is a plain comparison: it does not consult the serializer's
+		/// <see cref="DistributedValueSemantics"/>, so for a mutable type it answers "are these the same
+		/// value right now", which is not the same question as "should a Set replicate" — see
+		/// <see cref="DistributedFieldPolicy.IsUnchanged"/>.</summary>
 		public static bool Equals(T obj1, T obj2)
 		{
-			if (obj1 == null)
-			{
-				return obj2 == null;
-			}
-			return obj1.Equals(obj2);
+			return EqualityComparer<T>.Default.Equals(obj1, obj2);
 		}
 
 		public bool Equals(T other)
@@ -391,6 +456,17 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			// A missing value and a stored BSON null mean the same thing here, so normalize before deciding.
+			val ??= BsonValue.Null;
+
+			// Mirrors the collection fields, which ignore a stored value they cannot represent. A null is
+			// applied to the nullable value types and ignored by the rest, whose serializers would unbox a
+			// null onto a struct and throw.
+			if (val.IsNull && !FramingSerializer.IsNullable(Serializer.ValueType))
+			{
+				return;
+			}
+
 			Set(Serializer.FromBsonValue(val));
 		}
 
@@ -407,7 +483,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The element type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedArray<T, S> : IDistributedField, IReadOnlyList<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedArray<T, S> : IDistributedField, IReadOnlyList<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when the entire array is replaced, providing old and new arrays.</summary>
 		public event Action<T[], T[]> OnReplaced;
@@ -499,7 +575,7 @@ namespace Impunity.Connection
 		{
 			if (NewValue != null)
 			{
-				if (!force && NewValue[index].Equals(newValue))
+				if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, NewValue[index]))
 				{
 					return false;
 				}
@@ -523,7 +599,7 @@ namespace Impunity.Connection
 				throw new Exception("Array must be initialized with a call to Init or Replace before a value can be set");
 			}
 
-			if (CurrentValue[index].Equals(newValue))
+			if (!force && DistributedFieldPolicy.IsUnchanged(Serializer, newValue, CurrentValue[index]))
 			{
 				return false;
 			}
@@ -688,15 +764,6 @@ namespace Impunity.Connection
 			return GetEnumerator();
 		}
 
-		public bool Equals(T other)
-		{
-			if (CurrentValue == null)
-			{
-				return other == null;
-			}
-			return CurrentValue.Equals(other);
-		}
-
 		/// <summary>Gets field value as a BsonValue</summary>
 		public BsonValue GetAsBsonValue()
 		{
@@ -717,6 +784,8 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			val ??= BsonValue.Null;
+
 			if (val.IsNull || !val.IsArray)
 			{
 				return;
@@ -742,7 +811,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The element type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedQueue<T, S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedQueue<T, S> : IDistributedField, IReadOnlyCollection<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a new element is enqueued.</summary>
 		public event Action<T> OnChanged;
@@ -1005,15 +1074,6 @@ namespace Impunity.Connection
 			}
 		}
 
-		public bool Equals(T other)
-		{
-			if (CurrentValue == null)
-			{
-				return other == null;
-			}
-			return CurrentValue.Equals(other);
-		}
-
 		public readonly IEnumerator<T> GetEnumerator()
 		{
 			return CurrentValue.GetEnumerator();
@@ -1047,6 +1107,8 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			val ??= BsonValue.Null;
+
 			if (val.IsNull || !val.IsDocument)
 			{
 				return;
@@ -1078,7 +1140,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The element type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedStack<T, S> : IDistributedField, IReadOnlyCollection<T> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedStack<T, S> : IDistributedField, IReadOnlyCollection<T> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a value is pushed onto the stack, including a <see cref="SetTop"/> on an empty stack.</summary>
 		public event Action<T> OnPushed;
@@ -1533,6 +1595,8 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			val ??= BsonValue.Null;
+
 			if (val.IsNull || !val.IsArray)
 			{
 				return;
@@ -1559,7 +1623,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedIntDictionary<T, S> : IDistributedField, IReadOnlyDictionary<int, T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedIntDictionary<T, S> : IDistributedField, IReadOnlyDictionary<int, T?> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<int, T, T> OnChanged;
@@ -1825,15 +1889,6 @@ namespace Impunity.Connection
 			return GetEnumerator();
 		}
 
-		public bool Equals(T other)
-		{
-			if (CurrentValue == null)
-			{
-				return other == null;
-			}
-			return CurrentValue.Equals(other);
-		}
-
 		/// <summary>Gets field value as a BsonValue</summary>
 		public BsonValue GetAsBsonValue()
 		{
@@ -1854,6 +1909,8 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			val ??= BsonValue.Null;
+
 			if (val.IsNull || !val.IsDocument)
 			{
 				return;
@@ -1879,7 +1936,7 @@ namespace Impunity.Connection
 	/// </summary>
 	/// <typeparam name="T">The value type.</typeparam>
 	/// <typeparam name="S">The serializer struct.</typeparam>
-	public struct DistributedStringDictionary<T, S> : IDistributedField, IReadOnlyDictionary<string, T?> where T : IEquatable<T> where S : IDistributableValueSerializer<T>
+	public struct DistributedStringDictionary<T, S> : IDistributedField, IReadOnlyDictionary<string, T?> where S : IDistributableValueSerializer<T>
 	{
 		/// <summary>Raised when a single entry changes, providing key, old value, and new value.</summary>
 		public event Action<string, T, T> OnChanged;
@@ -2145,15 +2202,6 @@ namespace Impunity.Connection
 			return GetEnumerator();
 		}
 
-		public bool Equals(T other)
-		{
-			if (CurrentValue == null)
-			{
-				return other == null;
-			}
-			return CurrentValue.Equals(other);
-		}
-
 		/// <summary>Gets field value as a BsonValue</summary>
 		public BsonValue GetAsBsonValue()
 		{
@@ -2174,6 +2222,8 @@ namespace Impunity.Connection
 		/// <summary>Sets field from a BsonValue</summary>
 		public void SetFromBsonValue(BsonValue val)
 		{
+			val ??= BsonValue.Null;
+
 			if (val.IsNull || !val.IsDocument)
 			{
 				return;

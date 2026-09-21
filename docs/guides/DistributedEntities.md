@@ -249,7 +249,47 @@ The exceptions, where a `Set()` is applied to the local value immediately:
 - the entity is [client-authoritative](#8-client-authoritative-objects), or
 - the entity has no connected manager (an offline/editor instance).
 
-`Set(value)` returns `false` (and does nothing) if `value` equals the current value, unless you pass `force: true`.
+`Set(value)` returns `false` (and does nothing) if `value` equals the current value, unless you pass `force: true`. For mutable value types this deduplication is switched off — see below.
+
+### Mutable values: treat `Get()` as read-only
+
+> **The rule: never modify a value you got from `Get()`. Copy it, change the copy, and `Set` the copy.**
+
+This matters when `T` is something whose contents can be changed in place — an object serialized with `BsonSerializer<T>`/`BsonSmallSerializer<T>`, a byte buffer behind a `BlobSerializer`, or any custom serializer over a mutable type. `Get()` hands back the field's **own state, not a copy**, so modifying it writes straight through the field's records:
+
+```csharp
+// WRONG — mutates the field's own state
+var loadout = player.Loadout.Get();
+loadout.Weapon = "axe";
+player.Loadout.Set(loadout);
+
+// RIGHT — the field's state is only ever replaced, never edited underneath it
+var loadout = player.Loadout.Get().Clone();   // or: new Loadout(player.Loadout.Get()) { Weapon = "axe" }
+loadout.Weapon = "axe";
+player.Loadout.Set(loadout);
+```
+
+A blob is the same hazard wearing a struct: `ArraySegment<byte>` is a value type, but it only points at an array, and its `Equals` compares the array reference, offset and count — never the bytes. Rewriting the buffer you handed to `Set` is exactly as invisible to a comparison as editing an object's members, which is why `BlobSerializer` is `Mutable`.
+
+Each field's serializer declares which kind of value it holds via `IDistributableValueSerializer<T>.ValueSemantics`:
+
+| | `Immutable` | `Mutable` |
+|---|---|---|
+| Serializers | primitives, `StringSerializer`, `DateTime*`, `Guid`, Unity structs, custom serializers over immutable types | `BsonSerializer<T>`, `BsonSmallSerializer<T>`, `BlobSerializer`, custom serializers over mutable types |
+| Requires meaningful `Equals` | yes — see [Serializers](#serializers) | no, the value is never compared |
+| Unchanged `Set` | returns `false`, field stays clean | returns `true`, field is marked dirty |
+
+A field over a `Mutable` serializer **skips the unchanged check entirely**. It has no retained baseline to compare against, so when you pass back a value you modified in place, `value` and the current value are the same object and any equality comparison — however carefully `T.Equals` is written — compares the object with itself and reports "unchanged". Rather than silently swallow that update, the field treats every `Set` of a mutable value as a change. (This is also why `force: true` is no longer needed for these fields.)
+
+The cost is that re-setting an unchanged mutable value sends an update anyway, so **doing it every frame sends every frame**. That works correctly, but it is an anti-pattern: `Set` when the value actually changed.
+
+Following the copy-then-`Set` rule also avoids three related hazards that the always-dirty behavior cannot fix:
+
+- **Modify and never `Set`.** Nothing marks the field dirty, so the change stays local forever — there is no call for the field to intervene at.
+- **Modify after `Set`.** The pending value is a reference, and it is not serialized until the frame's update flush, so edits made in between are sent too.
+- **Modifying on a non-client-authoritative entity.** `Get()` is contractually the last **server-confirmed** value; editing it in place makes local reads disagree with the server before any echo, and leaves nothing to fall back to if the server rejects the update (for example because another client holds the entity's lock). It self-corrects on the next update for that field.
+
+`OnChanged(old, new)` also receives the same reference for both arguments if you modified the value in place, so comparing them detects nothing.
 
 ### Collections must be initialized before use
 
@@ -265,7 +305,7 @@ The `S` parameter is a zero-size struct implementing `IDistributableValueSeriali
 - **Unity types:** `Vector2/3Serializer`, `DVector4Serializer`, `Vector2Int/Vector3IntSerializer`, `ColorSerializer`, `Color32Serializer`, `QuaternionSerializer`, `Matrix4x4Serializer`.
 - **Arbitrary types:** `BsonSerializer<T>` and `BsonSmallSerializer<T>` serialize any type via UltraLiteDB's BSON mapper (use `BsonSmall` for compact small payloads).
 
-To support a custom type, implement the interface — write the binary form, the BSON form, and report a `ValueType` tag:
+To support a custom type, implement the interface — write the binary form, the BSON form, and report a `ValueType` tag and a `ValueSemantics` kind:
 
 ```csharp
 public struct MovementSerializer : IDistributableValueSerializer<MovementState>
@@ -275,10 +315,25 @@ public struct MovementSerializer : IDistributableValueSerializer<MovementState>
     public BsonValue ToBsonValue(MovementState v) => /* … */;
     public MovementState FromBsonValue(BsonValue b) => /* … */;
     public GameStateEntityPropertyValueType ValueType => GameStateEntityPropertyValueType.CustomSmallNullable;
+    public DistributedValueSemantics ValueSemantics => DistributedValueSemantics.Immutable;
 }
 ```
 
-`T` must be `IEquatable<T>` (the field uses equality to suppress no-op `Set`s). The `ValueType` tag (`Custom`/`CustomSmall` and nullable variants for complex values, or a primitive tag) is reported to tools via `ClientEntityManager.GetFieldSchema`.
+`T` has no constraints. Field types formerly required `T : IEquatable<T>`; that requirement is gone, because `ValueSemantics` now decides whether the field compares values at all. Equality for `Immutable` values runs through `EqualityComparer<T>.Default`, which dispatches to `IEquatable<T>` when the type implements it and falls back to `Equals(object)` otherwise.
+
+**Null is a valid value** for the nullable value types — `String`, `Blob`, `CustomSmallNullable` and `CustomNullable` (the last two being what `BsonSerializer<T>` and `BsonSmallSerializer<T>` report). On the wire, `FramingSerializer` writes a single false byte and reads it back as null. In the BSON path, `ToBsonValue`/`FromBsonValue` map null to and from `BsonValue.Null`, and a stored null survives a database round trip: `ApplyPersistedFieldsFromBson` applies it, clearing the field.
+
+The other value types have no null to represent. A null stored against one of them is ignored rather than applied, because their serializers would unbox a null onto a struct and throw; `FramingSerializer.IsNullable(valueType)` is the check. A field the document does not mention at all is also left unchanged, which is what lets a document written before that field existed still load — absence and a stored null are distinct, so the manager probes with `ContainsKey` rather than trusting the indexer (`BsonDocument`'s indexer returns `BsonValue.Null` for a missing key).
+
+If you write a custom serializer over a nullable type, handle null in both BSON methods — the binary framing covers null for you, but nothing guards your BSON conversions.
+
+> **`Immutable` is an assertion that your type has meaningful value equality.** The compiler no longer checks for an `Equals` implementation, so a class that inherits reference equality and is declared `Immutable` will fail to deduplicate — the exact silently-dropped-update bug the `Mutable` path exists to prevent. Structs are safe by default (`ValueType.Equals` compares fields); classes need an explicit `Equals`, or a `Mutable` declaration.
+
+The `ValueType` tag (`Custom`/`CustomSmall` and nullable variants for complex values, or a primitive tag) is reported to tools via `ClientEntityManager.GetFieldSchema`.
+
+`ValueSemantics` answers one question: **could a caller change this value's contents without constructing a new one?** Answer `Mutable` if so — a class with settable members, or a struct that only points at mutable storage (this is why `BlobSerializer` is `Mutable` even though `ArraySegment<byte>` is a struct: its `Equals` compares the array reference, offset and count, never the bytes). Answer `Immutable` only when the type genuinely cannot be modified in place. Both this and `ValueType` are compile-time constants on a concrete serializer struct, so the branches they drive fold away in specialized generics — declaring `Mutable` costs nothing at runtime.
+
+> Getting this wrong in the `Immutable` direction reintroduces the silently-dropped-update bug for your type, so when in doubt, declare `Mutable`.
 
 ---
 

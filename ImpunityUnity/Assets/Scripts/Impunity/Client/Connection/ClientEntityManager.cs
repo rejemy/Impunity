@@ -1599,8 +1599,11 @@ namespace Impunity.Connection
 
 		/// <summary>Applies persisted field values from a <see cref="BsonDocument"/> (as produced by
 		/// <see cref="GetPersistedFieldsAsBson"/>) back onto an entity, matching each persisted field by its
-		/// <c>PersistAs</c> key. Missing or null entries are left unchanged. Throws if the entity's type is not
-		/// registered with this manager.</summary>
+		/// <c>PersistAs</c> key. Fields the document does not mention are left unchanged — which is what lets a
+		/// document written before a field existed still load. A field the document <em>does</em> carry is
+		/// applied, including a stored null, so a round trip through the database preserves null for the field
+		/// types that can hold one; a null stored against a non-nullable field is ignored by the field itself.
+		/// Throws if the entity's type is not registered with this manager.</summary>
 		/// <param name="entity">The entity to populate.</param>
 		/// <param name="doc">The document holding persisted field values keyed by <c>PersistAs</c> name.</param>
 		public void ApplyPersistedFieldsFromBson(IDistributedEntity entity, BsonDocument doc)
@@ -1612,8 +1615,12 @@ namespace Impunity.Connection
 				if (fieldInfo == null) continue;
 
 				if (fieldInfo.PersistedAs == null) continue;
+
+				// BsonDocument's indexer answers BsonValue.Null for a key that is not there, so absence has to
+				// be probed separately from a value that is genuinely null.
+				if (!doc.ContainsKey(fieldInfo.PersistedAs)) continue;
+
 				BsonValue fieldValue = doc[fieldInfo.PersistedAs];
-				if (fieldValue == null || fieldValue.IsNull) continue;
 
 				object[] parameters = new object[] { fieldValue };
 				fieldInfo.SetFromBsonMethod.Invoke(entity, parameters);

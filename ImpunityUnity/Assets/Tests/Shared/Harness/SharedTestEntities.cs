@@ -40,6 +40,43 @@ namespace Impunity.Tests
 		public override string ToString() => $"({x}, {y}, {z})";
 	}
 
+	/// <summary>A plain value type that deliberately does <b>not</b> implement <see cref="IEquatable{T}"/>.
+	/// Declaring a field over it is only possible because the field types dropped that constraint; its
+	/// deduplication runs through <c>EqualityComparer&lt;T&gt;.Default</c>'s fallback to
+	/// <see cref="ValueType.Equals(object)"/>.</summary>
+	public struct TestPlainPair
+	{
+		public int A;
+		public int B;
+
+		public TestPlainPair(int a, int b) { A = a; B = b; }
+		public override string ToString() => $"({A}, {B})";
+	}
+
+	/// <summary>Immutable-semantics serializer for <see cref="TestPlainPair"/>.</summary>
+	public readonly struct TestPlainPairSerializer : IDistributableValueSerializer<TestPlainPair>
+	{
+		public void WriteTo(TestPlainPair value, BinaryWriter w)
+		{
+			w.Write(value.A);
+			w.Write(value.B);
+		}
+
+		public TestPlainPair ReadFrom(BinaryReader r, int byteCount)
+			=> new TestPlainPair(r.ReadInt32(), r.ReadInt32());
+
+		public BsonValue ToBsonValue(TestPlainPair value) => new BsonArray { value.A, value.B };
+
+		public TestPlainPair FromBsonValue(BsonValue value)
+		{
+			BsonArray pair = value.AsArray;
+			return new TestPlainPair(pair[0].AsInt32, pair[1].AsInt32);
+		}
+
+		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
+	}
+
 	/// <summary>Binary serializer for <see cref="TestVec3"/> — mirrors Vector3Serializer
 	/// (Client/Unity/DistributedUnitySerializers.cs): 12 bytes, CustomSmall. Also doubles as the
 	/// portable coverage for the payload-serializer + framing machinery
@@ -77,6 +114,7 @@ namespace Impunity.Tests
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	// ───────── Portable nullable-custom stand-in ─────────
@@ -113,6 +151,9 @@ namespace Impunity.Tests
 		public TestBox FromBsonValue(BsonValue value) => value.IsNull ? null : new TestBox(value.AsInt32);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmallNullable; }
+
+		/// <summary>Mutable: <see cref="TestBox"/> is a class with a settable field.</summary>
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Mutable; }
 	}
 
 	/// <summary>Nullable custom serializer for <see cref="TestBox"/> — CustomNullable (ushort-prefixed).
@@ -131,6 +172,9 @@ namespace Impunity.Tests
 		public TestBox FromBsonValue(BsonValue value) => value.IsNull ? null : new TestBox(value.AsInt32);
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomNullable; }
+
+		/// <summary>Mutable: <see cref="TestBox"/> is a class with a settable field.</summary>
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Mutable; }
 	}
 
 	// ───────── Integration test types (ephemeral) ─────────
@@ -284,6 +328,28 @@ namespace Impunity.Tests
 	public partial class BsonTestEphemeralSubEntity : BsonTestEntity
 	{
 		public DistributedValue<int, Int32Serializer> Runtime;
+	}
+
+	public static class MutableValueTestIds
+	{
+		public const int ENTITY = 60;
+	}
+
+	/// <summary>Fields for the mutable-value dirty-detection suite. Ephemeral (no <c>PersistAs</c>) so it carries
+	/// no schema weight, and deliberately mixes both value semantics: <see cref="Poco"/>/<see cref="Pocos"/> are
+	/// <c>Mutable</c> object graphs and <see cref="Blob"/> is a <c>Mutable</c> shared buffer, while
+	/// <see cref="Text"/>/<see cref="Number"/> are <c>Immutable</c> and must keep deduplicating unchanged sets.
+	/// <see cref="Blob"/> also pins the dropped <c>IEquatable&lt;T&gt;</c> constraint: <c>ArraySegment&lt;byte&gt;</c>
+	/// does not implement it, so this field would not compile while the constraint stood.</summary>
+	[DistributedEntity(MutableValueTestIds.ENTITY)]
+	public partial class MutableValueTestEntity : DistributedObjectBase
+	{
+		public DistributedValue<BsonTestPoco, BsonSerializer<BsonTestPoco>> Poco;
+		public DistributedValue<ArraySegment<byte>, BlobSerializer> Blob;
+		public DistributedValue<string, StringSerializer> Text;
+		public DistributedValue<int, Int32Serializer> Number;
+		public DistributedValue<TestPlainPair, TestPlainPairSerializer> Pair;
+		public DistributedArray<BsonTestPoco, BsonSerializer<BsonTestPoco>> Pocos;
 	}
 
 	/// <summary>Shares BsonTestEntity's PersistAs key — only referenced by the duplicate-key registration test.</summary>

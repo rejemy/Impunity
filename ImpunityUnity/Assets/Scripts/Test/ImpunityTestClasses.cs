@@ -104,6 +104,7 @@ public struct CustomMovementStateDataSerializer : IDistributableValueSerializer<
 	}
 
 	public GameStateEntityPropertyValueType ValueType { get { return GameStateEntityPropertyValueType.CustomSmallNullable; } }
+	public DistributedValueSemantics ValueSemantics { get { return DistributedValueSemantics.Immutable; } }
 }
 
 [DistributedEntity(TestEntityTypes.EMPTY_OBJ)]

@@ -46,6 +46,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector3"/> (12 bytes: 3 floats).</summary>
@@ -88,6 +89,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector4"/> (16 bytes: 4 floats).</summary>
@@ -133,6 +135,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector2Int"/> (8 bytes: 2 ints).</summary>
@@ -172,6 +175,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Vector3Int"/> (12 bytes: 3 ints).</summary>
@@ -214,6 +218,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Color"/> (16 bytes: 4 floats for RGBA).</summary>
@@ -260,6 +265,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Color32"/> (4 bytes: 4 bytes for RGBA).</summary>
@@ -305,6 +311,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Matrix4x4"/> (64 bytes: 16 floats).</summary>
@@ -353,6 +360,7 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 
 	/// <summary>Binary serializer for Unity <see cref="Quaternion"/> (16 bytes: 4 floats for XYZW).</summary>
@@ -398,5 +406,6 @@ namespace Impunity.Unity
 		}
 
 		public GameStateEntityPropertyValueType ValueType { get => GameStateEntityPropertyValueType.CustomSmall; }
+		public DistributedValueSemantics ValueSemantics { get => DistributedValueSemantics.Immutable; }
 	}
 }
