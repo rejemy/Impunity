@@ -349,6 +349,22 @@
             Disposes the database engine if it has been initialized, releasing file locks and flushing pending data.
             </summary>
         </member>
+        <member name="T:UltraLiteDB.BsonKeyCache">
+            <summary>
+            Maps the UTF-8 bytes of a BSON field name to a shared string, so reading many documents with the same
+            keys (a collection's documents) doesn't decode and allocate a new string for every field.
+            </summary>
+            <remarks>
+            A small direct-mapped cache: each slot holds the last key that hashed to it, so a miss just decodes and
+            replaces that slot. Lock-free and safe to share between threads: entries are immutable and published
+            with a release write, and a race can only cost a miss.
+            </remarks>
+        </member>
+        <member name="M:UltraLiteDB.BsonKeyCache.Get(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Returns the key for the <paramref name="length"/> UTF-8 bytes of <paramref name="buffer"/> at <paramref name="start"/>.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.BsonReader">
             <summary>
             Deserializes binary BSON data into <see cref="T:UltraLiteDB.BsonDocument"/> and <see cref="T:UltraLiteDB.BsonArray"/> objects.
@@ -377,6 +393,11 @@
             Reads a complete BSON array (length prefix + indexed elements + terminator) from the reader.
             </summary>
         </member>
+        <member name="M:UltraLiteDB.BsonReader.CountElements(UltraLiteDB.ByteReader,System.Int32)">
+            <summary>
+            Counts the elements left in the current document/array without decoding them, leaving the position unchanged.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.BsonReader.ReadElement(UltraLiteDB.IByteReader,System.String@)">
             <summary>
             Reads a single BSON element (type byte + CString key + value) and outputs the field name.
@@ -402,7 +423,8 @@
         <member name="M:UltraLiteDB.BsonSerializer.Serialize(UltraLiteDB.BsonDocument,System.IO.Stream)">
             <summary>
             Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> to a standard .NET <see cref="T:System.IO.Stream"/> in BSON format.
-            Writes forward-only, so any writable stream is supported (seekable or not).
+            Any writable stream is supported (seekable or not): the document is built in a reusable buffer and
+            written with a single <see cref="M:System.IO.Stream.Write(System.Byte[],System.Int32,System.Int32)"/>.
             </summary>
             <param name="doc">The document to serialize.</param>
             <param name="stream">The stream to write the BSON data to.</param>
@@ -422,7 +444,8 @@
         <member name="M:UltraLiteDB.BsonSerializer.Deserialize(System.IO.Stream)">
             <summary>
             Deserializes a <see cref="T:UltraLiteDB.BsonDocument"/> from a standard .NET <see cref="T:System.IO.Stream"/>.
-            Reads forward-only, so any readable stream is supported (seekable or not).
+            Reads forward-only, so any readable stream is supported (seekable or not): exactly one document
+            (as sized by its length prefix) is read into a reusable buffer and parsed from memory.
             </summary>
             <param name="stream">The stream to read the BSON document from.</param>
         </member>
@@ -436,6 +459,11 @@
             <summary>
             Serializes a <see cref="T:UltraLiteDB.BsonDocument"/> into a new byte array.
             </summary>
+            <remarks>
+            Single pass: the document is written into a reusable per-thread buffer with its length prefixes
+            back-filled, then copied out, instead of sizing the whole tree first. Every document and array written
+            gets its cached length updated, exactly as the sizing pass (<c>GetBytesCount(true)</c>) used to leave it.
+            </remarks>
         </member>
         <member name="M:UltraLiteDB.BsonWriter.SerializeTo(UltraLiteDB.BsonDocument,System.Byte[],System.Int32)">
             <summary>
@@ -447,10 +475,26 @@
             <summary>
             Writes a BSON document (length prefix + elements + 0x00 terminator) to the writer.
             </summary>
+            <remarks>
+            Forward-only (the length prefix comes from <see cref="M:UltraLiteDB.BsonValue.GetBytesCount(System.Boolean)"/>), so it works on
+            any writer: non-seekable streams, and fixed buffers such as index pages that must not grow.
+            </remarks>
         </member>
         <member name="M:UltraLiteDB.BsonWriter.WriteArray(UltraLiteDB.IByteWriter,UltraLiteDB.BsonArray)">
             <summary>
             Writes a BSON array (length prefix + indexed elements + 0x00 terminator) to the writer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonWriter.WriteDocumentDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonDocument)">
+            <summary>
+            Writes a BSON document into a growable <see cref="T:UltraLiteDB.ByteWriter"/> in one pass: the length prefix is
+            reserved and back-filled, and the document's cached length is updated to match. Keys and strings are
+            encoded straight into the buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonWriter.WriteArrayDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonArray)">
+            <summary>
+            Writes a BSON array into a growable <see cref="T:UltraLiteDB.ByteWriter"/> in one pass. See <see cref="M:UltraLiteDB.BsonWriter.WriteDocumentDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonDocument)"/>.
             </summary>
         </member>
         <member name="T:UltraLiteDB.DirectBsonReader">
@@ -458,38 +502,74 @@
             Deserializes BSON bytes directly into C# objects, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
             Reduces GC pressure for high-throughput deserialization. Supports polymorphism via _t/_type discriminators.
             </summary>
+            <remarks>
+            Hot-path notes: field names are matched as raw UTF-8 bytes against the bytes cached on
+            <see cref="T:UltraLiteDB.MemberMapper"/> (trying members in declaration order first, which is the order the
+            serializer writes them), so no strings are allocated for keys; array index keys are skipped
+            without decoding; per-target-type conversion info is cached in <see cref="T:UltraLiteDB.DirectReadInfo"/>.
+            </remarks>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadObjectDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Type,UltraLiteDB.DirectReadInfo)">
             <summary>
-            Read a BSON document from bytes directly into a C# object
+            Read a BSON document from bytes directly into a C# object. <c>info</c> is the cached read info
+            for <c>type</c> when the caller already has it, otherwise null.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryFromPosition(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type,System.Byte,System.String,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonReader.FindMember(System.Collections.Generic.List{UltraLiteDB.MemberMapper},System.Byte[],System.Int32,System.Int32,System.Int32@)">
+            <summary>
+            Finds the member whose field name equals the <paramref name="length"/> bytes of <paramref name="buffer"/> at
+            <paramref name="start"/>, starting the search at <paramref name="next"/> (the member after the previous
+            match) so in-order documents match on the first compare.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.TryReadPrimitive(UltraLiteDB.ByteReader,System.Byte,UltraLiteDB.TypedAccessor,System.Object)">
+            <summary>
+            Reads a primitive property's value and sets it through its typed accessor (no boxing), when the stored
+            BSON type is the one the property type maps to. Returns false, having consumed nothing, otherwise.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryFromPosition(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,UltraLiteDB.DirectReadInfo,System.Byte,System.String,System.Int32)">
             <summary>
             Helper to finish reading a dictionary when we discover mid-document that the target is IDictionary
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadValueDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Byte,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadValueDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,System.Byte,UltraLiteDB.DirectReadInfo)">
             <summary>
             Read a BSON value and convert directly to the target .NET type
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,UltraLiteDB.DirectReadInfo)">
             <summary>
             Read a BSON array directly into an Array or IList
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryDirect(UltraLiteDB.IByteReader,UltraLiteDB.BsonMapper,System.Type)">
+        <member name="M:UltraLiteDB.DirectBsonReader.TryReadPrimitiveList(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,UltraLiteDB.DirectReadInfo,System.Collections.IList,System.Int32)">
+            <summary>
+            Fills List&lt;int/long/double/float/bool&gt; without boxing when the stored BSON type matches;
+            other stored types go through the general conversion, exactly as the non-typed path does.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadArrayElementHeader(UltraLiteDB.ByteReader)">
+            <summary>
+            Reads an array element's type byte and skips its index key (array keys are positional and ignored).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.CountElements(UltraLiteDB.ByteReader,System.Int32)">
+            <summary>
+            Counts the elements remaining in the current document/array without decoding them, leaving the position unchanged.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadDictionaryDirect(UltraLiteDB.ByteReader,UltraLiteDB.BsonMapper,UltraLiteDB.DirectReadInfo)">
             <summary>
             Read a BSON document directly into an IDictionary
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.ReadBsonValue(UltraLiteDB.IByteReader,System.Byte)">
+        <member name="M:UltraLiteDB.DirectBsonReader.ReadBsonValue(UltraLiteDB.ByteReader,System.Byte)">
             <summary>
             Read a BSON element value as a BsonValue (fallback for custom serializers)
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonReader.SkipValue(UltraLiteDB.IByteReader,System.Byte)">
+        <member name="M:UltraLiteDB.DirectBsonReader.SkipValue(UltraLiteDB.ByteReader,System.Byte)">
             <summary>
             Skip past a BSON element's value bytes
             </summary>
@@ -499,37 +579,93 @@
             Serializes C# objects directly to BSON bytes, bypassing intermediate <see cref="T:UltraLiteDB.BsonDocument"/> creation.
             Reduces GC pressure for high-throughput serialization. Supports polymorphism via _t/_type discriminators.
             </summary>
+            <remarks>
+            Hot-path notes: field names are written from bytes cached on <see cref="T:UltraLiteDB.MemberMapper"/>, array index
+            keys and strings are encoded straight into the buffer, and per-value type dispatch is cached in
+            <see cref="T:UltraLiteDB.DirectWriteInfo"/>. Each element's type byte is reserved up front and back-filled once
+            the value has been written, so key handling is independent of value dispatch.
+            </remarks>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteObjectDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Object,System.Type,UltraLiteDB.EntityMapper,System.Int32)">
             <summary>
-            Write a C# object as a BSON document directly to the ByteWriter
+            Write a C# object as a BSON document directly to the ByteWriter. <c>runtimeType</c> and <c>entity</c>
+            are <c>obj.GetType()</c> and its entity mapper when the caller already has them, otherwise null.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.String,System.Type,System.Object,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteValue(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Object,System.Int32)">
             <summary>
-            Write a single value as a BSON element (type byte + CString key + value bytes)
+            Writes a non-null value's bytes (the element's type byte and key have already been handled)
+            and returns its BSON type byte.
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteArrayDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IEnumerable,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.WritePrimitive(UltraLiteDB.ByteWriter,UltraLiteDB.TypedAccessor,System.Object)">
+            <summary>
+            Writes a primitive property's value through its typed accessor (no boxing) and returns its BSON type byte.
+            Same bytes as <see cref="M:UltraLiteDB.DirectBsonWriter.WriteValue(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Object,System.Int32)"/> for the corresponding <see cref="T:UltraLiteDB.DirectKind"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteItem(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Object,System.Int32)">
+            <summary>
+            Writes a collection item or dictionary value, reusing the collection's cached item dispatch.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteArrayDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Collections.IEnumerable,System.Int32)">
             <summary>
             Write an IEnumerable as a BSON array directly
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteDictionaryDirect(UltraLiteDB.IByteWriter,UltraLiteDB.BsonMapper,System.Type,System.Collections.IDictionary,System.Int32)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.TryWritePrimitiveArray(UltraLiteDB.ByteWriter,System.Collections.IEnumerable)">
+            <summary>
+            Writes arrays/lists of common primitive element types without boxing each element.
+            Output is identical to the general path (same BSON types and conversions).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteDictionaryDirect(UltraLiteDB.ByteWriter,UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Collections.IDictionary,System.Int32)">
             <summary>
             Write an IDictionary as a BSON document directly
             </summary>
         </member>
-        <member name="M:UltraLiteDB.DirectBsonWriter.WriteElementFromBsonValue(UltraLiteDB.IByteWriter,System.String,UltraLiteDB.BsonValue)">
+        <member name="M:UltraLiteDB.DirectBsonWriter.ToUnixMilliseconds(System.DateTime)">
             <summary>
-            Write a BsonValue as an element using the existing BsonWriter format.
-            Used as fallback for custom serializers and BsonValue-typed properties.
+            Converts a DateTime to BSON UTC milliseconds since the Unix epoch.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBsonWriter.WriteBsonValue(UltraLiteDB.ByteWriter,UltraLiteDB.BsonValue)">
+            <summary>
+            Writes a BsonValue's bytes using the BsonWriter format and returns its BSON type byte.
+            Used for custom serializers and BsonValue-typed properties, and by <see cref="T:UltraLiteDB.BsonWriter"/>'s
+            single-pass document writer.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectBuffers">
+            <summary>
+            Per-thread scratch buffers for the direct (POCO) serializer, so repeated calls don't allocate
+            and regrow a fresh buffer each time. A buffer is taken out of its slot while in use, which keeps
+            re-entrant calls (e.g. a custom serializer that serializes another object) safe: they simply
+            get a new buffer.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectBuffers.MAX_RETAINED_SIZE">
+            <summary>
+            Buffers larger than this are dropped after use instead of being retained by the thread.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectBuffers.ReadDocument(System.IO.Stream,System.Int32@)">
+            <summary>
+            Reads exactly one BSON document (as sized by its length prefix) from <paramref name="stream"/> into a
+            rented buffer, consuming nothing past its end. Return the buffer with <see cref="M:UltraLiteDB.DirectBuffers.ReturnReadBuffer(System.Byte[])"/>.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonArray">
             <summary>
             Represents a BSON array — an ordered list of <see cref="T:UltraLiteDB.BsonValue"/> elements.
             Implements <see cref="T:System.Collections.Generic.IList`1"/> for indexed access. Null items are stored as <see cref="F:UltraLiteDB.BsonValue.Null"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonArray.SetBytesCount(System.Int32)">
+            <summary>
+            Records this array's serialized length, as <see cref="M:UltraLiteDB.BsonArray.GetBytesCount(System.Boolean)"/> with recalc would; used by
+            the single-pass writer, which learns the length by writing.
             </summary>
         </member>
         <member name="T:UltraLiteDB.BsonAutoId">
@@ -645,6 +781,12 @@
             Copies all fields from this document into <paramref name="other"/>, overwriting existing keys.
             </summary>
         </member>
+        <member name="M:UltraLiteDB.BsonDocument.SetBytesCount(System.Int32)">
+            <summary>
+            Records this document's serialized length, as <see cref="M:UltraLiteDB.BsonDocument.GetBytesCount(System.Boolean)"/> with recalc would; used
+            by the single-pass writer, which learns the length by writing.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.BsonFields">
             <summary>
             Extracts a single named field value from a <see cref="T:UltraLiteDB.BsonDocument"/>.
@@ -732,6 +874,22 @@
         <member name="M:UltraLiteDB.BsonValue.GetBytesCountElement(System.String,UltraLiteDB.BsonValue)">
             <summary>
             Calculates the BSON byte size for a single key-value element (type byte + key CString + value bytes + variant header).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonValue.GetBytesCountElement(System.Int32,UltraLiteDB.BsonValue)">
+            <summary>
+            Calculates the BSON byte size for a single element whose key is <paramref name="keyLength"/> UTF-8 bytes.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonValue.GetUtf8ByteCount(System.String)">
+            <summary>
+            UTF-8 byte count of <paramref name="value"/>, counting ASCII (the common case for keys and game data)
+            directly and leaving the rest to the encoder.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonValue.GetIndexKeyLength(System.Int32)">
+            <summary>
+            Byte length of a BSON array index key: the decimal digits of <paramref name="index"/>.
             </summary>
         </member>
         <member name="T:UltraLiteDB.JsonMember">
@@ -2866,6 +3024,17 @@
             Function that resolves a collection name from a CLR type. Defaults to using the type name.
             </summary>
         </member>
+        <member name="F:UltraLiteDB.BsonMapper.CustomTypesVersion">
+            <summary>
+            Incremented whenever custom serializers change, invalidating the direct serializer's cached
+            per-type dispatch (<see cref="T:UltraLiteDB.DirectWriteInfo"/>/<see cref="T:UltraLiteDB.DirectReadInfo"/>).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.GetDirectReadInfo(System.Type)">
+            <summary>
+            Gets the cached direct-deserializer conversion info for a target type.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.BsonMapper.#ctor(System.Func{System.Type,System.Object})">
             <summary>
             Initializes a new instance of <see cref="T:UltraLiteDB.BsonMapper"/> with default settings and optional IoC support.
@@ -3049,8 +3218,8 @@
             </summary>
             <typeparam name="T">The entity type.</typeparam>
             <param name="entity">The object to serialize.</param>
-            <param name="stream">The stream to write BSON bytes to. Must be seekable (unless the entity
-            is already a <see cref="T:UltraLiteDB.BsonDocument"/>), because document/array length prefixes are backfilled.</param>
+            <param name="stream">The stream to write BSON bytes to. Any writable stream is supported: the
+            document is built in a reusable buffer and written with a single <see cref="M:System.IO.Stream.Write(System.Byte[],System.Int32,System.Int32)"/>.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.SerializeToStream(System.Type,System.Object,System.IO.Stream)">
             <summary>
@@ -3059,8 +3228,8 @@
             </summary>
             <param name="type">The declared type (used for polymorphic type resolution).</param>
             <param name="entity">The object to serialize.</param>
-            <param name="stream">The stream to write BSON bytes to. Must be seekable (unless the entity
-            is already a <see cref="T:UltraLiteDB.BsonDocument"/>), because document/array length prefixes are backfilled.</param>
+            <param name="stream">The stream to write BSON bytes to. Any writable stream is supported: the
+            document is built in a reusable buffer and written with a single <see cref="M:System.IO.Stream.Write(System.Byte[],System.Int32,System.Int32)"/>.</param>
         </member>
         <member name="M:UltraLiteDB.BsonMapper.ToDocument(System.Type,System.Object)">
             <summary>
@@ -3090,6 +3259,106 @@
         <member name="M:UltraLiteDB.BsonMapper.SerializeObject(System.Object)">
             <summary>
             Serializes a complex object to a <see cref="T:UltraLiteDB.BsonDocument"/> using entity mapping.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectKind">
+            <summary>
+            How the direct serializer writes a value, resolved once per (declared type, runtime type) pair
+            instead of re-running the type-test chain for every value.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectWriteInfo">
+            <summary>
+            Cached write dispatch for values whose runtime type is <see cref="F:UltraLiteDB.DirectWriteInfo.RuntimeType"/> in a slot declared
+            as <see cref="F:UltraLiteDB.DirectWriteInfo.DeclaredType"/>. Instances are immutable apart from the lazily-filled cache fields,
+            which are single reference writes and therefore safe to race.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectWriteInfo.Custom">
+            <summary>Custom serializer (<see cref="F:UltraLiteDB.DirectKind.Custom"/>).</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectWriteInfo.ItemType">
+            <summary>Item type (<see cref="F:UltraLiteDB.DirectKind.Enumerable"/>) or value type (<see cref="F:UltraLiteDB.DirectKind.Dictionary"/>).</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectWriteInfo.Enum">
+            <summary>Enum name cache (<see cref="F:UltraLiteDB.DirectKind.Enum"/>).</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectWriteInfo.Entity">
+            <summary>Entity mapper for <see cref="F:UltraLiteDB.DirectWriteInfo.RuntimeType"/> (<see cref="F:UltraLiteDB.DirectKind.Object"/>), resolved on first use.</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectWriteInfo.ItemInfo">
+            <summary>Monomorphic cache of the write info for this collection's items.</summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectWriteInfo.Get(UltraLiteDB.BsonMapper,UltraLiteDB.DirectWriteInfo,System.Type,System.Object)">
+            <summary>
+            Returns <paramref name="cached"/> if it still describes <paramref name="value"/>'s runtime type, otherwise
+            builds a new info. Compares type handles rather than calling GetType(): under IL2CPP, GetType() (like
+            typeof) is a locked hash lookup, while reading an object's type handle is a pointer read.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectWriteInfo.Create(UltraLiteDB.BsonMapper,System.Type,System.Type)">
+            <summary>
+            Classifies a value exactly as the original per-value type-test chain did: built-in BSON types
+            first, then custom serializers (declared type, then runtime type), dictionaries, enumerables,
+            and finally plain objects.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectReadInfo">
+            <summary>
+            Cached read conversion info for a target CLR type, so the direct deserializer doesn't repeat
+            nullable unwrapping, custom-deserializer lookups, and interface scans for every value.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectReadInfo.Type">
+            <summary>Target type with <see cref="T:System.Nullable`1"/> unwrapped.</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectReadInfo.Code">
+            <summary><see cref="T:System.TypeCode"/> of exact primitive targets; <see cref="F:System.TypeCode.Object"/> for everything else (including enums).</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectReadInfo.ItemInfo">
+            <summary>Cached info for collection items.</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectReadInfo.ValueInfo">
+            <summary>Cached info for dictionary values.</summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectReadInfo.Get(UltraLiteDB.BsonMapper,UltraLiteDB.DirectReadInfo,System.Type)">
+            <summary>
+            Returns <paramref name="cached"/> if it is still current, otherwise builds a new info for <paramref name="targetType"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectReadInfo.ResolveCollection">
+            <summary>
+            Resolves item type / array-ness the same way the per-call code did: <c>object</c> reads as
+            <c>object[]</c>, arrays use their element type, anything else is a list-like collection.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.DirectEnumInfo">
+            <summary>
+            Per-enum-type caches of name bytes, so enum values serialize without <see cref="M:System.Enum.ToString"/>
+            and deserialize without <see cref="M:System.Enum.Parse(System.Type,System.String)"/> (both allocate, and are slow under Mono/IL2CPP).
+            Caches are copy-on-write and bounded, so concurrent readers never lock.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectEnumInfo._payloads">
+            <summary>Underlying value → full BSON string payload (length prefix, UTF-8 bytes, terminator).</summary>
+        </member>
+        <member name="F:UltraLiteDB.DirectEnumInfo._parsed">
+            <summary>UTF-8 names seen on read → boxed enum value (boxed enums are immutable, so sharing is safe).</summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectEnumInfo.GetKey(System.Object)">
+            <summary>
+            Reads the numeric value of a boxed enum without allocating (a boxed enum may be unboxed as its underlying type).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectEnumInfo.GetPayload(System.Object)">
+            <summary>
+            Returns the BSON string payload for <paramref name="value"/> (identical bytes to encoding <c>value.ToString()</c>).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.DirectEnumInfo.Parse(System.Byte[],System.Int32,System.Int32)">
+            <summary>
+            Converts UTF-8 name bytes (<paramref name="length"/> bytes of <paramref name="buffer"/> at
+            <paramref name="start"/>) to a boxed enum value, with the same result as <c>Enum.Parse(type, name)</c>.
             </summary>
         </member>
         <member name="T:UltraLiteDB.EntityBuilder`1">
@@ -3153,6 +3422,12 @@
             Gets the field-name-to-member lookup dictionary, building it on first access.
             </summary>
         </member>
+        <member name="F:UltraLiteDB.EntityMapper.TypeNamePayload">
+            <summary>
+            Cached BSON string payload of this type's <c>_type</c> discriminator ("FullName, AssemblyName"),
+            written by the direct serializer when an instance is stored in a slot of a different declared type.
+            </summary>
+        </member>
         <member name="M:UltraLiteDB.EntityMapper.GetMember(System.Linq.Expressions.Expression)">
             <summary>
             Finds a <see cref="T:UltraLiteDB.MemberMapper"/> by resolving the member path from a LINQ expression.
@@ -3185,6 +3460,22 @@
             Set to null to exclude from mapping.
             </summary>
         </member>
+        <member name="P:UltraLiteDB.MemberMapper.FieldNameCString">
+            <summary>
+            <see cref="P:UltraLiteDB.MemberMapper.FieldName"/> encoded as a null-terminated UTF-8 C-string, cached so the direct
+            serializer never re-encodes field names. Null when the member is excluded from mapping.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.MemberMapper.WriteInfo">
+            <summary>
+            Direct-serializer dispatch info cached for the last runtime type seen in this member.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.MemberMapper.ReadInfo">
+            <summary>
+            Direct-deserializer conversion info cached for <see cref="P:UltraLiteDB.MemberMapper.DataType"/>.
+            </summary>
+        </member>
         <member name="P:UltraLiteDB.MemberMapper.Getter">
             <summary>
             Delegate that reads this member's value from an entity instance.
@@ -3193,6 +3484,19 @@
         <member name="P:UltraLiteDB.MemberMapper.Setter">
             <summary>
             Delegate that writes a value to this member on an entity instance.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.MemberMapper.PrimitiveGetter">
+            <summary>
+            The typed accessor behind <see cref="P:UltraLiteDB.MemberMapper.Getter"/> when the member is a primitive the direct serializer can
+            write unboxed; otherwise null. Resolved once (Delegate.Target isn't free on every runtime) and reset
+            whenever <see cref="P:UltraLiteDB.MemberMapper.Getter"/> is replaced.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.MemberMapper.PrimitiveSetter">
+            <summary>
+            The typed accessor behind <see cref="P:UltraLiteDB.MemberMapper.Setter"/> when the member is a primitive the direct deserializer can
+            set unboxed; otherwise null. See <see cref="P:UltraLiteDB.MemberMapper.PrimitiveGetter"/>.
             </summary>
         </member>
         <member name="P:UltraLiteDB.MemberMapper.Serialize">
@@ -3283,6 +3587,79 @@
             <summary>
             Creates a setter delegate for a field or property. Returns null if the property has no set accessor.
             Includes special handling for <c>byte[]</c> members that receive <c>ArraySegment&lt;byte&gt;</c> values.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.Reflection.TypedAccessorsEnabled">
+            <summary>
+            Switch for the typed-accessor strategy, on by default. It exists so tests can exercise the reflection
+            fallback that runtimes without runtime generic instantiation (NativeAOT, older IL2CPP) use. Only
+            affects entity mappers built after it changes.
+            </summary>
+        </member>
+        <member name="P:UltraLiteDB.Reflection.TypedAccessorsSupported">
+            <summary>
+            Whether this runtime can build <see cref="T:UltraLiteDB.TypedAccessor`2"/> instantiations with
+            MakeGenericType and actually run them. Probed once, on first use, with a value type that appears in
+            no generic instantiation in code, through a virtual (interface) accessor — the demanding cases — plus
+            the unboxed primitive calls. An AOT compiler that precompiles statically visible instantiations (NativeAOT)
+            can pass the probe while lacking others, so each accessor is also verified when it is created.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.CreateTypedAccessor(System.Type,System.Reflection.PropertyInfo,System.Reflection.MethodInfo,System.Reflection.MethodInfo,UltraLiteDB.GenericSetter)">
+            <summary>
+            Builds a typed accessor for a property getter or setter, or returns null when this member or runtime
+            can't use one (the caller then uses reflection).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.GetAutoPropertyBackingField(System.Reflection.PropertyInfo,System.Reflection.MethodInfo)">
+            <summary>
+            Returns the compiler-generated backing field of an auto-property accessor, or null if the accessor
+            has a user-written body (so it may contain logic) or the backing field can't be found.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.Reflection._setterArgs">
+            <summary>
+            Reusable single-element argument array for <see cref="M:UltraLiteDB.Reflection.InvokeSetter(System.Reflection.MethodInfo,System.Object,System.Object)"/>. Taken out of the slot while
+            in use, so a setter that re-enters the mapper on the same thread just gets a fresh array.
+            </summary>
+        </member>
+        <member name="T:UltraLiteDB.TypedAccessor">
+            <summary>
+            Reads or writes one property through typed open-instance delegates bound to its accessor methods,
+            exposed with the same object-based shape as <see cref="T:UltraLiteDB.GenericGetter"/>/<see cref="T:UltraLiteDB.GenericSetter"/>.
+            A delegate call is far cheaper than <c>MethodInfo.Invoke</c> or <c>FieldInfo.GetValue</c> — especially
+            under IL2CPP — and needs no runtime code generation.
+            </summary>
+            <remarks>
+            Instances are created with <c>MakeGenericType</c> for each (owner, property type) pair, which works only
+            where the runtime can create new generic instantiations over value types at runtime (CoreCLR, Mono,
+            IL2CPP with full generic sharing — Unity 2022.1+; not NativeAOT or older IL2CPP). <see cref="T:UltraLiteDB.Reflection"/>
+            probes for that once and falls back to plain reflection when it is unavailable.
+            </remarks>
+        </member>
+        <member name="P:UltraLiteDB.TypedAccessor.Primitive">
+            <summary>
+            The property type when it is one of the primitives the direct serializer reads and writes unboxed
+            through the typed Get/Set methods below; <see cref="F:UltraLiteDB.DirectKind.Object"/> otherwise.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.TypedAccessor.Verify">
+            <summary>
+            Runs code of this generic instantiation. Called once after construction: on an AOT runtime missing code
+            for the instantiation it throws there (and the member falls back to reflection) rather than mid-use.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.TypedAccessor`2.#ctor(System.Reflection.MethodInfo,System.Reflection.MethodInfo,UltraLiteDB.GenericSetter)">
+            <param name="getMethod">Getter to bind, or null.</param>
+            <param name="setMethod">Setter to bind, or null.</param>
+            <param name="convertingSetter">Reflection setter used for values that aren't a <typeparamref name="TValue"/>,
+            so they get exactly the conversions reflection applies (e.g. a boxed int widened into a long property).</param>
+        </member>
+        <member name="T:UltraLiteDB.PreserveAttribute">
+            <summary>
+            Marks code reached only through reflection so Unity's managed code stripping keeps it. UnityLinker honors
+            any attribute named <c>PreserveAttribute</c>, whatever its namespace, so this library doesn't need to
+            reference UnityEngine.
             </summary>
         </member>
         <member name="T:UltraLiteDB.AesEncryption">
@@ -3407,6 +3784,22 @@
             </summary>
             <returns>The decoded string, or "_" if end of buffer is reached without finding null terminator.</returns>
         </member>
+        <member name="P:UltraLiteDB.ByteReader.Buffer">
+            <summary>
+            Gets the underlying buffer, for zero-copy reads by the BSON reader.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.ReadCStringRange(System.Int32@)">
+            <summary>
+            Reads a null-terminated C-string without decoding it: returns the offset of its first byte in
+            <see cref="P:UltraLiteDB.ByteReader.Buffer"/> and its <paramref name="length"/> (terminator excluded).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteReader.SkipCString">
+            <summary>
+            Skips past a null-terminated C-string without decoding it.
+            </summary>
+        </member>
         <member name="T:UltraLiteDB.ByteWriter">
             <summary>
             Writes primitive and extended data types sequentially into a byte buffer in little-endian format.
@@ -3474,6 +3867,67 @@
             Ensures the buffer has room for the specified number of additional bytes, growing it if necessary.
             </summary>
             <param name="additionalBytes">The number of additional bytes needed.</param>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.Utf8Capacity(System.String)">
+            <summary>
+            Returns an upper bound on the UTF-8 byte count of <paramref name="s"/>, cheaply for short strings
+            and exactly for long ones (so large strings don't over-reserve buffer space).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.BeginElement(System.Byte[])">
+            <summary>
+            Starts a BSON element: reserves the type byte and writes a pre-encoded C-string key.
+            Returns the position of the type byte, to be filled in with <see cref="M:UltraLiteDB.ByteWriter.SetByte(System.Int32,System.Byte)"/>
+            once the value (and therefore its BSON type) has been written.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.BeginElement(System.Int32)">
+            <summary>
+            Starts a BSON array element whose key is <paramref name="index"/>. See <see cref="M:UltraLiteDB.ByteWriter.BeginElement(System.Byte[])"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.BeginElement(System.String)">
+            <summary>
+            Starts a BSON element with a string key. See <see cref="M:UltraLiteDB.ByteWriter.BeginElement(System.Byte[])"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.SetByte(System.Int32,System.Byte)">
+            <summary>
+            Overwrites a single byte at an absolute position (used to back-fill element type bytes).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.SetInt32(System.Int32,System.Int32)">
+            <summary>
+            Overwrites an Int32 at an absolute position (used to back-fill document/array lengths).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.WriteRaw(System.Byte[])">
+            <summary>
+            Writes raw bytes, growing the buffer if needed.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.WriteCString(System.String)">
+            <summary>
+            Writes a null-terminated UTF-8 C-string, encoding directly into the buffer.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.EncodeUtf8(System.String,System.Int32)">
+            <summary>
+            Encodes <paramref name="value"/> as UTF-8 at <paramref name="offset"/> (capacity already ensured) and
+            returns the byte count. ASCII, the common case for keys and game strings, is copied directly; the
+            encoder only runs from the first non-ASCII character on (the ASCII prefix can't end in a surrogate).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.WriteIndexCString(System.Int32)">
+            <summary>
+            Writes a non-negative integer as a null-terminated ASCII C-string (BSON array index keys).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.ByteWriter.WriteBsonString(System.String)">
+            <summary>
+            Writes a BSON string value (Int32 length including terminator, UTF-8 bytes, 0x00), encoding
+            directly into the buffer.
+            </summary>
         </member>
         <member name="T:UltraLiteDB.Collation">
             <summary>
@@ -3900,11 +4354,9 @@
             in little-endian format, preserving BSON wire compatibility.
             </summary>
             <remarks>
-            The direct (POCO) serializer backfills document/array length prefixes by rewinding the write
-            position, which requires a seekable stream. Setting <see cref="P:UltraLiteDB.StreamByteWriter.Position"/> throws
-            <see cref="T:System.NotSupportedException"/> when the underlying stream is not seekable. Writing a
-            <see cref="T:UltraLiteDB.BsonDocument"/> is forward-only and never sets the position, so it works with any
-            writable stream.
+            Writes are forward-only, so any writable stream is supported (writing a <see cref="T:UltraLiteDB.BsonDocument"/>
+            never sets the position). Only setting <see cref="P:UltraLiteDB.StreamByteWriter.Position"/>, which rewinds to backfill data,
+            requires a seekable stream; it throws <see cref="T:System.NotSupportedException"/> otherwise.
             </remarks>
         </member>
         <member name="P:UltraLiteDB.StreamByteWriter.Position">
@@ -3914,7 +4366,8 @@
             <summary>
             Initializes a <see cref="T:UltraLiteDB.StreamByteWriter"/> that writes to the specified stream.
             </summary>
-            <param name="stream">The writable stream to write BSON data to.</param>
+            <param name="stream">The writable stream to write BSON data to. It only needs to be seekable
+            if <see cref="P:UltraLiteDB.StreamByteWriter.Position"/> will be set.</param>
         </member>
         <member name="M:UltraLiteDB.StreamByteWriter.EnsureCapacity(System.Int32)">
             <summary>

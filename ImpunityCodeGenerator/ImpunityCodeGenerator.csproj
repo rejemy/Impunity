@@ -5,10 +5,8 @@
     <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
     <PackageId>ImpunityCodeGenerator</PackageId>
-    <Version>1.0</Version>
-    <AssemblyVersion>1.0</AssemblyVersion>
-    <FileVersion>1.0</FileVersion>
-    <VersionPrefix>1.0</VersionPrefix>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0</AssemblyVersion>
     <Authors>Jeremy Friesen</Authors>
     <Product>ImpunityNetworking</Product>
     <Description>Impunity Networking Code Generator</Description>
