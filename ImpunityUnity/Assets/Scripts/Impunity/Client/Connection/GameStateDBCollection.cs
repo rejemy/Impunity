@@ -1,4 +1,5 @@
 
+using System;
 using System.Collections.Generic;
 
 using UltraLiteDB;
@@ -38,6 +39,14 @@ namespace Impunity.Connection
 		/// Defaults to <see cref="BsonMapper.Global"/> when none is supplied to the constructor. Note this is the
 		/// client's mapper for this wrapper only; the server (de)serializes documents with its own internal mapper,
 		/// so custom type registrations that affect storage must be made on both sides.
+		/// <para>
+		/// Documents are read from a database any connected client can write, so treat them as untrusted. A
+		/// member declared as a base class, interface or <c>object</c> is stored with a <c>_type</c> name, and the
+		/// mapper only reads that back for types it allows: allow your own data types (<c>AllowType</c>,
+		/// <c>AllowTypes("MyGame.Data.*")</c>, or <c>RegisterTypeId</c>), preferably on a dedicated mapper passed to
+		/// the constructor, since <see cref="BsonMapper.Global"/> is shared with the rest of the app. Never use
+		/// <c>AllowAllTypes</c> or <c>AllowTypes("*")</c> here: a document could then create any type in the process.
+		/// </para>
 		/// </summary>
 		public BsonMapper Mapper;
 		BaseGameConnection Connection;
@@ -49,7 +58,7 @@ namespace Impunity.Connection
 		/// The collection's numeric id. Must match the <see cref="GameStateCollection.Index"/> of a collection declared
 		/// in the connection's <see cref="GameStateFormat"/>. Ids below 10 are reserved for internal use and are rejected by the server.
 		/// </param>
-		/// <param name="mapper">Optional override for the object↔document mapper. Falls back to <see cref="BsonMapper.Global"/> when null.</param>
+		/// <param name="mapper">Optional override for the object↔document mapper. Falls back to <see cref="BsonMapper.Global"/> when null. See <see cref="Mapper"/> for which types it must allow.</param>
 		public GameStateDBCollection(BaseGameConnection connection, int collectionId, BsonMapper? mapper = null)
 		{
 			Connection = connection;
@@ -89,12 +98,25 @@ namespace Impunity.Connection
 
 		/// <summary>Retrieves a single document by its <c>_id</c> and maps it to <typeparamref name="DTYPE"/>.</summary>
 		/// <param name="id">The <c>_id</c> of the document to fetch.</param>
-		/// <param name="onComplete">Invoked on the main thread with the mapped document or null if not found, or an error.</param>
+		/// <param name="onComplete">
+		/// Invoked on the main thread with the mapped document or null if not found, or an error. A document that
+		/// can't be mapped to <typeparamref name="DTYPE"/> is reported as <see cref="ImpunityErrorCode.ClientMappingError"/>.
+		/// </param>
 		public void FindDocumentById(BsonValue id, ImpunityCallback<DTYPE?> onComplete)
 		{
 			Connection.FindDocumentById(CollectionId, id, (err, bson) =>
 			{
-				DTYPE? doc = (bson != null) ? Mapper.ToObject<DTYPE>(bson) : default;
+				DTYPE? doc = default;
+				if (bson != null)
+				{
+					ImpunityErrorResponse? mapError = TryMap(bson, out DTYPE mapped);
+					if (mapError != null)
+					{
+						onComplete(mapError, default);
+						return;
+					}
+					doc = mapped;
+				}
 				onComplete(err, doc);
 			});
 		}
@@ -110,7 +132,9 @@ namespace Impunity.Connection
 		/// <summary>Retrieves every document in the collection, each mapped to <typeparamref name="DTYPE"/>.</summary>
 		/// <param name="onComplete">
 		/// Invoked on the main thread with the mapped documents. The list is <c>null</c> when the underlying request
-		/// yielded no list (e.g. on error); an existing-but-empty collection yields an empty list.
+		/// yielded no list (e.g. on error); an existing-but-empty collection yields an empty list. If any document
+		/// can't be mapped to <typeparamref name="DTYPE"/>, the whole call fails with
+		/// <see cref="ImpunityErrorCode.ClientMappingError"/> naming that document's <c>_id</c>.
 		/// </param>
 		public void ListDocuments(ImpunityCallback<List<DTYPE>?> onComplete)
 		{
@@ -122,12 +146,36 @@ namespace Impunity.Connection
 					doclist = new List<DTYPE>(bsonlist.Count);
 					foreach (BsonDocument bson in bsonlist)
 					{
-						doclist.Add(Mapper.ToObject<DTYPE>(bson));
+						ImpunityErrorResponse? mapError = TryMap(bson, out DTYPE mapped);
+						if (mapError != null)
+						{
+							onComplete(mapError, null);
+							return;
+						}
+						doclist.Add(mapped);
 					}
 				}
 
 				onComplete(err, doclist);
 			});
+		}
+
+		// Maps a document read from the server, returning an error instead of throwing. The collection is writable by
+		// every client, so a document may fail to map (a disallowed _type, a mistyped member). Thrown from the
+		// callback, that would only be logged by Update(), and the caller's onComplete would never run.
+		private ImpunityErrorResponse? TryMap(BsonDocument bson, out DTYPE doc)
+		{
+			try
+			{
+				doc = Mapper.ToObject<DTYPE>(bson);
+				return null;
+			}
+			catch (Exception e)
+			{
+				doc = default!;
+				return new ImpunityErrorResponse(ImpunityErrorCode.ClientMappingError,
+					"Couldn't map document " + bson["_id"] + " to " + typeof(DTYPE).Name + ": " + e.Message);
+			}
 		}
 
 		// ----- Action builders

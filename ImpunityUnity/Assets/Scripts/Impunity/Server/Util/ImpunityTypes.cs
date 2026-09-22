@@ -103,6 +103,7 @@ namespace Impunity
 		ClientUnableToConnectError = 1000,
 		ClientConnectionBrokenError = 1001,
 		TimeoutError = 1002,
+		ClientMappingError = 1003, // A document from the server couldn't be mapped to the requested type (wrong shape, or a _type the mapper doesn't allow)
 
 		ServerUnavailable = 2000, // New connections to the server are temporarily paused
 		ServerPasswordIncorrect = 2001, // Attempt to connect to password protected server with the wrong password

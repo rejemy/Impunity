@@ -243,6 +243,15 @@ List<PlayerRecord>? all = await players.ListDocumentsAsync();
 
 The mapping is **client-side only** — the wire payload is always BSON — and uses `BsonMapper.Global` unless you pass your own mapper. Custom type registrations that affect *storage* must be made on both client and server, since the server (de)serializes documents with its own mapper.
 
+**Polymorphic members need an allow list.** Any connected client can write to a collection, so the documents you read back are untrusted. When a member is declared as a base class, interface or `object`, the mapper stores the real type's name in `_type`, and UltraLiteDB only resolves `_type` names the mapper allows. A document naming any other type fails to map, and the find or list call completes with `ClientMappingError`. A list fails as a whole rather than silently dropping the bad row. Allow your own data types, ideally on a dedicated mapper so the rest of the app's `BsonMapper.Global` settings don't leak in:
+
+```csharp
+var mapper = new BsonMapper().AllowTypes("MyGame.SaveData.*");   // or AllowType<Sword>(), RegisterTypeId(...)
+var inventory = new GameStateDBCollection<Inventory>(conn, inventoryCollection, mapper);
+```
+
+Never use `AllowAllTypes` or `AllowTypes("*")` on a mapper that reads shared collections: any client could then write a document that creates any type loaded in your game. Documents with only concrete-typed members need nothing allowed.
+
 ---
 
 ## 8. Named locks
@@ -322,6 +331,7 @@ Codes you'll actually branch on:
 | Code | Meaning |
 |---|---|
 | `TimeoutError` | No reply within `ActionTimeoutMillis` (remote only) |
+| `ClientMappingError` | A `GameStateDBCollection<T>` find/list got a document it couldn't map to `T` (wrong shape, or a `_type` the mapper doesn't allow) |
 | `ServerVersionIncompatible` | The client's format doesn't match the server and can't be upgraded |
 | `ServerPasswordIncorrect` | Wrong world password |
 | `ServerUnavailable` | The server is refusing new connections |

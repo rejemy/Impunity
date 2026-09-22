@@ -856,6 +856,10 @@ namespace Impunity.Connection
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSmallSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
+		/// <summary>Overrides the mapper for this <typeparamref name="T"/>; null uses Impunity's shared mapper. Values
+		/// arrive from other clients, so a replacement must stay restrictive: allow only your own data types for
+		/// <c>_type</c> (<c>AllowType</c>, <c>AllowTypes("MyGame.Data.*")</c>), never <c>AllowAllTypes</c> or
+		/// <c>AllowTypes("*")</c>. Impunity's mapper writes no <c>_type</c>, so it allows none.</summary>
 		public static BsonMapper? Mapper = null;
 
 		private static BsonMapper GetMapper()
@@ -911,6 +915,10 @@ namespace Impunity.Connection
 	/// <typeparam name="T">The object type to serialize via BsonMapper.</typeparam>
 	public readonly struct BsonSerializer<T> : IDistributableValueSerializer<T> where T : class
 	{
+		/// <summary>Overrides the mapper for this <typeparamref name="T"/>; null uses Impunity's shared mapper. Values
+		/// arrive from other clients, so a replacement must stay restrictive: allow only your own data types for
+		/// <c>_type</c> (<c>AllowType</c>, <c>AllowTypes("MyGame.Data.*")</c>), never <c>AllowAllTypes</c> or
+		/// <c>AllowTypes("*")</c>. Impunity's mapper writes no <c>_type</c>, so it allows none.</summary>
 		public static BsonMapper? Mapper = null;
 
 		private static BsonMapper GetMapper()

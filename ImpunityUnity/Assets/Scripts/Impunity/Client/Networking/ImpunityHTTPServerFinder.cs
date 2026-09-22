@@ -9,6 +9,11 @@ namespace Impunity.Networking
 	/// <summary>Discovers game worlds on a remote standalone server via its HTTP API. Uses the platform-appropriate transport via <see cref="ImpunityHttp"/> (UnityWebRequest in Unity, HttpClient standalone).</summary>
 	public static class ImpunityHTTPServerFinder
 	{
+		// The reply comes from whatever host the player entered, so it's mapped with a private mapper (defaults
+		// matching BsonMapper.Global) that allows no _type names: the reply types are all concrete. Using
+		// BsonMapper.Global would let an app loosen the allow list for its own data and widen this path too.
+		private static readonly BsonMapper ReplyMapper = new BsonMapper();
+
 		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results.</summary>
 		/// <param name="options"></param>
 		/// <param name="hostname">Server hostname, optionally with port (e.g., "example.com" or "example.com:29653").</param>
@@ -49,7 +54,7 @@ namespace Impunity.Networking
 						return;
 					}
 
-					StandaloneServerWorldsInfo reply = BsonMapper.Global.ToObject<StandaloneServerWorldsInfo>(docReply);
+					StandaloneServerWorldsInfo reply = ReplyMapper.ToObject<StandaloneServerWorldsInfo>(docReply);
 
 					if (reply.ImpunityVersion != ImpunityConstants.ImpunityVersion)
 					{

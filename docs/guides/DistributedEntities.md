@@ -304,7 +304,7 @@ The `S` parameter is a zero-size struct implementing `IDistributableValueSeriali
 
 - **Primitives:** `BoolSerializer`, `Int8/16/32/64Serializer`, `UInt8/16/32/64Serializer`, `FloatSerializer`, `DoubleSerializer`, `DecimalSerializer`, `CharSerializer`, `StringSerializer`, `BlobSerializer` (`ArraySegment<byte>`), `DateTimeSerializer`, `DateTimeOffsetSerializer`, `TimeSpanSerializer`, `GuidSerializer`.
 - **Unity types:** `Vector2/3Serializer`, `DVector4Serializer`, `Vector2Int/Vector3IntSerializer`, `ColorSerializer`, `Color32Serializer`, `QuaternionSerializer`, `Matrix4x4Serializer`.
-- **Arbitrary types:** `BsonSerializer<T>` and `BsonSmallSerializer<T>` serialize any type via UltraLiteDB's BSON mapper (use `BsonSmall` for compact small payloads).
+- **Arbitrary types:** `BsonSerializer<T>` and `BsonSmallSerializer<T>` serialize any type via UltraLiteDB's BSON mapper (use `BsonSmall` for compact small payloads). They use Impunity's shared mapper, which writes no `_type` names and allows none, so a replicated value can only ever be read as its declared member types, whatever another client sends. Members declared as a base class, interface or `object` therefore don't keep their derived type. If you need that, give the serializer a mapper with `IncludeFullType` on and your own data types allowed (`BsonSerializer<T>.Mapper = new BsonMapper { IncludeFields = true }.AllowTypes("MyGame.Data.*")`). Never `AllowAllTypes`: every other client's values go through it.
 
 To support a custom type, implement the interface — write the binary form, the BSON form, and report a `ValueType` tag and a `ValueSemantics` kind:
 

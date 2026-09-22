@@ -172,6 +172,38 @@ namespace Impunity.Tests
 			Assert.AreEqual(3, results.Count);
 		}
 
+		public class MappedItem { public int Power { get; set; } }
+		public class MappedItemVariant : MappedItem { }
+		public class MappedDoc { public string Id { get; set; } public MappedItem Item { get; set; } }
+
+		// GameStateDBCollection<T> maps documents client-side, from a collection any client can write. One that
+		// doesn't map (here a _type the mapper doesn't allow) must fail the call rather than throw out of the
+		// callback, where Update() would only log it and the caller would wait forever.
+		[Test, Category("LocalConnection")]
+		public async Task TypedCollection_UnmappableDocument_ReportsError()
+		{
+			CreateServer();
+			await ConnectLocal();
+
+			// The derived member is stored with a _type name, which only a mapper allowing it can read back.
+			var allowed = new GameStateDBCollection<MappedDoc>(LocalGame, IntegrationTestCollections.ITEMS, new BsonMapper().AllowType<MappedItemVariant>());
+			await Pump(allowed.InsertDocumentAsync(new MappedDoc { Id = "variant", Item = new MappedItemVariant { Power = 7 } }), LocalGame);
+
+			var found = await Pump(allowed.FindDocumentByIdAsync("variant"), LocalGame);
+			Assert.IsInstanceOf<MappedItemVariant>(found.Item);
+			Assert.AreEqual(7, found.Item.Power);
+
+			var items = new GameStateDBCollection<MappedDoc>(LocalGame, IntegrationTestCollections.ITEMS);
+
+			var findErr = await PumpExpectingError(items.FindDocumentByIdAsync("variant"), LocalGame);
+			Assert.IsNotNull(findErr, "A document naming a disallowed _type should fail the find");
+			Assert.AreEqual(ImpunityErrorCode.ClientMappingError, findErr.ErrorId);
+
+			var listErr = await PumpExpectingError(items.ListDocumentsAsync(), LocalGame);
+			Assert.IsNotNull(listErr, "A document naming a disallowed _type should fail the list");
+			Assert.AreEqual(ImpunityErrorCode.ClientMappingError, listErr.ErrorId);
+		}
+
 		// ═══════════════════════════════════════════════════════════
 		// 2. TCP Connection
 		// ═══════════════════════════════════════════════════════════

@@ -6,6 +6,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using NUnit.Framework;
 
@@ -467,6 +468,69 @@ namespace Impunity.Tests
 			// A message serialized without ever setting Seq must default to 0 (back-compat with old producers).
 			var noSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1 });
 			Assert.AreEqual((ushort)0, noSeq.Seq);
+		}
+
+		// ───────── Type allow list (_type names in untrusted data) ─────────
+		//
+		// Impunity's mapper reads peer messages, replicated values and save files. It writes no _type names, so any
+		// it reads came from an attacker: UltraLiteDB must refuse them before creating the type, even when the type
+		// is assignable to the member it's read into.
+
+		static int GadgetsConstructed;
+
+		public class AllowListBase { public int X; }
+
+		public class AllowListGadget : AllowListBase
+		{
+			public AllowListGadget() { GadgetsConstructed++; }
+		}
+
+		public class AllowListHolder { public AllowListBase Item; }
+
+		public class AllowListGadgetAction : InsertDocumentAction
+		{
+			public AllowListGadgetAction() { GadgetsConstructed++; }
+		}
+
+		static string TypeName(Type t) => t.FullName + ", " + t.Assembly.GetName().Name;
+
+		static void AssertTypeNotAllowed(TestDelegate read)
+		{
+			GadgetsConstructed = 0;
+			var ex = Assert.Throws<UltraLiteException>(read);
+			Assert.AreEqual(UltraLiteException.TYPE_NOT_ALLOWED, ex.ErrorCode, ex.Message);
+			Assert.AreEqual(0, GadgetsConstructed, "The type named by _type must not be created");
+		}
+
+		[Test, Category("TypeAllowList")]
+		public void BsonSerializers_RejectUnallowedTypeName()
+		{
+			var doc = new BsonDocument
+			{
+				["Item"] = new BsonDocument { ["_type"] = TypeName(typeof(AllowListGadget)), ["X"] = 1 }
+			};
+			byte[] bytes = BsonSerializer.Serialize(doc);
+
+			AssertTypeNotAllowed(() => new BsonSerializer<AllowListHolder>().FromBsonValue(doc));
+			AssertTypeNotAllowed(() => new BsonSmallSerializer<AllowListHolder>().FromBsonValue(doc));
+			AssertTypeNotAllowed(() => new BsonSerializer<AllowListHolder>().ReadFrom(new BinaryReader(new MemoryStream(bytes)), bytes.Length));
+		}
+
+		[Test, Category("TypeAllowList")]
+		public void CompoundAction_RejectsUnallowedTypeName_ResolvesRegisteredId()
+		{
+			// Sub-actions travel as registered _t ids, which still resolve.
+			var compound = WireRoundTrip(new CompoundDatabaseAction(new[] { new InsertDocumentAction(11, new BsonDocument()) }));
+			Assert.IsInstanceOf<InsertDocumentAction>(compound.Actions[0]);
+
+			// One naming an unregistered action subclass by _type is refused, as the server reads it.
+			var doc = new BsonDocument
+			{
+				["as"] = new BsonArray { new BsonDocument { ["_type"] = TypeName(typeof(AllowListGadgetAction)), ["cid"] = 11 } }
+			};
+			byte[] bytes = BsonSerializer.Serialize(doc);
+
+			AssertTypeNotAllowed(() => ImpunityUtil.GetBsonMapper().DeserializeFromBytes(typeof(CompoundDatabaseAction), bytes, 0));
 		}
 	}
 }

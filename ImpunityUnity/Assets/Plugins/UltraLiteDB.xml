@@ -2929,6 +2929,16 @@
         </member>
         <member name="T:UltraLiteDB.BsonMapper">
             <summary>
+            Controls which CLR types a document's <c>_type</c> discriminator may name.
+            </summary>
+            <remarks>
+            <c>_type</c> holds a type name the mapper instantiates and populates through its setters, so a document from
+            an untrusted source (a save file, a synced database, JSON from the network) could otherwise name any type
+            loaded in the process. Only types that are allowed here, registered with
+            <see cref="M:UltraLiteDB.BsonMapper.RegisterTypeId(System.Type,UltraLiteDB.BsonValue)"/>, or exactly the declared type are accepted, and every resolved type must be
+            assignable to the member or root type it is read into. <c>_t</c> ids only ever resolve to registered types.
+            </remarks>
+            <summary>
             Maps .NET entity classes to and from <see cref="T:UltraLiteDB.BsonDocument"/> representations.
             If you use a new instance rather than <see cref="F:UltraLiteDB.BsonMapper.Global"/>, cache it for better performance.
             <para>Serialization rules:</para>
@@ -2940,6 +2950,147 @@
               <item>Fields are not mapped by default (see <see cref="P:UltraLiteDB.BsonMapper.IncludeFields"/>)</item>
               <item><see cref="T:System.Collections.IList"/>, Array, <see cref="T:System.Collections.IDictionary"/> types are supported</item>
             </list>
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper.MAX_CACHED_TYPE_NAMES">
+            <summary>Allowed type names are cached up to this many entries per allow-list version.</summary>
+        </member>
+        <member name="T:UltraLiteDB.BsonMapper.AllowList">
+            <summary>
+            Immutable snapshot of the allow-list, plus the <c>_type</c> names already resolved under it. Every change
+            publishes a new snapshot, so checks never lock and each sees one consistent version; a change made while
+            another thread is deserializing takes effect for that thread at some point after it is published.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper.AllowList.Types">
+            <summary>Types allowed by <see cref="M:UltraLiteDB.BsonMapper.AllowType(System.Type)"/>.</summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper.AllowList.Names">
+            <summary>
+            Full names (generic definition names for generic types) of allowed and registered types, so a
+            <c>_type</c> name can be rejected before it is resolved.
+            </summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper.AllowList.Patterns">
+            <summary>Patterns added by <see cref="M:UltraLiteDB.BsonMapper.AllowTypes(System.String)"/>.</summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper.AllowList.Resolved">
+            <summary><c>_type</c> names already resolved to a type this allow-list allows.</summary>
+        </member>
+        <member name="P:UltraLiteDB.BsonMapper.AllowAllTypes">
+            <summary>If true, allow all types. Only use for trusted data. If true, bypasses allow list.</summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._allowList">
+            <summary>Current allow-list. Read with <see cref="M:System.Threading.Volatile.Read``1(``0@)"/>; replaced, never mutated.</summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._allowLock">
+            <summary>Serializes allow-list changes, so concurrent changes can't lose one another. Checks don't take it.</summary>
+        </member>
+        <member name="F:UltraLiteDB.BsonMapper._allowedContainerTypes">
+            <summary>
+            Generic collection definitions allowed as type arguments of an allowed type when their own type arguments are
+            allowed. A document can never populate a collection's own properties (collections are only read from BSON arrays).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.AllowType``1">
+            <summary>
+            Allows documents to name <typeparamref name="T"/> in their <c>_type</c> field, so it can be read into a
+            member or collection of a base class, interface, or <c>object</c> type.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.AllowType(System.Type)">
+            <summary>
+            Allows documents to name <paramref name="type"/> in their <c>_type</c> field, so it can be read into a
+            member or collection of a base class, interface, or <c>object</c> type. A generic type definition
+            (e.g. <c>typeof(MyBox&lt;&gt;)</c>) allows every instantiation whose type arguments are also allowed.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.AllowTypes(System.String)">
+            <summary>
+            Allows documents to name, in their <c>_type</c> field, any type whose full name matches
+            <paramref name="pattern"/>, where <c>*</c> matches any run of characters: <c>"MyCompany.DataTypes.*"</c>
+            allows every type in that namespace and the namespaces nested in it. Generic types match on their
+            definition name (<c>"MyCompany.DataTypes.Box`1"</c>), and their type arguments must be allowed too.
+            </summary>
+            <remarks>
+            Only allow namespaces that hold data types: every type they contain can be created, and its settable
+            properties set, by whoever writes the document. <c>"*"</c> allows every type in the process and is unsafe
+            for any data you did not write yourself.
+            </remarks>
+        </member>
+        <member name="P:UltraLiteDB.BsonMapper.AllowTypeFilter">
+            <summary>
+            Optional predicate, consulted for types not otherwise allowed; return <c>true</c> to allow a type in
+            <c>_type</c>. Like the other rules, it sees a generic type's definition and each of its type arguments
+            separately, never a constructed generic type. It may be called concurrently by threads deserializing
+            with this mapper. <c>t =&gt; true</c> allows every type and is unsafe for any data you did not write yourself.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.IsTypeAllowed(System.Type)">
+            <summary>
+            Returns true if <paramref name="type"/> may be named in a document's <c>_type</c> field.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.AllowRegisteredType(System.Type)">
+            <summary>
+            Records a type registered with <see cref="M:UltraLiteDB.BsonMapper.RegisterTypeId(System.Type,UltraLiteDB.BsonValue)"/>: registered types are allowed by name too.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.PublishAllowList(UltraLiteDB.BsonMapper.AllowList)">
+            <summary>
+            Publishes a changed allow-list, starting its resolved-name cache empty (the change may allow less than
+            before). Call with <see cref="F:UltraLiteDB.BsonMapper._allowLock"/> held.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.ResolveTypeName(System.Type,UltraLiteDB.BsonValue)">
+            <summary>
+            Resolves a document's <c>_type</c> name to the type to read into <paramref name="declaredType"/>, throwing
+            if the name doesn't resolve, the type isn't allowed, or it isn't assignable to <paramref name="declaredType"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.ResolveTypeId(System.Type,UltraLiteDB.BsonValue)">
+            <summary>
+            Resolves a document's <c>_t</c> id to its registered type, throwing if the id isn't registered or the type
+            isn't assignable to <paramref name="declaredType"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.IsAllowed(UltraLiteDB.BsonMapper.AllowList,System.Type)">
+            <summary>
+            Whether <paramref name="type"/> may be named in <c>_type</c> under <paramref name="allowList"/>.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.AreAllowedTypeArguments(UltraLiteDB.BsonMapper.AllowList,System.Reflection.TypeInfo)">
+            <summary>
+            A type argument decides the declared type of the members that use it, so each must be allowed too.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.IsAllowedDefinition(UltraLiteDB.BsonMapper.AllowList,System.Type)">
+            <summary>
+            Whether a non-generic type or generic type definition is allowed by the mapper's rules.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.IsAllowedTypeArgument(UltraLiteDB.BsonMapper.AllowList,System.Type)">
+            <summary>
+            Whether a generic type argument or array element type is allowed. Besides allowed types, this accepts
+            types a document can't populate through setters: built-in value types, enums, BSON types, types with a
+            custom deserializer, <c>object</c> (whose values need an allowed <c>_type</c> of their own), and arrays
+            and common collections of allowed types (collections are only ever read from BSON arrays).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.MatchesPattern(System.String,System.String)">
+            <summary>
+            Ordinal wildcard match where <c>*</c> matches any run of characters (including none).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.GetDefinitionName(System.Type)">
+            <summary>
+            The full name of a type, or of its generic type definition for a constructed generic type.
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.BsonMapper.GetDefinitionName(System.String)">
+            <summary>
+            The type (or generic type definition) part of a <c>_type</c> name, which is
+            <c>"FullName, Assembly"</c>, with generic arguments in <c>[[...]]</c> and arrays as <c>[]</c> after the name.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper._entities">
@@ -3011,6 +3162,8 @@
         <member name="P:UltraLiteDB.BsonMapper.IncludeFullType">
             <summary>
             When <c>true</c>, the serializer includes the assembly-qualified type name (<c>_type</c> field) for derived types to support polymorphic deserialization. Default is <c>true</c>.
+            Reading a <c>_type</c> back requires the type to be allowed (<see cref="M:UltraLiteDB.BsonMapper.AllowType(System.Type)"/>, <see cref="M:UltraLiteDB.BsonMapper.AllowTypes(System.String)"/>)
+            or registered with <see cref="M:UltraLiteDB.BsonMapper.RegisterTypeId(System.Type,UltraLiteDB.BsonValue)"/>.
             </summary>
         </member>
         <member name="F:UltraLiteDB.BsonMapper.ResolveMember">
@@ -3315,6 +3468,9 @@
         <member name="F:UltraLiteDB.DirectReadInfo.Code">
             <summary><see cref="T:System.TypeCode"/> of exact primitive targets; <see cref="F:System.TypeCode.Object"/> for everything else (including enums).</summary>
         </member>
+        <member name="F:UltraLiteDB.DirectReadInfo.IsCollection">
+            <summary>An enumerable, non-dictionary type: only read from BSON arrays (see <see cref="M:UltraLiteDB.Reflection.IsCollectionType(System.Type)"/>).</summary>
+        </member>
         <member name="F:UltraLiteDB.DirectReadInfo.ItemInfo">
             <summary>Cached info for collection items.</summary>
         </member>
@@ -3565,6 +3721,16 @@
             <summary>
             Returns true if the type implements <c>IEnumerable&lt;T&gt;</c> (excluding <c>string</c> and <c>BsonDocument</c>).
             </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.IsCollectionType(System.Type)">
+            <summary>
+            Returns true for enumerable types the mapper stores as BSON arrays, so never reads from a document:
+            everything enumerable except strings, BSON values and dictionaries (<see cref="T:System.Collections.IDictionary"/>,
+            <c>IDictionary&lt;,&gt;</c>, <c>IReadOnlyDictionary&lt;,&gt;</c>).
+            </summary>
+        </member>
+        <member name="M:UltraLiteDB.Reflection.IsGenericDictionaryInterface(System.Type)">
+            <summary>Returns true if the type is <c>IDictionary&lt;,&gt;</c> or <c>IReadOnlyDictionary&lt;,&gt;</c>.</summary>
         </member>
         <member name="M:UltraLiteDB.Reflection.SelectMember(System.Collections.Generic.IEnumerable{System.Reflection.MemberInfo},System.Func{System.Reflection.MemberInfo,System.Boolean}[])">
             <summary>

@@ -55,7 +55,9 @@ namespace Impunity
 	public static class ImpunityUtil
 	{
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
-		private static BsonMapper? Mapper = null;
+		// Built on first use. Lazy publishes it only once fully configured: a mapper visible before its RegisterTypeId
+		// calls finish would leave a thread racing the first call unable to resolve _t ids.
+		private static readonly Lazy<BsonMapper> Mapper = new Lazy<BsonMapper>(CreateBsonMapper);
 
 		private static TemporaryBuffer? SmallBufferPool;
 		private static object SmallBufferLock = new object();
@@ -139,15 +141,23 @@ namespace Impunity
 
 		}
 
-		/// <summary>Returns the shared BsonMapper configured with all client and server action type registrations. Lazily initialized on first call.</summary>
+		/// <summary>Returns the shared BsonMapper configured with all client and server action type registrations. Built on first call; thread-safe.</summary>
+		/// <remarks>
+		/// This mapper reads untrusted input: wire messages from peers, replicated <c>BsonSerializer&lt;T&gt;</c>
+		/// values, and the server's own database and marker files (which may come from a shared save). Its only type
+		/// discriminators are the <c>_t</c> ids registered here. It never writes <c>_type</c> (<c>IncludeFullType</c>
+		/// is off), so its <c>_type</c> allow list is left empty on purpose: a <c>_type</c> naming anything other than
+		/// the declared type can only have come from an attacker, and UltraLiteDB rejects it. Do not add
+		/// <c>AllowTypes</c> or <c>AllowAllTypes</c> here.
+		/// </remarks>
 		public static BsonMapper GetBsonMapper()
 		{
-			if (Mapper != null)
-			{
-				return Mapper;
-			}
+			return Mapper.Value;
+		}
 
-			Mapper = new BsonMapper
+		private static BsonMapper CreateBsonMapper()
+		{
+			BsonMapper mapper = new BsonMapper
 			{
 				IncludeFields = true,
 				IncludeFullType = false,
@@ -157,7 +167,7 @@ namespace Impunity
 			foreach (ClientActionType actionTypeId in Enum.GetValues(typeof(ClientActionType)))
 			{
 				Type actionType = ClientActionFactory.GetActionClassType(actionTypeId);
-				Mapper.RegisterTypeId(actionType, (int)actionTypeId);
+				mapper.RegisterTypeId(actionType, (int)actionTypeId);
 			}
 
 			foreach (ServerActionType actionTypeId in Enum.GetValues(typeof(ServerActionType)))
@@ -168,10 +178,10 @@ namespace Impunity
 
 				int intActionId = (int)actionTypeId + SERVER_ACTION_ID_OFFSET;
 				Type actionType = ServerActionFactory.GetActionClassType(actionTypeId);
-				Mapper.RegisterTypeId(actionType, intActionId);
+				mapper.RegisterTypeId(actionType, intActionId);
 			}
 
-			return Mapper;
+			return mapper;
 		}
 
 		/// <summary>Checks if a byte array starts with the given header bytes.</summary>
