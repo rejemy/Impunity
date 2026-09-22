@@ -662,6 +662,9 @@ namespace Impunity.GameState
 				if (action.Error != null)
 				{
 					SendActionResults(action);
+					// A rejected create/delete never reaches DoAction, so resolve its conditional here (as skipped) or the
+					// client would wait on its reply until the action timeout.
+					ConditionalActions.Dispatch(this, action, false);
 					return;
 				}
 			}

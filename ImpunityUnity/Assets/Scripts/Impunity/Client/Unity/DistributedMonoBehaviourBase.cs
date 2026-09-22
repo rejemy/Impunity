@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 using Impunity.Connection;
+using Impunity.GameState;
 
 using UltraLiteDB;
 using System;
@@ -111,16 +112,32 @@ namespace Impunity.Unity
 		}
 
 		/// <inheritdoc/>
-		public void UpdateExclusive(ImpunityCallback onComplete)
+		public void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null)
 		{
 			if (Manager == null)
 			{
 				// No manager means the entity was never registered with a connection; there is no queue to defer through.
 				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection"));
+				if (onReplicatedAction != null)
+				{
+					onReplicatedAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection");
+					onReplicatedAction.InvokeOnCompleteCallback();
+				}
 				return;
 			}
 
-			Manager.SendEntityUpdatesExclusive(this, onComplete);
+			Manager.SendEntityUpdatesExclusive(this, onComplete, onReplicatedAction);
+		}
+
+		/// <inheritdoc/>
+		public void AddReplicatedAction(GameStateActionBase action)
+		{
+			if (Manager == null)
+			{
+				throw new InvalidOperationException("Entity is not registered with a connection");
+			}
+
+			Manager.AddReplicatedAction(this, action);
 		}
 
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
@@ -129,9 +146,12 @@ namespace Impunity.Unity
 		/// <param name="deleteData">Optional BSON payload relayed to subscribers via <see cref="OnDeleted"/>.</param>
 		/// <param name="onComplete">Receives <c>true</c> if the entity was deleted, or <c>false</c> if the request was
 		/// rejected because the entity is locked by another client; the error argument is non-null on failure. May be null.</param>
-		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
+		/// <param name="onDeletedAction">Optional database action sent in the same message and run by the server only if
+		/// this request deleted the entity — e.g. adding a picked-up item to the player's inventory. Its own callback
+		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
+		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
 		{
-			Manager?.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete);
+			Manager?.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'

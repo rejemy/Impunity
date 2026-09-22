@@ -173,11 +173,13 @@ BsonDocument doc = await conn.FindDocumentByIdAsync(collectionId, id);   // thro
 
 ### Guaranteed vs. unguaranteed
 
-Most actions are sent **guaranteed** (reliably, over TCP). A few high-frequency ones — entity property updates — can be sent **unguaranteed** (best-effort, over UDP) when you don't care about losing an intermediate frame. Unguaranteed delivery is only available on a remote connection that has negotiated UDP (a ping/pong exchange during connect); otherwise the send transparently falls back to TCP, and a local connection is always reliable. This matters mainly for distributed fields — see [`DistributedEntities.md`](DistributedEntities.md) §5/§12.
+Most actions are sent **guaranteed** (reliably, over TCP). A few high-frequency ones — entity property updates — can be sent **unguaranteed** (best-effort, over UDP) when you don't care about losing an intermediate frame. Unguaranteed delivery is only available on a remote connection that has negotiated UDP (a ping/pong exchange during connect); otherwise the send transparently falls back to TCP, and a local connection is always reliable. This matters mainly for distributed fields — see [`DistributedEntities.md`](DistributedEntities.md) §5/§13.
 
 ### Replies, ordering, and timeouts
 
-A request that has a callback waits for exactly one reply; a callback-less request is flagged "no reply" so the server doesn't send one. Replies are matched to requests **positionally** — in send order — which is safe over the single ordered TCP stream. The reply timeout (`ActionTimeoutMillis`, remote only) is the only thing that completes a request the server never answers; a local connection has no timeout.
+A request that has a callback waits for exactly one reply; a callback-less request is flagged "no reply" so the server doesn't send one. On a remote connection each reply-expecting request is given a correlation id in its message header, and the server echoes that id on the reply, so replies are matched to requests **by id** and need not arrive in send order. A late reply to a request that already timed out simply matches nothing. The reply timeout (`ActionTimeoutMillis`, remote only) is the only thing that completes a request the server never answers; a local connection has no timeout.
+
+A `CreateObject`, `DeleteEntity`, or entity update carrying a **conditional action** (a database action run only if the entity operation succeeds — see [`DistributedEntities.md`](DistributedEntities.md) §11) is one message with two replies (for a plain update, which has no reply of its own, just the conditional's). The conditional gets a second correlation id, carried in the request body, and its reply always arrives after the entity operation's. Each has its own callback and times out independently.
 
 ### Compound actions
 
@@ -284,7 +286,7 @@ conn.OnBroadcastMessage = (messageType, body, sender) =>
 
 `OnBroadcastMessage` is invoked on the main thread during `Update()`, like every other callback. Because the sender receives its own broadcast, you can treat the handler as the single place that reacts to the message rather than acting locally at the send site.
 
-For a message targeted at the subscribers of one entity's channel (rather than everyone), use an entity **event** instead — see [`DistributedEntities.md`](DistributedEntities.md) §11.
+For a message targeted at the subscribers of one entity's channel (rather than everyone), use an entity **event** instead — see [`DistributedEntities.md`](DistributedEntities.md) §12.
 
 ---
 
@@ -329,6 +331,7 @@ Codes you'll actually branch on:
 | `ActionNotFound` | The target entity/document doesn't exist |
 | `ActionBadRequest` / `ActionInvalidParameter` | Malformed request (e.g. a non-DB action in a compound batch, a bad collection id) |
 | `ActionCompoundFailure` | At least one sub-action of a compound action failed |
+| `ActionConditionNotMet` | A conditional action was not run because the create/delete it was attached to did not succeed |
 
 A **fatal** server error (e.g. an incompatible version at connect) closes the connection after reporting. Transport-level failures on a remote connection surface through `OnNetworkError` — note the caveat in [§13](#13-known-caveats) about *clean* disconnects.
 

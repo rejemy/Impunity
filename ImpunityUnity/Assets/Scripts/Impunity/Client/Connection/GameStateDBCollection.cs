@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 
 using UltraLiteDB;
+using Impunity.GameState;
 
 
 namespace Impunity.Connection
@@ -127,6 +128,46 @@ namespace Impunity.Connection
 
 				onComplete(err, doclist);
 			});
+		}
+
+		// ----- Action builders
+		//
+		// These build the same request as the methods above but return it instead of sending it, for use as the
+		// conditional action of an entity create or delete (BaseGameConnection.CreateObject's onCreatedAction,
+		// DeleteEntity's onDeletedAction, entity.Delete's onDeletedAction), or as a step of a CompoundDatabaseAction.
+		// The callback fires with the action's own result once the server has run it — or, used as a conditional, with
+		// ImpunityErrorCode.ActionConditionNotMet if the entity operation did not succeed and it was never run.
+
+		/// <summary>Builds, without sending, an insert of <paramref name="doc"/>. See <see cref="InsertDocument"/>.</summary>
+		/// <param name="doc">The document to store. If it has no <c>_id</c>, the server assigns one.</param>
+		/// <param name="onComplete">Receives the assigned <c>_id</c>, or an error. May be null for fire-and-forget.</param>
+		public InsertDocumentAction MakeInsertAction(DTYPE doc, ImpunityCallback<BsonValue>? onComplete = null)
+		{
+			return new InsertDocumentAction(CollectionId, Mapper.ToDocument(doc), onComplete);
+		}
+
+		/// <summary>Builds, without sending, a replace of the document matching <paramref name="doc"/>'s <c>_id</c>. See <see cref="UpdateDocument"/>.</summary>
+		/// <param name="doc">The replacement document.</param>
+		/// <param name="onComplete">Receives <c>true</c> if a matching document was replaced, <c>false</c> if none existed. May be null.</param>
+		public UpdateDocumentAction MakeUpdateAction(DTYPE doc, ImpunityCallback<bool>? onComplete = null)
+		{
+			return new UpdateDocumentAction(CollectionId, Mapper.ToDocument(doc), onComplete);
+		}
+
+		/// <summary>Builds, without sending, an insert-or-replace of <paramref name="doc"/>. See <see cref="UpsertDocument"/>.</summary>
+		/// <param name="doc">The document to insert or replace.</param>
+		/// <param name="onComplete">Receives <c>true</c> if inserted as new, <c>false</c> if it replaced an existing one. May be null.</param>
+		public UpsertDocumentAction MakeUpsertAction(DTYPE doc, ImpunityCallback<bool>? onComplete = null)
+		{
+			return new UpsertDocumentAction(CollectionId, Mapper.ToDocument(doc), onComplete);
+		}
+
+		/// <summary>Builds, without sending, a delete of the document with the given <c>_id</c>. See <see cref="DeleteDocument"/>.</summary>
+		/// <param name="id">The <c>_id</c> of the document to delete.</param>
+		/// <param name="onComplete">Receives <c>true</c> if a matching document was deleted, <c>false</c> if none existed. May be null.</param>
+		public DeleteDocumentAction MakeDeleteAction(BsonValue id, ImpunityCallback<bool>? onComplete = null)
+		{
+			return new DeleteDocumentAction(CollectionId, id, onComplete);
 		}
 	}
 

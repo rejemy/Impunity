@@ -12,6 +12,7 @@
 #nullable disable
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -317,6 +318,195 @@ namespace Impunity.Tests
 			await PumpFor(TimeSpan.FromSeconds(0.5), AllConnections());
 
 			Assert.IsFalse(bSawChange, "Replication leaked to an unsubscribed client");
+		}
+
+		/// <summary>Two clients pick up the same world item, each with a conditional "add to my inventory". Over a
+		/// remote leg this is what exercises the conditional's second correlation id: its reply must find its own
+		/// callback, independent of the delete's.</summary>
+		[Test, Category("Transport"), Category("Conditional")]
+		public async Task ConditionalDelete_RaceOnlyWinnerGetsItem()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("pickup");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var item = new IntegrationTestEntity();
+			item.DisplayName.Set("sword");
+			await Pump(connA.EntityManager.CreateObjectAsync(item, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+
+			IntegrationTestEntity bItem = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				bItem = (IntegrationTestEntity)obj;
+			}
+
+			var entities = new IntegrationTestEntity[] { item, bItem };
+			var invIds = new[] { Name("inv_a"), Name("inv_b") };
+			var deletes = new[] { new CallbackProbe<bool>(), new CallbackProbe<bool>() };
+			var inserts = new[] { new CallbackProbe<BsonValue>(), new CallbackProbe<BsonValue>() };
+
+			for (int i = 0; i < 2; i++)
+			{
+				var doc = new BsonDocument { ["_id"] = invIds[i], ["item"] = "sword" };
+				entities[i].Delete(null, deletes[i].OnComplete, new InsertDocumentAction(IntegrationTestCollections.ITEMS, doc, inserts[i].OnComplete));
+			}
+
+			await PumpUntil(() => deletes[0].Fired && deletes[1].Fired && inserts[0].Fired && inserts[1].Fired, TimeSpan.FromSeconds(5), AllConnections());
+
+			int winner = (deletes[0].Error == null && deletes[0].Value) ? 0 : 1;
+			int loser = 1 - winner;
+			Assert.IsTrue(deletes[winner].Error == null && deletes[winner].Value, "Neither delete succeeded");
+			Assert.IsNotNull(deletes[loser].Error, "Both deletes succeeded");
+			Assert.AreEqual(ImpunityErrorCode.ActionNotFound, deletes[loser].Error.ErrorCode);
+
+			Assert.IsNull(inserts[winner].Error, "Winner's conditional failed: " + inserts[winner].Error?.Message);
+			Assert.AreEqual(invIds[winner], inserts[winner].Value.AsString, "Conditional reply was matched to the wrong action");
+			Assert.IsNotNull(inserts[loser].Error, "Loser's conditional ran");
+			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, inserts[loser].Error.ErrorCode);
+
+			Assert.IsNotNull(await Pump(connA.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, invIds[winner]), AllConnections()));
+			Assert.IsNull(await Pump(connA.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, invIds[loser]), AllConnections()),
+				"The item was duplicated into the loser's inventory");
+		}
+
+		/// <summary>Drop: create in the world with a conditional "remove from my inventory", over the wire. The
+		/// create's callback must fire first, then the conditional's with its own result.</summary>
+		[Test, Category("Transport"), Category("Conditional")]
+		public async Task ConditionalCreate_RemovesInventoryRow()
+		{
+			await EnsureServerAsync();
+			var conn = await OpenConnectionAsync();
+
+			var channelName = Name("drop");
+			var channel = await Pump(conn.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), conn);
+
+			var bagId = Name("bag");
+			await Pump(conn.InsertDocumentAsync(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = bagId, ["item"] = "gem" }), conn);
+
+			var log = new List<string>();
+			var createProbe = new CallbackProbe<IntegrationTestEntity>(log, "create");
+			var removeProbe = new CallbackProbe<bool>(log, "remove");
+
+			var dropped = new IntegrationTestEntity();
+			dropped.DisplayName.Set("gem");
+			conn.EntityManager.CreateObject(dropped, channel, false, createProbe.OnComplete,
+				new DeleteDocumentAction(IntegrationTestCollections.ITEMS, bagId, removeProbe.OnComplete));
+
+			await PumpUntil(() => createProbe.Fired && removeProbe.Fired, TimeSpan.FromSeconds(5), conn);
+
+			Assert.IsNull(createProbe.Error, "Create failed: " + createProbe.Error?.Message);
+			Assert.IsNull(removeProbe.Error, "Conditional failed: " + removeProbe.Error?.Message);
+			Assert.IsTrue(removeProbe.Value, "Conditional delete should have found the inventory row");
+			CollectionAssert.AreEqual(new[] { "create", "remove" }, log);
+
+			Assert.IsNull(await Pump(conn.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, bagId), conn));
+		}
+
+		/// <summary>A skipped compound conditional replies with an error and no results list. Over a remote leg the
+		/// reply must still deserialize and reach the callback, rather than being dropped (and never timing out).</summary>
+		[Test, Category("Transport"), Category("Conditional")]
+		public async Task ConditionalCompound_SkippedStillReplies()
+		{
+			await EnsureServerAsync();
+			var conn = await OpenConnectionAsync();
+
+			var compoundProbe = new CallbackProbe<List<ActionResult>>();
+			var compound = new CompoundDatabaseAction(new GameStateActionBase[]
+			{
+				new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = Name("never") })
+			}, compoundProbe.OnComplete);
+
+			// No such entity: the delete fails, so the compound is skipped.
+			var deleteProbe = new CallbackProbe<bool>();
+			conn.DeleteEntity(uint.MaxValue - 1, null, deleteProbe.OnComplete, compound);
+
+			await PumpUntil(() => deleteProbe.Fired && compoundProbe.Fired, TimeSpan.FromSeconds(5), conn);
+
+			Assert.AreEqual(ImpunityErrorCode.ActionNotFound, deleteProbe.Code);
+			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, compoundProbe.Code);
+			Assert.IsNotNull(compoundProbe.Value, "A skipped compound should hand its callback an empty list, not null");
+			Assert.AreEqual(0, compoundProbe.Value.Count);
+		}
+
+		/// <summary>Two replicated actions on one exclusive update travel as a single compound. Over a remote leg each
+		/// action's typed result must survive the compound round trip and reach its own callback.</summary>
+		[Test, Category("Transport"), Category("Conditional")]
+		public async Task ReplicatedActions_CombinedOnExclusiveUpdate()
+		{
+			await EnsureServerAsync();
+			var conn = await OpenConnectionAsync();
+
+			var channel = await Pump(conn.EntityManager.SubscribeToChannelAsync(Name("chest"), new IntegrationTestChannel()), conn);
+			var chest = new IntegrationTestEntity();
+			await Pump(conn.EntityManager.CreateObjectAsync(chest, channel, false), conn);
+
+			var ids = new[] { Name("r1"), Name("r2") };
+			var probes = new[] { new CallbackProbe<BsonValue>(), new CallbackProbe<BsonValue>() };
+
+			chest.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
+			chest.DisplayName.Set("gem");
+			bool updateDone = false;
+			ImpunityErrorResponse updateErr = null;
+			chest.UpdateExclusive(err => { updateDone = true; updateErr = err; },
+				new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[1] }, probes[1].OnComplete));
+
+			await PumpUntil(() => updateDone && probes[0].Fired && probes[1].Fired, TimeSpan.FromSeconds(5), conn);
+
+			Assert.IsNull(updateErr, "Exclusive update failed: " + updateErr?.Message);
+			for (int i = 0; i < 2; i++)
+			{
+				Assert.IsNull(probes[i].Error, "Action " + i + " failed: " + probes[i].Error?.Message);
+				Assert.AreEqual(ids[i], probes[i].Value.AsString, "Action " + i + " got the wrong result");
+			}
+		}
+
+		/// <summary>An exclusive update rejected by another client's lock skips its combined actions; over a remote leg
+		/// the skip must still fan out to every action's callback.</summary>
+		[Test, Category("Transport"), Category("Conditional")]
+		public async Task ReplicatedActions_RejectedUpdateSkipsAll()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("chest");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var chest = new IntegrationTestEntity();
+			await Pump(connA.EntityManager.CreateObjectAsync(chest, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+			IntegrationTestEntity bChest = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				bChest = (IntegrationTestEntity)obj;
+			}
+			Assert.IsTrue(await Pump(bChest.TryLockAsync(), AllConnections()), "B should take the lock");
+
+			var ids = new[] { Name("s1"), Name("s2") };
+			var probes = new[] { new CallbackProbe<BsonValue>(), new CallbackProbe<BsonValue>() };
+			chest.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
+			chest.DisplayName.Set("gem");
+			bool updateDone = false;
+			ImpunityErrorResponse updateErr = null;
+			chest.UpdateExclusive(err => { updateDone = true; updateErr = err; },
+				new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[1] }, probes[1].OnComplete));
+
+			await PumpUntil(() => updateDone && probes[0].Fired && probes[1].Fired, TimeSpan.FromSeconds(5), AllConnections());
+
+			Assert.IsNotNull(updateErr, "The update should be rejected while B holds the lock");
+			Assert.AreEqual(ImpunityErrorCode.ActionBlockedByLock, updateErr.ErrorCode);
+			for (int i = 0; i < 2; i++)
+			{
+				Assert.IsNotNull(probes[i].Error, "Action " + i + " ran on a rejected update");
+				Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, probes[i].Error.ErrorCode);
+				Assert.IsNull(await Pump(connA.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, ids[i]), AllConnections()));
+			}
 		}
 	}
 

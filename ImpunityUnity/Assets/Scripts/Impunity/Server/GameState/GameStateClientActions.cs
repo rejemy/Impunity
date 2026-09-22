@@ -484,6 +484,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.COMPOUND_DATABASE; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public CompoundDatabaseAction() { }
 
@@ -535,11 +536,20 @@ namespace Impunity.GameState
 				Error = mapper.ToObject<ImpunityErrorResponse>(errorVal.AsDocument!);
 			}
 
-			BsonArray resultArray = (BsonArray)resultBody["r"];
+			// No results at all when the compound never ran — skipped as a conditional, or rejected before DoAction (the
+			// mapper omits a null list). A partial list when it threw part-way through (a non-database sub-action).
+			BsonValue resultsVal = resultBody["r"];
+			if (!resultsVal.IsArray)
+			{
+				Result = new List<ActionResult>();
+				return;
+			}
+
+			BsonArray resultArray = resultsVal.AsArray!;
 
 			Result = new List<ActionResult>(resultArray.Count);
 
-			for (int i = 0; i < Actions.Count; i++)
+			for (int i = 0; i < resultArray.Count && i < Actions.Count; i++)
 			{
 				GameStateActionBase action = Actions[i];
 				BsonDocument resultVal = resultArray[i].AsDocument!;
@@ -548,6 +558,13 @@ namespace Impunity.GameState
 
 				Result.Add((ActionResult)mapper.ToObject(resultType, resultVal)!);
 			}
+		}
+
+		// A compound that never ran has no result list; hand the callback an empty one (as the remote path does) so
+		// callers can index it without a null check.
+		public override void InvokeOnCompleteCallback()
+		{
+			OnCompleteCallback?.Invoke(Error, Result ?? new List<ActionResult>());
 		}
 
 	}
@@ -562,6 +579,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.INSERT_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public InsertDocumentAction() { }
 
@@ -588,6 +606,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public UpdateDocumentAction() { }
 
@@ -614,6 +633,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPSERT_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public UpsertDocumentAction() { }
 
@@ -640,6 +660,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INTO_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public MergeIntoDocumentAction() { }
 
@@ -666,6 +687,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INSERT_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public MergeInsertDocumentAction() { }
 
@@ -692,6 +714,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.FIND_DOCUMENT_BY_ID; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public FindDocumentByIdAction() { }
 
@@ -718,6 +741,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public DeleteDocumentAction() { }
 
@@ -742,6 +766,7 @@ namespace Impunity.GameState
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.LIST_DOCUMENTS; }
 		public override bool IsDBOperation() { return true; }
+		public override bool CanRunConditionally() { return true; }
 
 		public ListDocumentsAction() { }
 
@@ -754,6 +779,98 @@ namespace Impunity.GameState
 		protected override void DoAction(GameStateServer game)
 		{
 			Result = game.DB.ListDocuments(CollectionId);
+		}
+	}
+
+
+	// Conditional actions
+	//
+	// A CreateObject, DeleteEntity or UpdateEntity request can carry one database action that the server runs only if the
+	// entity operation succeeded for this client — e.g. "delete this item from the world, and only if that worked, add it
+	// to my inventory", or "put this item in the chest, and only if that update was accepted, remove it from my
+	// inventory". (On the client, updates pick theirs up from the entity's pending replicated actions; several pending at
+	// once are sent as one CompoundDatabaseAction — see ClientEntityReplicatedActions.cs.) Both travel in one message, so a connection that dies mid-operation can't have landed just one of
+	// them. The entity operation runs first on the live thread (which is single-threaded, so it is the arbiter when two
+	// clients race for the same entity); the conditional then runs on the database thread. It is not a transaction:
+	// the two are separate commits, and a failed conditional does not undo the entity operation.
+	//
+	// The conditional keeps its own callback and gets its own reply, correlated by a second message id carried in the
+	// parent's body (ConditionalMessageId). That reply is always delivered after the parent's. See
+	// docs/guides/DistributedEntities.md, "Conditional actions".
+
+	/// <summary>Implemented by the entity actions that can carry a conditional database action. Lets the client
+	/// transports register the conditional's reply without knowing the concrete action type.</summary>
+	public interface IHasConditionalAction
+	{
+		/// <summary>The database action to run if the entity operation succeeds, or null for none.</summary>
+		GameStateActionBase? ConditionalAction { get; }
+
+		/// <summary>Correlation id for the conditional's own reply, or 0 when the client expects none. Assigned by the
+		/// client transport when the message is sent.</summary>
+		ushort ConditionalMessageId { get; set; }
+	}
+
+	/// <summary>Server-side validation and dispatch shared by the actions implementing <see cref="IHasConditionalAction"/>.</summary>
+	internal static class ConditionalActions
+	{
+		// Null when the conditional is acceptable, otherwise the reason it is not.
+		private static string? GetInvalidReason(GameStateActionBase conditional)
+		{
+			if (!conditional.IsDBOperation() || !conditional.CanRunConditionally())
+			{
+				return "Action " + conditional.GetType().Name + " cannot be used as a conditional action; only document actions and CompoundDatabaseAction can";
+			}
+			return null;
+		}
+
+		/// <summary>Rejects the whole request, before the entity operation runs, if the attached conditional is not
+		/// allowed. Called on the live thread at the top of the parent's <c>DoAction</c>.</summary>
+		public static void Validate(IHasConditionalAction parent)
+		{
+			GameStateActionBase? conditional = parent.ConditionalAction;
+			if (conditional == null)
+			{
+				return;
+			}
+
+			string? invalid = GetInvalidReason(conditional);
+			if (invalid != null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, invalid);
+			}
+		}
+
+		/// <summary>
+		/// Queues the conditional to run on the database thread when <paramref name="succeeded"/>, or to be reported as
+		/// skipped otherwise. Either way it is <em>queued</em>, never reported inline, so the conditional's reply always
+		/// follows the parent's. Called on the live thread once the parent's entity operation has finished, however it
+		/// finished; also called when the parent was rejected before it could run.
+		/// </summary>
+		public static void Dispatch(GameStateServer game, GameStateActionBase parentAction, bool succeeded)
+		{
+			if (!(parentAction is IHasConditionalAction parent) || parent.ConditionalAction == null)
+			{
+				return;
+			}
+
+			GameStateActionBase conditional = parent.ConditionalAction;
+
+			// Deserialized conditionals arrive bare: no origin, no reply routing. Remote clients carry the reply id in
+			// the parent's body; local connections set a non-zero marker instead (they ignore ids).
+			conditional.Origin = parentAction.Origin;
+			conditional.ResultsExpected = parent.ConditionalMessageId != 0;
+			conditional.MessageId = parent.ConditionalMessageId;
+
+			if (!succeeded)
+			{
+				string? invalid = GetInvalidReason(conditional);
+				conditional.Error = invalid != null
+					? new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, invalid)
+					: new ImpunityErrorResponse(ImpunityErrorCode.ActionConditionNotMet,
+						"Not run: the " + parentAction.GetType().Name + " it was attached to did not succeed");
+			}
+
+			game.QueueAction(new ConditionalDatabaseAction(conditional, succeeded, parentAction.GetType().Name));
 		}
 	}
 
@@ -945,8 +1062,9 @@ namespace Impunity.GameState
 		}
 	}
 
-	/// <summary>Creates a new entity object within a channel. Returns the assigned entity ID.</summary>
-	public class CreateObjectAction : ClientActionResultBase<uint>
+	/// <summary>Creates a new entity object within a channel. Returns the assigned entity ID. May carry a conditional
+	/// database action that runs only if the object was created (see <see cref="IHasConditionalAction"/>).</summary>
+	public class CreateObjectAction : ClientActionResultBase<uint>, IHasConditionalAction
 	{
 		[BsonField("t")]
 		public int EntityTypeId;
@@ -966,12 +1084,23 @@ namespace Impunity.GameState
 		[BsonField("r")]
 		public bool ReplaceExisting;
 
+		/// <summary>Database action to run on the database thread if, and only if, the object is created. Null for none.</summary>
+		[BsonField("ca")]
+		public GameStateActionBase? OnCreatedAction;
+
+		/// <summary>Correlation id for <see cref="OnCreatedAction"/>'s own reply; 0 when none is expected.</summary>
+		[BsonField("cm")]
+		public ushort ConditionalMessageId;
+
+		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnCreatedAction;
+		ushort IHasConditionalAction.ConditionalMessageId { get => ConditionalMessageId; set => ConditionalMessageId = value; }
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.CREATE_OBJECT; }
 		public override bool IsDBOperation() { return false; }
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete = null)
+		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete = null, GameStateActionBase? onCreatedAction = null)
 		{
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
@@ -980,16 +1109,30 @@ namespace Impunity.GameState
 			UniqueName = uniqueName;
 			ReplaceExisting = replace;
 			OnCompleteCallback = onComplete;
+			OnCreatedAction = onCreatedAction;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false);
+			bool created = false;
+			try
+			{
+				ConditionalActions.Validate(this);
+				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false);
+				created = true;
+			}
+			finally
+			{
+				// After Live.CreateObject, so a persisted object's row write is already ahead of the conditional in the
+				// FIFO database queue.
+				ConditionalActions.Dispatch(game, this, created);
+			}
 		}
 	}
 
-	/// <summary>Applies a property update to a live entity using serialized update bytes.</summary>
-	public class UpdateEntityAction : ClientActionResultlessBase
+	/// <summary>Applies a property update to a live entity using serialized update bytes. May carry a conditional
+	/// database action that runs only if the server applied the update (see <see cref="IHasConditionalAction"/>).</summary>
+	public class UpdateEntityAction : ClientActionResultlessBase, IHasConditionalAction
 	{
 		[BsonField("id")]
 		public uint EntityId;
@@ -1005,6 +1148,20 @@ namespace Impunity.GameState
 		/// with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field is stale. Absent ⇒ ordinary update.</summary>
 		[BsonField("xs")]
 		public ArraySegment<byte> KnownFieldSeqs;
+
+		/// <summary>Database action to run on the database thread if, and only if, the server applied this update — not
+		/// when it was rejected (stale exclusive update, entity locked by another connection, entity gone) or silently
+		/// dropped (a plain update to an entity locked by another connection). Null for none. Set by the entity manager
+		/// from the entity's pending replicated actions.</summary>
+		[BsonField("ca")]
+		public GameStateActionBase? OnReplicatedAction;
+
+		/// <summary>Correlation id for <see cref="OnReplicatedAction"/>'s own reply; 0 when none is expected.</summary>
+		[BsonField("cm")]
+		public ushort ConditionalMessageId;
+
+		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnReplicatedAction;
+		ushort IHasConditionalAction.ConditionalMessageId { get => ConditionalMessageId; set => ConditionalMessageId = value; }
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
 		public override bool IsDBOperation() { return false; }
@@ -1030,12 +1187,24 @@ namespace Impunity.GameState
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq, KnownFieldSeqs);
+			bool applied = false;
+			try
+			{
+				ConditionalActions.Validate(this);
+				applied = game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq, KnownFieldSeqs);
+			}
+			finally
+			{
+				// After Live.UpdateEntity, so a persisted entity's property write is already ahead of the conditional in
+				// the FIFO database queue.
+				ConditionalActions.Dispatch(game, this, applied);
+			}
 		}
 	}
 
-	/// <summary>Deletes a live entity by ID, with optional associated data for cleanup.</summary>
-	public class DeleteEntityAction : ClientActionResultBase<bool>
+	/// <summary>Deletes a live entity by ID, with optional associated data for cleanup. May carry a conditional database
+	/// action that runs only if this request deleted the entity (see <see cref="IHasConditionalAction"/>).</summary>
+	public class DeleteEntityAction : ClientActionResultBase<bool>, IHasConditionalAction
 	{
 		[BsonField("id")]
 		public uint EntityId;
@@ -1043,21 +1212,47 @@ namespace Impunity.GameState
 		[BsonField("dd")]
 		public BsonValue DeleteData = null!;
 
+		/// <summary>Database action to run on the database thread if, and only if, this request deleted the entity — not
+		/// when it was already gone (<see cref="ImpunityErrorCode.ActionNotFound"/>) or locked by another connection
+		/// (<c>false</c>). Null for none.</summary>
+		[BsonField("ca")]
+		public GameStateActionBase? OnDeletedAction;
+
+		/// <summary>Correlation id for <see cref="OnDeletedAction"/>'s own reply; 0 when none is expected.</summary>
+		[BsonField("cm")]
+		public ushort ConditionalMessageId;
+
+		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnDeletedAction;
+		ushort IHasConditionalAction.ConditionalMessageId { get => ConditionalMessageId; set => ConditionalMessageId = value; }
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.DELETE_ENTITY; }
 		public override bool IsDBOperation() { return false; }
 
 		public DeleteEntityAction() { }
 
-		public DeleteEntityAction(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete = null)
+		public DeleteEntityAction(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete = null, GameStateActionBase? onDeletedAction = null)
 		{
 			EntityId = entityId;
 			DeleteData = deleteData;
 			OnCompleteCallback = onComplete;
+			OnDeletedAction = onDeletedAction;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData);
+			bool deleted = false;
+			try
+			{
+				ConditionalActions.Validate(this);
+				Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData);
+				deleted = Result;
+			}
+			finally
+			{
+				// After Live.DeleteEntity, so a persisted entity's row delete is already ahead of the conditional in the
+				// FIFO database queue.
+				ConditionalActions.Dispatch(game, this, deleted);
+			}
 		}
 	}
 

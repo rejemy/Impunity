@@ -666,9 +666,19 @@ namespace Impunity.Connection
 		/// <param name="uniqueName">Optional name unique within the channel (must not contain '/'); doubles as the database key for persisted objects.</param>
 		/// <param name="replace">If true, replace an existing object with the same unique name.</param>
 		/// <param name="onComplete">Invoked with the assigned entity id on success, or an error (e.g. <see cref="ImpunityErrorCode.ActionUniqueNameExists"/>).</param>
-		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete)
+		/// <param name="onCreatedAction">
+		/// Optional database action (a document action, or a <see cref="GameState.CompoundDatabaseAction"/> for several)
+		/// sent in the same message and run by the server only if the object is created — e.g. removing the item from the
+		/// player's inventory as it is dropped into the world. Build it with its own callback (see
+		/// <see cref="GameStateDBCollection{DTYPE}.MakeDeleteAction"/> and friends): that callback fires after
+		/// <paramref name="onComplete"/>, with the action's own result, or with
+		/// <see cref="ImpunityErrorCode.ActionConditionNotMet"/> if the create failed and it was not run.
+		/// Not a transaction: a failing conditional does not undo the create. See docs/guides/DistributedEntities.md,
+		/// "Conditional actions".
+		/// </param>
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete, GameStateActionBase? onCreatedAction = null)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, onComplete));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, onComplete, onCreatedAction));
 		}
 
 		/// <summary>Sends a serialized property delta for a live entity to the server, which validates and relays it to other subscribers.</summary>
@@ -677,10 +687,15 @@ namespace Impunity.Connection
 		/// <param name="guaranteed">If true, send reliably (TCP); if false, allow best-effort delivery (UDP) for high-frequency updates.</param>
 		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
 		/// <param name="onComplete">Optional completion callback; updates are typically fire-and-forget.</param>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete)
+		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the server
+		/// applies the update. Forces the update to be sent reliably. Application code normally attaches these through
+		/// <see cref="IDistributedEntity.AddReplicatedAction"/> rather than calling this directly.</param>
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
-			action.SetGuaranteed(guaranteed);
+			action.OnReplicatedAction = onReplicatedAction;
+			// The action must not travel over a lossy transport: a dropped datagram would lose both halves.
+			action.SetGuaranteed(guaranteed || onReplicatedAction != null);
 			DoAction(action);
 		}
 
@@ -695,9 +710,12 @@ namespace Impunity.Connection
 		/// <param name="knownFieldSeqs">The client's known per-field seqs blob, format <c>[fieldId:byte][seq:ushort LE]...[0]</c>.</param>
 		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
 		/// <param name="onComplete">Completion callback; receives an error on rejection (stale data or lock held by another).</param>
-		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete)
+		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the update is
+		/// accepted; on rejection it is skipped (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>).</param>
+		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, knownFieldSeqs, onComplete);
+			action.OnReplicatedAction = onReplicatedAction;
 			action.SetGuaranteed(true);
 			DoAction(action);
 		}
@@ -717,13 +735,38 @@ namespace Impunity.Connection
 			CompletedActions.Enqueue(action);
 		}
 
+		/// <summary>Completes an action that was never sent with the given error, invoking its own (typed) callback on the
+		/// next <see cref="Update"/>. Used to resolve pending replicated actions whose entity went away before they could
+		/// ride an update. No-op for an action without a callback.</summary>
+		internal void QueueLocalFailure(GameStateActionBase action, ImpunityErrorResponse error)
+		{
+			if (!action.HasCallback())
+			{
+				return;
+			}
+
+			action.Error = error;
+			CompletedActions.Enqueue(action);
+		}
+
 		/// <summary>Deletes a live entity by id. Deleting a channel also deletes its member objects.</summary>
 		/// <param name="entityId">The entity to delete.</param>
 		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification (e.g. a reason).</param>
-		/// <param name="onComplete">Invoked with <c>true</c> if the entity was deleted, or an error (e.g. blocked by another connection's lock).</param>
-		public void DeleteEntity(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete)
+		/// <param name="onComplete">Invoked with <c>true</c> if the entity was deleted, <c>false</c> if another connection's lock blocked it, or an error (e.g. <see cref="ImpunityErrorCode.ActionNotFound"/> when it is already gone).</param>
+		/// <param name="onDeletedAction">
+		/// Optional database action (a document action, or a <see cref="GameState.CompoundDatabaseAction"/> for several)
+		/// sent in the same message and run by the server only if <em>this</em> request deleted the entity — e.g. adding
+		/// a picked-up item to the player's inventory. When two clients race to delete the same entity, exactly one wins
+		/// and only its conditional runs. Build it with its own callback (see
+		/// <see cref="GameStateDBCollection{DTYPE}.MakeInsertAction"/> and friends): that callback fires after
+		/// <paramref name="onComplete"/>, with the action's own result, or with
+		/// <see cref="ImpunityErrorCode.ActionConditionNotMet"/> if the delete did not happen and it was not run.
+		/// Not a transaction: a failing conditional does not restore the entity. See docs/guides/DistributedEntities.md,
+		/// "Conditional actions".
+		/// </param>
+		public void DeleteEntity(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete, GameStateActionBase? onDeletedAction = null)
 		{
-			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete));
+			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete, onDeletedAction));
 		}
 
 		/// <summary>Fires a one-shot, fire-and-forget event on an entity. The server relays it to every subscriber of the entity's channel, including the sender.</summary>

@@ -125,6 +125,17 @@ namespace Impunity.Connection
 			action.ResultsExpected = action.HasCallback();
 			action.SentAt = DateTimeOffset.UtcNow;
 
+			// A conditional database action rides along by reference. The server decides whether to reply to it from
+			// ConditionalMessageId, so mark it non-zero when a reply is wanted; local connections never match replies
+			// by id, so any non-zero value does.
+			if (action is IHasConditionalAction withConditional && withConditional.ConditionalAction != null)
+			{
+				GameStateActionBase conditional = withConditional.ConditionalAction;
+				conditional.Origin = this;
+				conditional.SentAt = action.SentAt;
+				withConditional.ConditionalMessageId = conditional.HasCallback() ? (ushort)1 : (ushort)0;
+			}
+
 			State.QueueAction(action);
 		}
 

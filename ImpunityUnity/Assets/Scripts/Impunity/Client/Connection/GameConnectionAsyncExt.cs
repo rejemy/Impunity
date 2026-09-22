@@ -297,10 +297,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete, onCreatedAction);
 			return t.Task;
 		}
 
@@ -311,10 +311,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, BsonValue deleteData)
+		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.DeleteEntity(entityId, deleteData, t.OnComplete);
+			connection.DeleteEntity(entityId, deleteData, t.OnComplete, onDeletedAction);
 			return t.Task;
 		}
 
@@ -406,10 +406,10 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedObject
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction);
 			return t.Task;
 		}
 
@@ -447,17 +447,17 @@ namespace Impunity.Connection
 
 		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. The returned task faults with an
 		/// <see cref="ImpunityErrorResponseException"/> on a stale-data or lock rejection; await it in a try/catch to handle contention.</summary>
-		public static Task UpdateExclusiveAsync(this IDistributedEntity entity)
+		public static Task UpdateExclusiveAsync(this IDistributedEntity entity, GameStateActionBase? onReplicatedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			entity.UpdateExclusive(t.OnComplete);
+			entity.UpdateExclusive(t.OnComplete, onReplicatedAction);
 			return t.Task;
 		}
 
-		public static Task<bool> DeleteAsync(this IDistributedEntity entity, BsonValue deleteData)
+		public static Task<bool> DeleteAsync(this IDistributedEntity entity, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.Delete(deleteData, t.OnComplete);
+			entity.Delete(deleteData, t.OnComplete, onDeletedAction);
 			return t.Task;
 		}
 

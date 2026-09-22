@@ -20,10 +20,11 @@ This document covers the essentials. It assumes you already have a working `Game
 8. [Client-authoritative objects](#8-client-authoritative-objects)
 9. [Persistent objects](#9-persistent-objects)
 10. [Locks](#10-locks)
-11. [Events](#11-events)
-12. [Niche topics](#12-niche-topics) — exclusive updates, temporal fields, local-only setters, unguaranteed sends
-13. [Quick reference](#13-quick-reference)
-14. [Known caveats](#14-known-caveats)
+11. [Conditional actions](#11-conditional-actions) — moving items between the world (create, delete, update) and the database without duplicates
+12. [Events](#12-events)
+13. [Niche topics](#13-niche-topics) — exclusive updates, temporal fields, local-only setters, unguaranteed sends
+14. [Quick reference](#14-quick-reference)
+15. [Known caveats](#15-known-caveats)
 
 ---
 
@@ -42,7 +43,7 @@ The unit of replication is the **channel**. A client **subscribes** to a channel
                          └─────────────────────────────────────────────────────────┘
 ```
 
-The server is the single source of truth. A client mutates a field locally; the change is sent to the server; the server applies it (and persists it if the field is persisted), then relays it to every other subscriber. **By default a client's own reads do not reflect its own writes until the server echoes the change back** — see [§5](#5-information-flow-client--server--client). Two opt-outs from that rule exist: [client-authoritative](#8-client-authoritative-objects) entities and [local-only setters](#12-niche-topics).
+The server is the single source of truth. A client mutates a field locally; the change is sent to the server; the server applies it (and persists it if the field is persisted), then relays it to every other subscriber. **By default a client's own reads do not reflect its own writes until the server echoes the change back** — see [§5](#5-information-flow-client--server--client). Two opt-outs from that rule exist: [client-authoritative](#8-client-authoritative-objects) entities and [local-only setters](#13-niche-topics).
 
 Each client drives the system by calling `connection.Update()` once per frame. That single call dispatches inbound server messages to your entities (firing their callbacks) and flushes your pending outbound changes. Nothing happens between `Update()` calls.
 
@@ -369,10 +370,10 @@ A field change makes a full round trip. Here is the life of one `Set`:
 Key points:
 
 - **Batched per frame.** `Set` only marks the field dirty; the actual send happens in `SendUpdates()`, called from `connection.Update()`. Multiple `Set`s to the same field between frames collapse to the latest value; multiple fields on one entity travel in one message.
-- **Sequence numbers guard against staleness.** Each entity has an outgoing `SendSeq`; the server tracks a per-field received-sequence and ignores out-of-order updates; the server stamps relays with an `OutSeq`; each client tracks a per-field `FieldRecvSeq` and ignores stale inbound updates. This matters because updates can be sent unguaranteed (best-effort) and arrive out of order — see [§12](#12-niche-topics).
+- **Sequence numbers guard against staleness.** Each entity has an outgoing `SendSeq`; the server tracks a per-field received-sequence and ignores out-of-order updates; the server stamps relays with an `OutSeq`; each client tracks a per-field `FieldRecvSeq` and ignores stale inbound updates. This matters because updates can be sent unguaranteed (best-effort) and arrive out of order — see [§13](#13-niche-topics).
 - **Guaranteed vs. unguaranteed.** `Set` flags the update **guaranteed** (reliable delivery). `SetUnguaranteed` flags it best-effort. If any dirty field on an entity in a frame is guaranteed, that frame's update for the entity is sent reliably.
 - **The writer's echo is what updates its own `Get()`** for non-authoritative entities. For client-authoritative entities the server deliberately does *not* echo to the writer (it already applied locally), avoiding a redundant round trip.
-- **`UpdateExclusive` short-circuits the batch and adds an optimistic-concurrency guard.** It flushes one entity's dirty fields immediately (not on the next `SendUpdates()`) and carries the client's known per-field seqs; the server applies and relays the update only if the client has seen the latest change to every written field, else it rejects the whole update (`ActionStaleData`) with nothing applied. See [§12](#12-niche-topics).
+- **`UpdateExclusive` short-circuits the batch and adds an optimistic-concurrency guard.** It flushes one entity's dirty fields immediately (not on the next `SendUpdates()`) and carries the client's known per-field seqs; the server applies and relays the update only if the client has seen the latest change to every written field, else it rejects the whole update (`ActionStaleData`) with nothing applied. See [§13](#13-niche-topics).
 
 Everything inbound — creates, updates, events, locks, deletes — is dispatched on the thread that calls `connection.Update()` (the main/Unity thread), so your callbacks run where you can safely touch game state and UI.
 
@@ -402,8 +403,8 @@ Every entity (override the method, or subscribe to the paired `…Event`) receiv
 |---|---|
 | `OnFullyInitialized` | The entity has been created locally and its initial field values applied — it is ready to use. For a channel with existing members, this fires on the channel *before* its members are created. |
 | `OnObjectAdded(obj, newlyCreated)` *(channels)* | An object joins the channel. `newlyCreated` is `false` for members in the initial snapshot, `true` for objects created later while you watch — **including objects you create yourself** via `CreateObject` (see [§7](#7-creating-channels-and-objects)). |
-| `OnObjectRemoved(obj)` *(channels)* | An object leaves the channel. *(See [§14](#14-known-caveats).)* |
-| `OnEventTriggered(type, data)` | A one-shot [event](#11-events) is fired on the entity. |
+| `OnObjectRemoved(obj)` *(channels)* | An object leaves the channel. *(See [§15](#15-known-caveats).)* |
+| `OnEventTriggered(type, data)` | A one-shot [event](#12-events) is fired on the entity. |
 | `OnLocked` / `OnUnlocked` | The entity's [lock](#10-locks) is taken / released (by anyone). |
 | `OnDeleted(deleteData)` | The entity is deleted on the server. Always followed by `OnUndistributed`. |
 | `OnUndistributed` | The entity stops being replicated to you — you unsubscribed, the channel was deleted, or the entity was deleted. Release any references here. |
@@ -460,7 +461,7 @@ What client authority changes:
 Constraints:
 
 - **Client-authoritative and persisted are mutually exclusive** — creating an entity that is both throws.
-- `IsClientAuthoritative` is meaningful as a *request set before creation*. (See [§14](#14-known-caveats) for a note on how it is represented on entities you receive from the server.)
+- `IsClientAuthoritative` is meaningful as a *request set before creation*. (See [§15](#15-known-caveats) for a note on how it is represented on entities you receive from the server.)
 
 The same immediate-local-apply behavior also applies to any entity whose manager has **no connection** — i.e. an offline or editor-built instance. This lets you build and manipulate entities outside a live session.
 
@@ -547,7 +548,7 @@ entity.Unlock((err, released) => { });
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
-A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§12](#12-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.)
+A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§13](#13-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.)
 
 ### `RunExclusive` — the scoped form
 
@@ -593,7 +594,96 @@ Not covered: fields written with `SetUnguaranteed`. Those are sent unreliably, o
 
 ---
 
-## 11. Events
+## 11. Conditional actions
+
+Moving an item between the world and a player's inventory touches two stores: a live entity and a database document, which the server handles on two different threads. Sent as two separate requests, a connection that drops between them — or a client bug — leaves only one of them done, and the item either vanishes or is duplicated. And when two players reach for the same item, exactly one of them must get it.
+
+`CreateObject`, `Delete`, and entity updates can carry a **conditional action**: a database action that travels in the same message and that the server runs only if the entity operation succeeded for this client.
+
+```csharp
+// Pickup: remove the item from the world, and add it to my inventory only if I was the one who removed it.
+worldItem.Delete(null,
+    (err, deleted) => { /* true: it's gone from the world */ },
+    inventory.MakeInsertAction(new InventoryItem { Id = worldItem.ItemId.Get() },
+        (err, id) => { /* fires after the delete's callback, with the insert's own result */ }));
+
+// Drop: create the item in the world, and remove it from my inventory only if the create worked.
+var dropped = new WorldItem();
+dropped.ItemId.Set(item.Id);
+manager.CreateObject(dropped, zone, false,
+    (err, obj) => { },
+    inventory.MakeDeleteAction(item.Id, (err, removed) => { }));
+```
+
+The raw connection methods take the same parameter: `connection.CreateObject(…, onComplete, onCreatedAction)` and `connection.DeleteEntity(…, onComplete, onDeletedAction)`, as do the `…Async` and `…Yield` wrappers.
+
+### Updates: replicated actions
+
+For an entity whose *fields* change — a potion's effect on the player, an item going into a chest — attach the action to the entity with `AddReplicatedAction`. It rides the entity's next update:
+
+```csharp
+// Potion: the effect lands on my (client-authoritative) player, and the potion leaves my inventory with it.
+player.Health.Set(player.Health.Get() + 50);
+player.AddReplicatedAction(inventory.MakeDeleteAction(potion.Id, (err, removed) => { }));
+
+// Chest: put the item in with an optimistic exclusive update; it leaves my inventory only if the update is accepted.
+chest.Contents.Add(item.Kind);
+chest.UpdateExclusive(err => { /* ActionStaleData: someone else changed the chest; retry */ },
+    inventory.MakeDeleteAction(item.Id, (err, removed) => { }));
+```
+
+- **"Next update" is whichever send comes first:** the per-frame sweep in `Update()`, an `UpdateExclusive`, or the flush before `Unlock` (so an action attached inside `RunExclusive` rides the update sent under the lock). The field changes pending at that moment travel with it. `UpdateExclusive(onComplete, action)` is shorthand for attaching and flushing in one call.
+- **Nothing needs to be dirty.** If no field changed (a `Set` to the same value is a no-op), an empty update is sent just to carry the action. It still gets the server's verdict: a foreign lock rejects it.
+- **Always reliable.** An update carrying an action is sent over TCP, even if its only dirty fields were written with `SetUnguaranteed`.
+- **Several actions attached before one send** travel together as a single `CompoundDatabaseAction`, and each action's own callback still fires with its own result. They all run even if one fails.
+- **A rejected update skips its actions.** That covers a stale `UpdateExclusive`, an entity locked by another client, and an entity that is gone. The skip is reported as `ActionConditionNotMet`. The actions are used up, so **a retry must attach them again** (passing the action to `UpdateExclusive` makes a retry loop do that naturally). For a plain update, which has no callback of its own, the skip is the only sign that the server dropped it.
+- **The entity going away** (deleted, unsubscribed) before its next update is sent fails its pending actions locally with `ActionConditionNotMet`; they are never sent.
+- **Entities owned by another client.** You can't update another player's client-authoritative entity — an NPC they control, say. Their lock refuses the update, so the action is skipped: safe, but it won't happen.
+
+### How it runs
+
+- **The entity operation goes first, on the live thread.** That thread is single-threaded, so two clients racing to pick up the same item are serialized there: one delete wins, the other fails (`ActionNotFound` if the entity is already gone, `false` if another client holds its lock), and the loser's conditional never runs.
+- **The conditional runs next, on the database thread.** The live thread does not wait for it.
+- **One message.** The server either receives both halves or neither.
+- **Persisted entities.** The entity's own row write, delete, or persisted-field update is queued ahead of the conditional, and database work runs in order, so the world row always lands first.
+
+"Succeeded" means no error for a create, a `true` result for a delete, and for an update, that the server applied it.
+
+### Results
+
+The conditional is an ordinary action with its own callback, and it gets its own reply:
+
+- **The entity operation's callback always fires first**, then the conditional's. With `manager.CreateObject`, the new object is already registered by the time the conditional's callback runs.
+- **A skipped conditional still gets a callback.** If the entity operation did not succeed, the conditional is not run and its callback receives `ActionConditionNotMet`. Every conditional callback fires exactly once.
+- **A conditional without a callback still runs.** If it fails, the server logs a warning.
+- **A `TimeoutError` on the conditional does not mean it didn't run.** It can just mean the database queue was slow.
+
+### What can be a conditional
+
+Any document action: insert, update, upsert, merge-into, merge-insert, delete, find, or list. Build them directly (`new InsertDocumentAction(collectionId, doc, callback)`), or use the typed builders on `GameStateDBCollection<T>`: `MakeInsertAction`, `MakeUpdateAction`, `MakeUpsertAction`, `MakeDeleteAction`.
+
+For several actions, wrap them in a `CompoundDatabaseAction`. It is not atomic: it runs every sub-action even if an earlier one fails, and a delete that finds nothing returns `false` rather than an error.
+
+Anything else (live actions, migration actions) is rejected: the whole request fails with `ActionBadRequest`, and the entity operation is not performed. `AddReplicatedAction` refuses such an action up front instead, throwing `ArgumentException`, because the plain update it would ride has no callback to report the rejection, and its field changes would be dropped silently.
+
+### What it does not guarantee
+
+It is **not a transaction**. The two halves are separate operations and separate database commits.
+
+- **A failed conditional does not undo the entity operation.** A pickup's insert practically can't fail. But a drop whose inventory delete finds nothing still leaves the world item created — a duplicate. That happens with stale or repeated drops: a double click, a retry after a timeout, a second device on the same account, two players emptying one shared container. Mitigations:
+  - Block the drop UI until the callback arrives.
+  - Re-read the inventory before retrying after a timeout.
+  - For placements that can legitimately collide, give the world entity a `UniqueName` derived from the item's instance id. A concurrent second drop then fails with `ActionUniqueNameExists` and skips its conditional. Uniqueness is checked per channel, and it stops protecting you once the first copy has been picked up again.
+- **Crash window.** The entity half always commits first. If the server dies between the two commits, the database half is lost. So if the database half is the one that *removes* the item (drop, putting it in a chest, drinking a potion), a crash duplicates it; if it's the one that *adds* it (pickup, taking from a chest), a crash loses it.
+- **Choose world-item flags with care:**
+  - `ClientAuthoritative` items are auto-locked to their creator, so nobody else can pick them up: their delete returns `false`.
+  - `DeleteOnDisconnect` items vanish when the player who dropped them leaves, so the item is lost.
+  - Non-persisted items are lost on a server restart.
+  - For dropped items, use persisted objects in a persisted channel.
+
+---
+
+## 12. Events
 
 An event is a one-shot, fire-and-forget message attached to an entity — no stored state, not persisted. The server relays it to **every** subscriber of the entity's channel, **including the sender**.
 
@@ -609,7 +699,7 @@ Use events for transient signals — a hit, a sound cue, a one-off notification 
 
 ---
 
-## 12. Niche topics
+## 13. Niche topics
 
 ### Optimistic exclusive updates (`UpdateExclusive`)
 
@@ -668,7 +758,7 @@ Use it for client-side prediction, cosmetic/interpolated state, or any value you
 
 ---
 
-## 13. Quick reference
+## 14. Quick reference
 
 ### Declaring
 
@@ -693,11 +783,13 @@ public partial class Foo : DistributedObjectBase   // or DistributedChannelBase,
 | `SetUnguaranteed(v)` | yes | only if client-authoritative / offline | best-effort |
 | `SetLocalOnly(v)` | no | always | — |
 
-Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. See [§12](#12-niche-topics).
+Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. See [§13](#13-niche-topics).
 
 ### Operations (on `IDistributedEntity`)
 
 `TriggerEvent` · `UpdateExclusive` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+
+`Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddReplicatedAction(action)` attaches one to an entity's next update (`UpdateExclusive(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
 
 ### Per-frame
 
@@ -705,13 +797,15 @@ Call `connection.Update()` every frame. It dispatches inbound messages (firing y
 
 ---
 
-## 14. Known caveats
+## 15. Known caveats
 
 A few sharp edges to be aware of (these reflect the current implementation and are candidates for cleanup):
 
 - **`IsClientAuthoritative` is not restored from server flags** on entities you *receive* (only `IsPersisted` is). Treat it as reliable only on the connection that created the entity.
 - **The `RunExclusive` handoff guarantee covers guaranteed fields only.** Fields written with `SetUnguaranteed` leave the ordered path for best-effort delivery, so they can arrive after the next holder's body has already run, or not at all. Do not carry state the next holder depends on in an unguaranteed field.
 - **A `TryLock` retry loop can starve under contention.** Waiters queued via `WaitForLock`/`RunExclusive` are served before anyone polling, and a handoff raises `OnLocked` rather than `OnUnlocked`, so a poller watching for the release is not woken at all. Queue instead of polling.
+- **Conditional actions are not transactions.** A failed conditional does not undo the create, delete, or update it rode with, and a server crash between the two commits can lose or duplicate an item. See [§11](#11-conditional-actions).
+- **Object unique names are checked per channel but registered server-wide.** `CreateObject` rejects a duplicate `UniqueName` only within the same channel, yet the server's name index (and a persisted object's database key) is global. The same name in two channels, or an object named like a channel, silently displaces the earlier entry. Keep unique names globally unique, e.g. by prefixing them with the channel name.
 - **A named lock shares its namespace with channels.** `TryToLock("foo")` when a channel named `foo` exists locks *that channel*, not a separate mutex. Waiting is not offered in that case (the request just fails), because the grant is entity-shaped and a caller waiting on a name has nothing to match it against.
 
 ---

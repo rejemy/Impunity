@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using UltraLiteDB;
+using Impunity.GameState;
 
 
 namespace Impunity.Connection
@@ -242,14 +243,41 @@ namespace Impunity.Connection
 		/// wait for the callback before issuing another exclusive update to the same field.</summary>
 		/// <param name="onComplete">Invoked with a null error on success, or a non-null error on rejection (stale data, or the
 		/// entity is locked by another client). Delivered on a later <c>Update()</c>, never reentrantly. May be null.</param>
-		void UpdateExclusive(ImpunityCallback onComplete);
+		/// <param name="onReplicatedAction">Optional database action to ride this update (shorthand for
+		/// <see cref="AddReplicatedAction"/> followed by the flush). It runs only if the update is accepted; on rejection it
+		/// is skipped, so a retry must pass it again.</param>
+		void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null);
+		/// <summary>
+		/// Attaches a database action that rides this entity's next update to the server, in the same message, and runs
+		/// only if the server applies that update — e.g. applying a potion's effect to the player entity and removing the
+		/// potion from the inventory, or putting an item in a chest and removing it from the inventory.
+		/// <para>
+		/// "Next update" is whichever send happens first: the per-frame sweep in <c>Update()</c>, an
+		/// <see cref="UpdateExclusive"/>, or the flush before an <see cref="Unlock"/>. Field changes made before that send
+		/// travel with the action. If no field is dirty (say the <c>Set</c> was a no-op) an empty update is sent just to
+		/// carry it. An update carrying an action is always sent reliably.
+		/// </para>
+		/// <para>
+		/// The action's own callback fires after the update is processed: with its own result, or with
+		/// <see cref="ImpunityErrorCode.ActionConditionNotMet"/> if it was not run — the update was rejected (stale
+		/// exclusive update, entity locked by another client, entity gone) or the entity was removed before it was sent.
+		/// Several actions attached before one send travel together and each still gets its own callback. Not a
+		/// transaction: a failed action does not undo the update. See docs/guides/DistributedEntities.md, "Conditional actions".
+		/// </para>
+		/// </summary>
+		/// <param name="action">A document action (insert, update, upsert, merge, delete, find, list) or a
+		/// <see cref="CompoundDatabaseAction"/>. Anything else throws <see cref="System.ArgumentException"/>.</param>
+		void AddReplicatedAction(GameStateActionBase action);
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
 		/// <param name="deleteData">Optional BSON payload relayed to subscribers via <see cref="OnDeleted"/>.</param>
 		/// <param name="onComplete">Receives <c>true</c> if the entity was deleted, or <c>false</c> if the request was
 		/// rejected because the entity is locked by another client; the error argument is non-null on failure. May be null.</param>
-		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete);
+		/// <param name="onDeletedAction">Optional database action sent in the same message and run by the server only if
+		/// this request deleted the entity — e.g. adding a picked-up item to the player's inventory. Its own callback
+		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
+		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null);
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
 		/// updates and deletes are rejected by the server. Release with <see cref="Unlock"/>.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
@@ -484,16 +512,32 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void UpdateExclusive(ImpunityCallback onComplete)
+		public void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null)
 		{
 			if (Manager == null)
 			{
 				// No manager means the entity was never registered with a connection; there is no queue to defer through.
 				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection"));
+				if (onReplicatedAction != null)
+				{
+					onReplicatedAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection");
+					onReplicatedAction.InvokeOnCompleteCallback();
+				}
 				return;
 			}
 
-			Manager.SendEntityUpdatesExclusive(this, onComplete);
+			Manager.SendEntityUpdatesExclusive(this, onComplete, onReplicatedAction);
+		}
+
+		/// <inheritdoc/>
+		public void AddReplicatedAction(GameStateActionBase action)
+		{
+			if (Manager == null)
+			{
+				throw new InvalidOperationException("Entity is not registered with a connection");
+			}
+
+			Manager.AddReplicatedAction(this, action);
 		}
 
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
@@ -502,9 +546,12 @@ namespace Impunity.Connection
 		/// <param name="deleteData">Optional BSON payload relayed to subscribers via <see cref="OnDeleted"/>.</param>
 		/// <param name="onComplete">Receives <c>true</c> if the entity was deleted, or <c>false</c> if the request was
 		/// rejected because the entity is locked by another client; the error argument is non-null on failure. May be null.</param>
-		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete)
+		/// <param name="onDeletedAction">Optional database action sent in the same message and run by the server only if
+		/// this request deleted the entity — e.g. adding a picked-up item to the player's inventory. Its own callback
+		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
+		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
 		{
-			Manager.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete);
+			Manager.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'

@@ -263,7 +263,11 @@ namespace Impunity.Connection
 		/// <param name="replace">If true, replace any existing object with the same unique name in the channel.</param>
 		/// <param name="onComplete">Receives the same <paramref name="distObj"/> (now registered) on success, or a non-null
 		/// error with a null object on failure. May be null.</param>
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete) where T : class, IDistributedObject
+		/// <param name="onCreatedAction">Optional database action sent in the same message and run by the server only if
+		/// the object is created — e.g. removing the item from the player's inventory as it is dropped into the world.
+		/// Its own callback fires after <paramref name="onComplete"/>, so the object is already registered by then. See
+		/// <see cref="BaseGameConnection.CreateObject"/>.</param>
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
 		{
 			if (Connection == null)
 			{
@@ -353,7 +357,7 @@ namespace Impunity.Connection
 				}
 
 				onComplete?.Invoke(err, distObj);
-			});
+			}, onCreatedAction);
 		}
 
 		private ObjectCreateData MakeObjectCreateData(IDistributedObject distObj, IDistributedChannel channel)
@@ -1163,6 +1167,7 @@ namespace Impunity.Connection
 		private void UnregisterEntity(IDistributedEntity entity)
 		{
 			DistributedObjects.Remove(entity.DistributedEntityId);
+			FailPendingReplicatedActions(entity);
 
 			if (entity is IDistributedChannel channel)
 			{
@@ -1478,9 +1483,22 @@ namespace Impunity.Connection
 			}
 
 			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out bool guaranteedSend);
+			GameStateActionBase? replicatedAction = TakeReplicatedAction(entity);
+
+			if (updateDatabuffer.Array == null)
+			{
+				if (replicatedAction == null)
+				{
+					// Nothing changed and nothing to carry; don't burn a seq on an empty update.
+					return;
+				}
+
+				// Only here to carry a replicated action (e.g. a Set that turned out to be a no-op).
+				updateDatabuffer = new ArraySegment<byte>(Array.Empty<byte>());
+			}
 
 			entity.SendSeq++;
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null, replicatedAction);
 
 		}
 
@@ -1493,7 +1511,9 @@ namespace Impunity.Connection
 		/// <param name="entity">The entity whose pending dirty fields to flush exclusively.</param>
 		/// <param name="onComplete">Callback invoked with null on success or an error on rejection. Delivered on a later
 		/// <see cref="BaseGameConnection.Update"/>, never reentrantly.</param>
-		public void SendEntityUpdatesExclusive(IDistributedEntity entity, ImpunityCallback? onComplete)
+		/// <param name="onReplicatedAction">Optional database action to attach before flushing (see
+		/// <see cref="AddReplicatedAction"/>). Rides this update together with any actions already pending.</param>
+		public void SendEntityUpdatesExclusive(IDistributedEntity entity, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
 		{
 			if (Connection == null)
 			{
@@ -1503,12 +1523,23 @@ namespace Impunity.Connection
 			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
 			{
 				Connection.QueueLocalCallback(onComplete, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				if (onReplicatedAction != null)
+				{
+					Connection.QueueLocalFailure(onReplicatedAction, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				}
 				return;
 			}
 
-			// Snapshot dirty bits before GetPropertyBytes clears them; nothing dirty is trivially a success.
+			if (onReplicatedAction != null)
+			{
+				AddReplicatedAction(entity, onReplicatedAction);
+			}
+
+			// Snapshot dirty bits before GetPropertyBytes clears them. Nothing dirty is trivially a success — unless a
+			// replicated action is waiting, which is sent on an empty exclusive update so it still gets the lock/staleness
+			// verdict (an empty seq blob checks nothing, but a foreign lock still rejects it).
 			ulong dirtyBits = entity.DirtyBits;
-			if (dirtyBits == 0)
+			if (dirtyBits == 0 && !HasPendingReplicatedAction(entity))
 			{
 				Connection.QueueLocalCallback(onComplete, null);
 				return;
@@ -1557,7 +1588,7 @@ namespace Impunity.Connection
 			DirtyObjects.Remove(entity);
 
 			entity.SendSeq++;
-			Connection.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete);
+			Connection.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, TakeReplicatedAction(entity));
 		}
 
 		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,

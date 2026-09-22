@@ -75,6 +75,22 @@ namespace Impunity.GameState
 		/// <summary>Whether this action should be processed immediately rather than queued.</summary>
 		public virtual bool IsImmediate() { return false; }
 
+		/// <summary>
+		/// Whether this action may be attached as the conditional action of an entity create or delete (see
+		/// <see cref="IHasConditionalAction"/>). Opt-in: only the document actions and <see cref="CompoundDatabaseAction"/>
+		/// allow it. A conditional runs on the database thread outside the normal queueing path, so anything that defers
+		/// itself, needs the live thread, or is gated by the migration flow must stay out.
+		/// </summary>
+		public virtual bool CanRunConditionally() { return false; }
+
+		/// <summary>Copies one result from a <see cref="CompoundDatabaseAction"/> reply into this action, so its own
+		/// callback can be invoked as if it had been sent alone. Client-side; used when several replicated actions ride
+		/// one entity update as a single compound.</summary>
+		internal virtual void ApplyResult(ActionResult result)
+		{
+			Error = result.Error;
+		}
+
 		/// <summary>Serializes this action's request fields to BSON for network transmission.</summary>
 		public virtual BsonDocument SerializeRequest()
 		{
@@ -229,6 +245,15 @@ namespace Impunity.GameState
 			ActionResult<TResult> reply = mapper.DeserializeFromBytes<ActionResult<TResult>>(messageBytes);
 			Error = reply.Error;
 			Result = reply.Result;
+		}
+
+		internal override void ApplyResult(ActionResult result)
+		{
+			Error = result.Error;
+			if (result is ActionResult<TResult> typed)
+			{
+				Result = typed.Result;
+			}
 		}
 
 		public override void InvokeOnCompleteCallback()

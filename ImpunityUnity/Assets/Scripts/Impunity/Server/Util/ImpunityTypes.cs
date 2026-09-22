@@ -116,6 +116,7 @@ namespace Impunity
 		ActionNotFound = 3004,
 		ActionBlockedByLock = 3005,
 		ActionStaleData = 3006, // An exclusive update was rejected because the client's known field seq was behind the server's
+		ActionConditionNotMet = 3007, // A conditional action was not run because the entity create/delete it was attached to did not succeed
 	}
 
 	/// <summary>Persisted metadata about a game world, stored in the database.</summary>

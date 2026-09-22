@@ -208,10 +208,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace)
+		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, action.OnComplete);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, action.OnComplete, onCreatedAction);
 			return action;
 		}
 
@@ -222,10 +222,10 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> DeleteEntityYield(this BaseGameConnection connection, uint entityId, BsonValue deleteData)
+		public static ImpunityYield<bool> DeleteEntityYield(this BaseGameConnection connection, uint entityId, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.DeleteEntity(entityId, deleteData, action.OnComplete);
+			connection.DeleteEntity(entityId, deleteData, action.OnComplete, onDeletedAction);
 			return action;
 		}
 
@@ -315,10 +315,10 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="ClientEntityManager"/>.</summary>
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace) where T : class, IDistributedObject
+		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
 		{
 			var t = new ImpunityYield<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction);
 			return t;
 		}
 
@@ -356,17 +356,17 @@ namespace Impunity.Unity
 
 		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. Yield until the exclusive update
 		/// completes; inspect the yield's error to detect a stale-data or lock rejection.</summary>
-		public static ImpunityYield UpdateExclusiveYield(this IDistributedEntity entity)
+		public static ImpunityYield UpdateExclusiveYield(this IDistributedEntity entity, GameStateActionBase? onReplicatedAction = null)
 		{
 			var t = new ImpunityYield();
-			entity.UpdateExclusive(t.OnComplete);
+			entity.UpdateExclusive(t.OnComplete, onReplicatedAction);
 			return t;
 		}
 
-		public static ImpunityYield<bool> DeleteYield(this IDistributedEntity entity, BsonValue deleteData)
+		public static ImpunityYield<bool> DeleteYield(this IDistributedEntity entity, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityYield<bool>();
-			entity.Delete(deleteData, t.OnComplete);
+			entity.Delete(deleteData, t.OnComplete, onDeletedAction);
 			return t;
 		}
 

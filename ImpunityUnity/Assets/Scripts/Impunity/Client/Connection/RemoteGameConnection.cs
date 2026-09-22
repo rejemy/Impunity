@@ -321,6 +321,22 @@ namespace Impunity.Connection
 				AwaitingReceive[messageId] = action;
 			}
 
+			// A create/delete carrying a conditional database action gets a second correlation id for the conditional's
+			// own reply, written into the parent's body. Must happen before the parent is serialized below. It is
+			// independent of the parent's NO_REPLY flag: either one can expect a reply without the other.
+			if (action is IHasConditionalAction withConditional)
+			{
+				GameStateActionBase? conditional = withConditional.ConditionalAction;
+				if (conditional != null && conditional.HasCallback())
+				{
+					ushort conditionalId = AllocateMessageId();
+					conditional.MessageId = conditionalId;
+					conditional.SentAt = action.SentAt;
+					AwaitingReceive[conditionalId] = conditional;
+					withConditional.ConditionalMessageId = conditionalId;
+				}
+			}
+
 			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, flags, action.GetActionType(), action);
 
 			if (action.Guaranteed)

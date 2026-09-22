@@ -468,6 +468,77 @@ namespace Impunity.GameState
 		}
 	}
 
+	/// <summary>
+	/// Internal carrier for the conditional database action of a CreateObject / DeleteEntity (see
+	/// <see cref="IHasConditionalAction"/>), queued by <see cref="ConditionalActions.Dispatch"/> on the live thread.
+	/// <para>
+	/// When the entity operation succeeded this goes to the database thread, runs the conditional there, then hops back
+	/// to the live thread (<see cref="GameStateServer.QueueDBReply"/>) to deliver the conditional's reply. When it did
+	/// not, the conditional already carries its skip error and this goes straight to the live queue to deliver it.
+	/// </para>
+	/// <para>
+	/// Delivering from the live thread in a later iteration than the parent is what guarantees the client sees the
+	/// entity operation's reply before the conditional's. Reporting straight from the database thread could beat it:
+	/// the parent is only reported after its <c>DoAction</c> returns, by which point the database thread may already
+	/// have finished.
+	/// </para>
+	/// </summary>
+	internal class ConditionalDatabaseAction : ClientActionResultlessBase
+	{
+		private readonly GameStateActionBase Conditional;
+		private readonly bool ShouldRun;
+		private readonly string ParentName;
+
+		public override ushort GetActionType() { throw new Exception("Not supported"); }
+		public override bool IsDBOperation() { return ShouldRun; }
+
+		public ConditionalDatabaseAction(GameStateActionBase conditional, bool shouldRun, string parentName)
+		{
+			Conditional = conditional;
+			ShouldRun = shouldRun;
+			ParentName = parentName;
+		}
+
+		protected override void DoAction(GameStateServer game)
+		{
+			if (!ShouldRun)
+			{
+				// Live thread, skip path: the conditional's error is already set.
+				Deliver();
+				return;
+			}
+
+			// Database thread. Run() converts exceptions into the conditional's Error.
+			Conditional.Run(game);
+			game.QueueDBReply(this);
+		}
+
+		// Live thread, after the database hop.
+		public override void InvokeOnCompleteCallback()
+		{
+			Deliver();
+		}
+
+		private void Deliver()
+		{
+			if (ShouldRun && Conditional.Error != null)
+			{
+				// Always logged: a fire-and-forget conditional has nobody else to tell, and even with a callback this is
+				// the half of a paired operation that went wrong.
+				ImpunityLogger.LogWarning("Conditional " + Conditional.GetType().Name + " failed after a successful " + ParentName + ": " + Conditional.Error.Message);
+			}
+
+			try
+			{
+				Conditional.Origin.ReportActionResult(Conditional);
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception reporting conditional action result", e);
+			}
+		}
+	}
+
 	/// <summary>Name-value pair for a single persisted property of a live entity.</summary>
 	public class LiveEntityPersistedPropertyData
 	{
