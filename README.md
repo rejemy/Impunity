@@ -28,18 +28,13 @@ In Unity, add the Asset Label "RoslynAnalyzer" to  ImpunityCodeGenerator.dll
 
 ### Define your distributed types
 
-Annotate your types with `[DistributedEntity]` and `[Distributed]` — the source generator handles the rest.
+Annotate your types with `[DistributedEntity]` — the source generator handles the rest.
 
 ```csharp
 [DistributedEntity(1)]
 public partial class Player : DistributedEntityBase
 {
-    public enum Props : byte { HEALTH = 1, NAME = 2 }
-
-    [Distributed((byte)Props.HEALTH)]
     public DistributedValue<int, Int32Serializer> Health;
-
-    [Distributed((byte)Props.NAME)]
     public DistributedValue<string, StringSerializer> DisplayName;
 
     public Player() { InitializeDistributedFields(); }
@@ -48,12 +43,7 @@ public partial class Player : DistributedEntityBase
 [DistributedEntity(2)]
 public partial class GameWorld : DistributedChannelBase
 {
-    public enum Props : byte { STATUS = 1, CHAT = 2 }
-
-    [Distributed((byte)Props.STATUS)]
     public DistributedValue<string, StringSerializer> Status;
-
-    [Distributed((byte)Props.CHAT)]
     public DistributedQueue<string, StringSerializer> Chat;
 
     public GameWorld() { InitializeDistributedFields(); }
