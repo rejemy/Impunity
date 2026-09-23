@@ -868,7 +868,7 @@ namespace Impunity.Connection
 		}
 		public void WriteTo(T value, BinaryWriter w)
 		{
-			w.Write(BsonSerializer.Serialize(GetMapper().SerializeObject(value)));
+			w.Write(BsonSerializer.Serialize(GetMapper().ToDocument(typeof(T), value)));
 		}
 
 		public T ReadFrom(BinaryReader r, int byteCount)
@@ -928,7 +928,7 @@ namespace Impunity.Connection
 
 		public void WriteTo(T value, BinaryWriter w)
 		{
-			w.Write(BsonSerializer.Serialize(GetMapper().SerializeObject(value)));
+			w.Write(BsonSerializer.Serialize(GetMapper().ToDocument(typeof(T), value)));
 		}
 
 		public T ReadFrom(BinaryReader r, int byteCount)

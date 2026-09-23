@@ -149,6 +149,75 @@ namespace Impunity.Tests
 			Assert.AreEqual(v, BsonRoundTrip<TestVec3, TestVec3Serializer>(new TestVec3Serializer(), v));
 		}
 
+		// A field declared as an abstract base carries its subclass via the serializer's own mapper: the
+		// root value is written through the DECLARED type, so the discriminator is present on the wire and
+		// in BSON alike. A registered type id is written as the compact _t, never the full _type name.
+		public abstract class PolyBase { public int X; }
+		public class PolyDerived : PolyBase { public string Y; }
+
+		static BsonMapper PolyMapper()
+		{
+			var mapper = new BsonMapper { IncludeFields = true, IncludeFullType = false };
+			mapper.RegisterTypeId(typeof(PolyDerived), "pd");
+			return mapper;
+		}
+
+		static void AssertPolyDerived(PolyBase read)
+		{
+			Assert.IsInstanceOf<PolyDerived>(read);
+			Assert.AreEqual(3, read.X);
+			Assert.AreEqual("y", ((PolyDerived)read).Y);
+		}
+
+		static void AssertCompactDiscriminator(BsonDocument doc)
+		{
+			Assert.AreEqual("pd", doc["_t"].AsString);
+			Assert.IsFalse(doc.ContainsKey("_type"));
+		}
+
+		static void AssertPolymorphicRoundTrips<S>(S ser) where S : IDistributableValueSerializer<PolyBase>
+		{
+			PolyBase value = new PolyDerived { X = 3, Y = "y" };
+
+			BsonValue bv = ser.ToBsonValue(value);
+			AssertCompactDiscriminator(bv.AsDocument);
+			AssertPolyDerived(ser.FromBsonValue(bv));
+
+			var stream = new MemoryStream();
+			ser.WriteTo(value, new BinaryWriter(stream));
+			byte[] bytes = stream.ToArray();
+			AssertCompactDiscriminator(BsonSerializer.Deserialize(bytes));
+			AssertPolyDerived(ser.ReadFrom(new BinaryReader(new MemoryStream(bytes)), bytes.Length));
+		}
+
+		[Test, Category("BsonSerializers")]
+		public void BsonSerializer_AbstractDeclaredType_RoundTripsSubclass()
+		{
+			BsonSerializer<PolyBase>.Mapper = PolyMapper();
+			try
+			{
+				AssertPolymorphicRoundTrips(new BsonSerializer<PolyBase>());
+			}
+			finally
+			{
+				BsonSerializer<PolyBase>.Mapper = null;
+			}
+		}
+
+		[Test, Category("BsonSerializers")]
+		public void BsonSmallSerializer_AbstractDeclaredType_RoundTripsSubclass()
+		{
+			BsonSmallSerializer<PolyBase>.Mapper = PolyMapper();
+			try
+			{
+				AssertPolymorphicRoundTrips(new BsonSmallSerializer<PolyBase>());
+			}
+			finally
+			{
+				BsonSmallSerializer<PolyBase>.Mapper = null;
+			}
+		}
+
 		// ───────── 2. Manager: GetPersistedFieldsAsBson / ApplyPersistedFieldsFromBson ─────────
 
 		[Test, Category("BsonManager")]
