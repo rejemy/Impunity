@@ -887,7 +887,7 @@ namespace Impunity.Connection
 				return BsonValue.Null;
 			}
 
-			return GetMapper().SerializeObject(value);
+			return GetMapper().ToDocument(typeof(T), value);
 		}
 
 		/// <summary>Converts BsonValue to C# type, might throw if incompatible types. A null or missing value
@@ -947,7 +947,7 @@ namespace Impunity.Connection
 				return BsonValue.Null;
 			}
 
-			return GetMapper().SerializeObject(value);
+			return GetMapper().ToDocument(typeof(T), value);
 		}
 
 		/// <summary>Converts BsonValue to C# type, might throw if incompatible types. A null or missing value

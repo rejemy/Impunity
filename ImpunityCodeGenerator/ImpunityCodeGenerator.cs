@@ -334,7 +334,7 @@ namespace SourceGenerator
 			SemanticModel model = context.Compilation.GetSemanticModel(cd.SyntaxTree);
 
 			// Check the merged type symbol, so another part of a partial class carrying the attribute counts.
-			INamedTypeSymbol classSymbol = model.GetDeclaredSymbol(cd) as INamedTypeSymbol;
+			INamedTypeSymbol? classSymbol = model.GetDeclaredSymbol(cd);
 			if (classSymbol != null)
 			{
 				foreach (AttributeData attr in classSymbol.GetAttributes())
@@ -375,14 +375,14 @@ namespace SourceGenerator
 				}
 			}
 
-			INamedTypeSymbol distributedFieldInterface =
+			INamedTypeSymbol? distributedFieldInterface =
 				context.Compilation.GetTypeByMetadataName("Impunity.Connection.IDistributedField");
 			if (distributedFieldInterface == null)
 			{
 				return false;
 			}
 
-			ITypeSymbol fieldType = model.GetTypeInfo(fd.Declaration.Type).Type;
+			ITypeSymbol? fieldType = model.GetTypeInfo(fd.Declaration.Type).Type;
 			if (fieldType == null)
 			{
 				return false;
