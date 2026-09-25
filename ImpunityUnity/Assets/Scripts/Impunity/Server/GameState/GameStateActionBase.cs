@@ -170,6 +170,36 @@ namespace Impunity.GameState
 
 		/// <summary>Invokes the user's completion callback with the result. Called on the main thread.</summary>
 		public abstract void InvokeOnCompleteCallback();
+
+		/// <summary>
+		/// Resolves an action that will never be sent: sets <see cref="Error"/> to <paramref name="error"/> and invokes
+		/// the action's own callback immediately, on the calling thread. Client-side.
+		/// </summary>
+		/// <remarks>
+		/// This is how the exactly-once promise for conditional actions holds when a request is refused before it
+		/// leaves the client. The convention, for Impunity's own APIs and for game code that wraps them: <em>any method
+		/// that accepts a conditional action and then refuses before sending must resolve it, after its own
+		/// callback</em>. Otherwise whoever built the action waits for a reply that never comes. Call this at most
+		/// once per action, and never on an action that has been sent.
+		/// </remarks>
+		/// <param name="error">The error the action's callback receives.</param>
+		public void FailLocally(ImpunityErrorResponse error)
+		{
+			Error = error;
+			InvokeOnCompleteCallback();
+		}
+
+		/// <summary>
+		/// Resolves a conditional action that the caller has decided not to send (the drop spot is blocked, the target
+		/// is already gone, the edit was abandoned): its callback fires immediately with
+		/// <see cref="ImpunityErrorCode.ActionConditionNotMet"/>, the same code a conditional skipped by the server
+		/// receives, so one handler covers both. Shorthand for <see cref="FailLocally"/>; see it for the convention.
+		/// </summary>
+		/// <param name="reason">Why the action was not sent; becomes the error message, prefixed with "Not sent: ".</param>
+		public void SkipUnsent(string reason)
+		{
+			FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionConditionNotMet, "Not sent: " + reason));
+		}
 	}
 
 

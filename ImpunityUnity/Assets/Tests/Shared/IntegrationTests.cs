@@ -204,6 +204,48 @@ namespace Impunity.Tests
 			Assert.AreEqual(ImpunityErrorCode.ClientMappingError, listErr.ErrorId);
 		}
 
+		[Test, Category("LocalConnection")]
+		public async Task Merge_UnsetKeys_AndInsertedVersusMerged()
+		{
+			CreateServer();
+			await ConnectLocal();
+
+			var inventory = new GameStateDBCollection<BsonDocument>(LocalGame, IntegrationTestCollections.ITEMS);
+
+			bool inserted = await Pump(inventory.MergeInsertDocumentAsync(new BsonDocument { ["_id"] = "p1", ["slot1"] = "sword", ["slot2"] = "shield" }), LocalGame);
+			Assert.IsTrue(inserted, "Merge-insert of a missing document reports an insert");
+
+			inserted = await Pump(inventory.MergeInsertDocumentAsync(new BsonDocument { ["_id"] = "p1", ["slot3"] = "bow" }, new[] { "slot1" }), LocalGame);
+			Assert.IsFalse(inserted, "Merge-insert into an existing document reports a merge");
+			var doc = await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "p1"), LocalGame);
+			Assert.IsFalse(doc.ContainsKey("slot1"), "slot1 should have been unset");
+			Assert.AreEqual("shield", (string)doc["slot2"]);
+			Assert.AreEqual("bow", (string)doc["slot3"]);
+
+			// Unsetting a field that isn't there is fine.
+			bool found = await Pump(inventory.MergeIntoDocumentAsync(new BsonDocument { ["_id"] = "p1", ["slot4"] = BsonValue.Null }, new[] { "slot2", "never_set" }), LocalGame);
+			Assert.IsTrue(found);
+			doc = await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "p1"), LocalGame);
+			Assert.IsFalse(doc.ContainsKey("slot2"));
+			Assert.IsTrue(doc.ContainsKey("slot4") && doc["slot4"].IsNull, "A null in the patch is stored as a real null, not a removal");
+
+			found = await Pump(inventory.MergeIntoDocumentAsync(new BsonDocument { ["_id"] = "p2", ["slot1"] = "axe" }), LocalGame);
+			Assert.IsFalse(found, "Merge-into a missing document reports not found");
+			Assert.IsNull(await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "p2"), LocalGame), "Merge-into must not insert");
+
+			// Invalid merges are rejected by the server; the typed wrapper refuses a patch with no _id up front.
+			var both = await PumpExpectingError(LocalGame.MergeIntoDocumentAsync(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = "p1", ["slot3"] = "x" }, new[] { "slot3" }), LocalGame);
+			Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, both.ErrorId, "Setting and unsetting the same key");
+			var id = await PumpExpectingError(LocalGame.MergeInsertDocumentAsync(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = "p1" }, new[] { "_id" }), LocalGame);
+			Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, id.ErrorId, "Unsetting _id");
+			var noId = await PumpExpectingError(LocalGame.MergeInsertDocumentAsync(IntegrationTestCollections.ITEMS, new BsonDocument { ["slot1"] = "x" }), LocalGame);
+			Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, noId.ErrorId, "A raw patch with no _id");
+			Assert.Throws<ArgumentException>(() => inventory.MergeInsertDocument(new BsonDocument { ["slot1"] = "x" }, null));
+
+			doc = await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "p1"), LocalGame);
+			Assert.AreEqual("bow", (string)doc["slot3"], "A rejected merge must not write anything");
+		}
+
 		// ═══════════════════════════════════════════════════════════
 		// 2. TCP Connection
 		// ═══════════════════════════════════════════════════════════
@@ -251,6 +293,24 @@ namespace Impunity.Tests
 			var found2 = await Pump(RemoteGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "mi1"), RemoteGame);
 			Assert.AreEqual("Potion", (string)found2["name"], "Original field should survive the merge");
 			Assert.AreEqual(7, (int)found2["power"], "New field should be merged in");
+		}
+
+		[Test, Category("TCPConnection")]
+		public async Task TCPMergeUnsetKeysTravelOverTheWire()
+		{
+			CreateServer();
+			await StartTCPAndConnectRemote();
+
+			var doc = new BsonDocument { ["_id"] = "mu1", ["a"] = 1, ["b"] = 2 };
+			Assert.IsTrue(await Pump(RemoteGame.MergeInsertDocumentAsync(IntegrationTestCollections.ITEMS, doc), RemoteGame));
+
+			var patch = new BsonDocument { ["_id"] = "mu1", ["c"] = 3 };
+			Assert.IsFalse(await Pump(RemoteGame.MergeInsertDocumentAsync(IntegrationTestCollections.ITEMS, patch, new[] { "a" }), RemoteGame));
+
+			var found = await Pump(RemoteGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "mu1"), RemoteGame);
+			Assert.IsFalse(found.ContainsKey("a"), "The unset key must reach the server");
+			Assert.AreEqual(2, (int)found["b"]);
+			Assert.AreEqual(3, (int)found["c"]);
 		}
 
 		[Test, Category("TCPConnection")]

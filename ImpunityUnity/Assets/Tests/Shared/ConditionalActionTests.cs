@@ -12,6 +12,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -661,6 +662,191 @@ namespace Impunity.Tests
 
 			await PumpFor(TimeSpan.FromMilliseconds(50), AllConnections());
 			Assert.IsNull(await FindDoc(conns[0], "inv_loose"));
+		}
+
+		// ───────── Merge builders as conditionals ─────────
+
+		/// <summary>The one-field-per-slot inventory: a pickup fills a slot with a merge-insert, a drop empties one by
+		/// unsetting the field. Both built with the typed collection's merge builders.</summary>
+		[Test, Category("Conditional")]
+		public async Task MergeBuilders_AsConditionals_FillAndEmptySlots()
+		{
+			var (conns, items, channel) = await SetupWorldItem("cond_merge", 1);
+			var inventory = new GameStateDBCollection<BsonDocument>(conns[0], ITEMS);
+			Assert.AreEqual(ITEMS, inventory.CollectionId);
+
+			var fillProbe = new CallbackProbe<bool>();
+			bool deleted = await Pump(items[0].DeleteAsync(null,
+				inventory.MakeMergeInsertAction(new BsonDocument { ["_id"] = "slots", ["slot3"] = "sword" }, fillProbe.OnComplete)), AllConnections());
+			Assert.IsTrue(deleted);
+			await PumpUntil(() => fillProbe.Fired, AllConnections());
+			Assert.IsNull(fillProbe.Error, "Fill failed: " + fillProbe.Error?.Message);
+			Assert.IsTrue(fillProbe.Value, "The first merge-insert should report that it created the document");
+			Assert.AreEqual("sword", (string)(await FindDoc(conns[0], "slots"))["slot3"]);
+
+			var emptyProbe = new CallbackProbe<bool>();
+			var dropped = new IntegrationTestEntity();
+			await Pump(conns[0].EntityManager.CreateObjectAsync(dropped, channel, false,
+				inventory.MakeMergeIntoAction(new BsonDocument { ["_id"] = "slots" }, emptyProbe.OnComplete, new[] { "slot3" })), AllConnections());
+			await PumpUntil(() => emptyProbe.Fired, AllConnections());
+			Assert.IsNull(emptyProbe.Error, "Empty failed: " + emptyProbe.Error?.Message);
+			Assert.IsTrue(emptyProbe.Value);
+			Assert.IsFalse((await FindDoc(conns[0], "slots")).ContainsKey("slot3"), "The emptied slot should be removed, not left as null");
+
+			Assert.Throws<ArgumentException>(() => inventory.MakeMergeIntoAction(new BsonDocument { ["slot1"] = "x" }),
+				"A patch with no _id must be refused before an action exists");
+		}
+
+		// ───────── Requests that never leave the client ─────────
+
+		/// <summary>Runs every callback-taking entity method on an entity that can't send, recording each callback's
+		/// error in the order they fire.</summary>
+		static List<string> CallEverythingUnsent(IntegrationTestEntity entity)
+		{
+			var fired = new List<string>();
+			void Record(string tag, ImpunityErrorResponse err) => fired.Add(tag + ":" + (err?.ErrorCode.ToString() ?? "ok"));
+
+			entity.Delete(null, (err, deleted) => Record("delete", err),
+				new InsertDocumentAction(ITEMS, InventoryDoc("inv_unsent_a", "x"), (err, id) => Record("delete-conditional", err)));
+			entity.UpdateExclusive(err => Record("update", err),
+				new InsertDocumentAction(ITEMS, InventoryDoc("inv_unsent_b", "x"), (err, id) => Record("update-conditional", err)));
+			entity.TryLock((err, locked) => Record("trylock", err));
+			entity.Unlock((err, unlocked) => Record("unlock", err));
+			entity.TriggerEvent(1, null, err => Record("event", err));
+			entity.WaitForLock((err, result) => Record("wait-" + result, err));
+			entity.RunExclusive(() => fired.Add("body ran"), (err, result) => Record("exclusive-" + result, err));
+			return fired;
+		}
+
+		static readonly string[] ExpectedUnsent =
+		{
+			"delete:ActionBadRequest", "delete-conditional:ActionBadRequest",
+			"update:ActionBadRequest", "update-conditional:ActionBadRequest",
+			"trylock:ActionBadRequest", "unlock:ActionBadRequest", "event:ActionBadRequest",
+			"wait-Error:ActionBadRequest", "exclusive-Failed:ActionBadRequest",
+		};
+
+		/// <summary>An entity that was never registered can't send anything, but every callback must still fire, once
+		/// and immediately, with the conditional's after its parent's. A lost conditional callback leaves whatever the
+		/// caller reserved for it (an inventory slot) reserved for good.</summary>
+		[Test, Category("Conditional")]
+		public void EntityMethods_NoManager_FireEveryCallback()
+		{
+			CollectionAssert.AreEqual(ExpectedUnsent, CallEverythingUnsent(new IntegrationTestEntity()));
+
+			var unsubscribed = new List<string>();
+			new IntegrationTestChannel().Unsubscribe(err => unsubscribed.Add(err?.ErrorCode.ToString() ?? "ok"));
+			CollectionAssert.AreEqual(new[] { "ActionBadRequest" }, unsubscribed);
+		}
+
+		[Test, Category("Conditional")]
+		public void EntityMethods_ManagerWithoutConnection_FireEveryCallback()
+		{
+			var entity = new IntegrationTestEntity { Manager = new ClientEntityManager() };
+			CollectionAssert.AreEqual(ExpectedUnsent, CallEverythingUnsent(entity));
+		}
+
+		/// <summary>A method that throws never took the action: it is left unresolved for the caller, who still owns it.
+		/// (Resolving it too would make a wrapper that catches and calls SkipUnsent fire the callback twice.)</summary>
+		[Test, Category("Conditional")]
+		public void CreateObject_ManagerWithoutConnection_ThrowsAndLeavesConditionalToCaller()
+		{
+			var probe = new CallbackProbe<bool>();
+			var action = new DeleteDocumentAction(ITEMS, "bag_x", probe.OnComplete);
+
+			Assert.Throws<Exception>(() => new ClientEntityManager().CreateObject(new IntegrationTestEntity(), new IntegrationTestChannel(), false, null, action));
+			Assert.IsFalse(probe.Fired);
+
+			action.SkipUnsent("manager had no connection");
+			Assert.AreEqual(1, probe.FireCount);
+		}
+
+		[Test, Category("Conditional")]
+		public void SkipUnsent_FiresCallbackOnceWithConditionNotMet()
+		{
+			var probe = new CallbackProbe<bool>();
+			new DeleteDocumentAction(ITEMS, "bag_x", probe.OnComplete).SkipUnsent("drop spot is blocked");
+
+			Assert.AreEqual(1, probe.FireCount);
+			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, probe.Code);
+			StringAssert.Contains("drop spot is blocked", probe.Error.Message);
+
+			var compoundResults = new List<List<ActionResult>>();
+			new CompoundDatabaseAction(new GameStateActionBase[] { new DeleteDocumentAction(ITEMS, "bag_x") }, (err, results) => compoundResults.Add(results))
+				.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "refused"));
+			Assert.AreEqual(1, compoundResults.Count);
+			Assert.IsNotNull(compoundResults[0], "A compound resolved locally still hands its callback a list");
+		}
+
+		/// <summary>After Dispose, a remote connection can't send, so a delete and its conditional fail on the next
+		/// Update() instead of throwing out of the call.</summary>
+		[Test, Category("Conditional")]
+		public async Task Remote_DisposedConnection_FailsParentThenConditional()
+		{
+			CreateServer();
+			await StartTCPAndConnectRemote();
+			var conn = RemoteGame;
+			DisposeConnection(conn);
+
+			var log = new List<string>();
+			var deleteProbe = new CallbackProbe<bool>(log, "delete");
+			var insertProbe = new CallbackProbe<BsonValue>(log, "insert");
+			conn.DeleteEntity(1, null, deleteProbe.OnComplete, new InsertDocumentAction(ITEMS, InventoryDoc("inv_closed", "x"), insertProbe.OnComplete));
+
+			await PumpUntil(() => deleteProbe.Fired && insertProbe.Fired, conn);
+
+			CollectionAssert.AreEqual(new[] { "delete", "insert" }, log);
+			Assert.AreEqual(ImpunityErrorCode.ClientConnectionBrokenError, deleteProbe.Code);
+			Assert.AreEqual(ImpunityErrorCode.ClientConnectionBrokenError, insertProbe.Code);
+		}
+
+		/// <summary>Blocks the server's live thread until released, so requests queued behind it get no reply.</summary>
+		sealed class StallLiveThreadAction : ClientActionResultlessBase
+		{
+			readonly ManualResetEventSlim Gate;
+
+			public StallLiveThreadAction(ManualResetEventSlim gate) { Gate = gate; }
+
+			public override ushort GetActionType() { return 0; }
+			public override bool IsDBOperation() { return false; }
+
+			protected override void DoAction(GameStateServer game)
+			{
+				Gate.Wait(TimeSpan.FromSeconds(10));
+			}
+		}
+
+		/// <summary>A parent and its conditional expire in the same timeout sweep; the parent's timeout must still be
+		/// delivered first.</summary>
+		[Test, Category("Conditional")]
+		public async Task Remote_BothTimeOut_ParentStillFiresFirst()
+		{
+			CreateServer();
+			await StartTCPAndConnectRemote();
+
+			var log = new List<string>();
+			var deleteProbe = new CallbackProbe<bool>(log, "delete");
+			var insertProbe = new CallbackProbe<BsonValue>(log, "insert");
+
+			int savedTimeout = Options.ActionTimeoutMillis;
+			var gate = new ManualResetEventSlim(false);
+			try
+			{
+				GameServer.QueueAction(new StallLiveThreadAction(gate));
+				Options.ActionTimeoutMillis = 300;
+
+				RemoteGame.DeleteEntity(1, null, deleteProbe.OnComplete, new InsertDocumentAction(ITEMS, InventoryDoc("inv_slow", "x"), insertProbe.OnComplete));
+				await PumpUntil(() => deleteProbe.Fired && insertProbe.Fired, RemoteGame);
+			}
+			finally
+			{
+				Options.ActionTimeoutMillis = savedTimeout;
+				gate.Set();
+			}
+
+			CollectionAssert.AreEqual(new[] { "delete", "insert" }, log);
+			Assert.AreEqual(ImpunityErrorCode.TimeoutError, deleteProbe.Code);
+			Assert.AreEqual(ImpunityErrorCode.TimeoutError, insertProbe.Code);
 		}
 	}
 }

@@ -266,7 +266,9 @@ namespace Impunity.Connection
 		/// <param name="onCreatedAction">Optional database action sent in the same message and run by the server only if
 		/// the object is created — e.g. removing the item from the player's inventory as it is dropped into the world.
 		/// Its own callback fires after <paramref name="onComplete"/>, so the object is already registered by then. See
-		/// <see cref="BaseGameConnection.CreateObject"/>.</param>
+		/// <see cref="BaseGameConnection.CreateObject"/>. If this method throws, the action was never taken and is left
+		/// unresolved: the caller still owns it, and should resolve it (<see cref="GameStateActionBase.SkipUnsent"/>) if
+		/// something is waiting on its callback.</param>
 		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
 		{
 			if (Connection == null)
@@ -1517,7 +1519,10 @@ namespace Impunity.Connection
 		{
 			if (Connection == null)
 			{
-				throw new Exception("ClientEntityManager has no connection");
+				// No connection to queue through, so both callbacks fire now, in the usual order.
+				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				onReplicatedAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				return;
 			}
 
 			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))

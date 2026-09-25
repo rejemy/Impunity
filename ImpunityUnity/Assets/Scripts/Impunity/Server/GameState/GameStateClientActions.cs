@@ -650,13 +650,19 @@ namespace Impunity.GameState
 		}
 	}
 
-	/// <summary>Merges fields from the given document into an existing document. Returns true if the target document was found.</summary>
+	/// <summary>Merges the top-level fields of the given partial document into the existing document with the same
+	/// <c>_id</c>, then removes the fields named in <see cref="UnsetKeys"/>. Returns true if the target document was
+	/// found, false (nothing written) if not.</summary>
 	public class MergeIntoDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
 		public int CollectionId;
 		[BsonField("d")]
 		public BsonDocument Doc = null!;
+		/// <summary>Top-level fields to remove from the stored document after the merge, or null for none. Must not
+		/// include <c>_id</c> or a field <see cref="Doc"/> also sets. Servers that predate this field ignore it.</summary>
+		[BsonField("u")]
+		public List<string>? UnsetKeys;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INTO_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
@@ -664,26 +670,37 @@ namespace Impunity.GameState
 
 		public MergeIntoDocumentAction() { }
 
-		public MergeIntoDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">The partial document to merge; must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Receives the result, or an error. May be null.</param>
+		/// <param name="unsetKeys">Top-level fields to remove after merging, or null for none.</param>
+		public MergeIntoDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null, IEnumerable<string>? unsetKeys = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
 			OnCompleteCallback = onComplete;
+			UnsetKeys = unsetKeys != null ? new List<string>(unsetKeys) : null;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.DB.MergeIntoDocument(CollectionId, Doc);
+			Result = game.DB.MergeIntoDocument(CollectionId, Doc, UnsetKeys);
 		}
 	}
 
-	/// <summary>Merges fields into an existing document, or inserts as new if not found.</summary>
+	/// <summary>Merges into the existing document with the same <c>_id</c> (as <see cref="MergeIntoDocumentAction"/>),
+	/// or inserts the document as new if there is none. Returns true if a new document was inserted, false if an
+	/// existing one was merged into.</summary>
 	public class MergeInsertDocumentAction : ClientActionResultBase<bool>
 	{
 		[BsonField("cid")]
 		public int CollectionId;
 		[BsonField("d")]
 		public BsonDocument Doc = null!;
+		/// <summary>Top-level fields to remove from the stored document after the merge, or null for none. Must not
+		/// include <c>_id</c> or a field <see cref="Doc"/> also sets. Servers that predate this field ignore it.</summary>
+		[BsonField("u")]
+		public List<string>? UnsetKeys;
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.MERGE_INSERT_DOCUMENT; }
 		public override bool IsDBOperation() { return true; }
@@ -691,16 +708,21 @@ namespace Impunity.GameState
 
 		public MergeInsertDocumentAction() { }
 
-		public MergeInsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null)
+		/// <param name="collectionId">Target collection id.</param>
+		/// <param name="doc">The partial document to merge; must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Receives the result, or an error. May be null.</param>
+		/// <param name="unsetKeys">Top-level fields to remove after merging, or null for none.</param>
+		public MergeInsertDocumentAction(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete = null, IEnumerable<string>? unsetKeys = null)
 		{
 			CollectionId = collectionId;
 			Doc = doc;
 			OnCompleteCallback = onComplete;
+			UnsetKeys = unsetKeys != null ? new List<string>(unsetKeys) : null;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			Result = game.DB.MergeInsertDocument(CollectionId, Doc);
+			Result = game.DB.MergeInsertDocument(CollectionId, Doc, UnsetKeys);
 		}
 	}
 

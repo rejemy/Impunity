@@ -646,21 +646,93 @@ chest.UpdateExclusive(err => { /* ActionStaleData: someone else changed the ches
 - **The conditional runs next, on the database thread.** The live thread does not wait for it.
 - **One message.** The server either receives both halves or neither.
 - **Persisted entities.** The entity's own row write, delete, or persisted-field update is queued ahead of the conditional, and database work runs in order, so the world row always lands first.
+- **A later plain database write can overtake it.** See [Ordering against your other writes](#ordering-against-your-other-writes).
 
 "Succeeded" means no error for a create, a `true` result for a delete, and for an update, that the server applied it.
+
+### Ordering against your other writes
+
+A conditional and a plain database action take different routes on the server. A plain `UpsertDocument`, `MergeInsertDocument` and so on goes straight onto the database queue. A conditional reaches that queue only after its entity operation has run on the live thread. So when a client sends `Delete(…, conditional)` and then, a moment later, a plain write to the **same document**, the plain write can commit first, and the conditional then lands on top of it.
+
+This bites whole-document rewrites. Say the inventory is one document, rewritten in full on every change:
+
+1. The player drops a sword. The drop's conditional is an upsert of the whole inventory, minus the sword.
+2. Before it runs, the player rearranges two slots, and the game sends a plain upsert of the whole inventory, with the rearrangement.
+3. The rearrange's upsert commits first. The drop's conditional commits second, overwriting it with its older snapshot. The rearrangement is lost, and if the rearrange snapshot had been taken before the drop, the dropped sword is back.
+
+Two rules keep writes safe when conditionals are in play:
+
+- **Make writes that don't overlap.** Store things the conditional touches as their own documents (one per item, keyed by the item's instance id), or as their own top-level fields written with merges (`MergeIntoDocument` / `MergeInsertDocument`, one field per slot or key). Writes to different documents, or to different fields of one document through merges, give the same result in either order. A whole-document `UpsertDocument` or `UpdateDocument` overlaps with every other write to that document.
+- **Hold writes to the same keys until the conditional's callback fires.** Once it has fired, the conditional has committed (or was skipped), and anything sent afterwards lands after it. Block that slot, that item, or that document in your UI or game logic until then.
+
+That's why the examples in this section use per-item documents. `MakeDeleteAction(item.Id)` and `MakeInsertAction(new InventoryItem { Id = … })` touch only that item's document, so a later write to any other item can't collide with them. The only write to that item's document that could collide is a second write to the same item, which the second rule prevents.
+
+For a keyed map inside one document (inventory slots, quest flags, relationship values), use merges with `unsetKeys` to remove a key instead of writing `null` into it; see the document database section of [`Connections.md`](Connections.md#7-the-document-database).
 
 ### Results
 
 The conditional is an ordinary action with its own callback, and it gets its own reply:
 
-- **The entity operation's callback always fires first**, then the conditional's. With `manager.CreateObject`, the new object is already registered by the time the conditional's callback runs.
+- **The entity operation's callback always fires first**, then the conditional's. With `manager.CreateObject`, the new object is already registered by the time the conditional's callback runs. This holds for local (in-process) connections as well as remote ones, and also when both requests time out.
 - **A skipped conditional still gets a callback.** If the entity operation did not succeed, the conditional is not run and its callback receives `ActionConditionNotMet`. Every conditional callback fires exactly once.
+- **A request that never leaves the client still resolves its conditional.** On an entity with no manager or connection, `Delete`, `UpdateExclusive` and the other entity methods fire their own callback immediately with `ActionBadRequest`, then the conditional's. On a remote connection that has been disposed, both fail with `ClientConnectionBrokenError` on the next `Update()`. Methods that *throw* are the exception: `manager.CreateObject` throws on misuse (no connection, a bad unique name, inconsistent flags), and `AddReplicatedAction` throws on an invalid action. A method that throws never took the action, so it is not resolved, and the caller still owns it.
 - **A conditional without a callback still runs.** If it fails, the server logs a warning.
 - **A `TimeoutError` on the conditional does not mean it didn't run.** It can just mean the database queue was slow.
 
+What each result tells you about whether the conditional ran:
+
+| Conditional's result | Ran? |
+|---|---|
+| No error | Yes |
+| `ActionConditionNotMet` | No. The entity operation failed, or the client never sent it (`SkipUnsent`) |
+| `ActionBadRequest`, `ClientConnectionBrokenError` | No. Rejected, or never sent |
+| Any other error from the action itself (e.g. `ActionNotFound`) | It ran and failed. Nothing was written |
+| `TimeoutError` | Unknown |
+
+#### Recovering from timeouts
+
+If both the entity operation and its conditional time out, the client can't know from the replies what happened. The two travel in one message, so outside the crash window described below, **the server did both halves or neither**. The recovery is to stop trusting local state and read back both halves:
+
+1. Keep the item, slot or container blocked, exactly as while the request was in flight.
+2. Read back the conditional's target document(s), and look at the entity: resubscribe to the channel, or wait for its replicated create or delete.
+3. Rebuild local state from what you read, then unblock.
+
+This is easier when you can check the conditional's effect from its target alone. Write something that says "this move happened": the item's instance id in the slot, not just "slot 3 is full". There is no API to ask whether a given conditional ran, so the document has to answer that.
+
+If only the conditional times out and the entity operation succeeded, the conditional was very probably run, just slowly. Re-read its target before retrying it, because retrying a non-idempotent write (an insert, a whole-document upsert) can apply it twice.
+
+#### Refusing before sending: `SkipUnsent`
+
+Game code often wraps these calls, and a wrapper may accept a conditional and then decide not to send anything: the drop spot is blocked, the target is already gone, or the state changed under an exclusive edit. **Any API that accepts a conditional action and refuses before sending must resolve it, after its own callback**, or whoever built the action waits forever. `GameStateActionBase` has two methods for that:
+
+```csharp
+public void Drop(Item item, Vector3 where, ImpunityCallback<WorldItem> onDone, GameStateActionBase onDropped)
+{
+    if (!IsPassable(where))
+    {
+        onDone?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Blocked"), null);
+        onDropped.SkipUnsent("drop spot is blocked");   // callback fires now with ActionConditionNotMet
+        return;
+    }
+    manager.CreateObject(MakeWorldItem(item, where), zone, false, onDone, onDropped);
+}
+```
+
+`SkipUnsent(reason)` completes the action with `ActionConditionNotMet`, the code a server-side skip uses, so one handler covers both. `FailLocally(error)` takes any error. Both invoke the callback immediately. Call them only on an action that has not been sent, and only once. This is what Impunity's own entity methods do in the no-connection case above.
+
 ### What can be a conditional
 
-Any document action: insert, update, upsert, merge-into, merge-insert, delete, find, or list. Build them directly (`new InsertDocumentAction(collectionId, doc, callback)`), or use the typed builders on `GameStateDBCollection<T>`: `MakeInsertAction`, `MakeUpdateAction`, `MakeUpsertAction`, `MakeDeleteAction`.
+Any document action: insert, update, upsert, merge-into, merge-insert, delete, find, or list. Build them directly (`new InsertDocumentAction(collectionId, doc, callback)`), or use the typed builders on `GameStateDBCollection<T>`: `MakeInsertAction`, `MakeUpdateAction`, `MakeUpsertAction`, `MakeMergeIntoAction`, `MakeMergeInsertAction`, `MakeDeleteAction`. The merge builders take a partial `BsonDocument` that must include `_id`, and an optional list of top-level keys to remove:
+
+```csharp
+// Pickup into slot 3 of a one-field-per-slot inventory document.
+var fill = inventory.MakeMergeInsertAction(
+    new BsonDocument { ["_id"] = playerId, ["slot3"] = worldItem.ItemId.Get() },
+    (err, inserted) => { /* inserted: true if the inventory document was created by this write */ });
+
+// Drop from slot 3: remove the field rather than storing null in it.
+var empty = inventory.MakeMergeIntoAction(new BsonDocument { ["_id"] = playerId }, null, new[] { "slot3" });
+```
 
 For several actions, wrap them in a `CompoundDatabaseAction`. It is not atomic: it runs every sub-action even if an earlier one fails, and a delete that finds nothing returns `false` rather than an error.
 
@@ -805,6 +877,7 @@ A few sharp edges to be aware of (these reflect the current implementation and a
 - **The `RunExclusive` handoff guarantee covers guaranteed fields only.** Fields written with `SetUnguaranteed` leave the ordered path for best-effort delivery, so they can arrive after the next holder's body has already run, or not at all. Do not carry state the next holder depends on in an unguaranteed field.
 - **A `TryLock` retry loop can starve under contention.** Waiters queued via `WaitForLock`/`RunExclusive` are served before anyone polling, and a handoff raises `OnLocked` rather than `OnUnlocked`, so a poller watching for the release is not woken at all. Queue instead of polling.
 - **Conditional actions are not transactions.** A failed conditional does not undo the create, delete, or update it rode with, and a server crash between the two commits can lose or duplicate an item. See [§11](#11-conditional-actions).
+- **A conditional can be overtaken by a later plain database write.** Plain actions go straight to the database queue; a conditional gets there only after its entity operation has run. Use separate documents or field-level merges, and hold writes to the same keys until the conditional's callback fires. See [§11, Ordering against your other writes](#ordering-against-your-other-writes).
 - **Object unique names are checked per channel but registered server-wide.** `CreateObject` rejects a duplicate `UniqueName` only within the same channel, yet the server's name index (and a persisted object's database key) is global. The same name in two channels, or an object named like a channel, silently displaces the earlier entry. Keep unique names globally unique, e.g. by prefixing them with the channel name.
 - **A named lock shares its namespace with channels.** `TryToLock("foo")` when a channel named `foo` exists locks *that channel*, not a separate mutex. Waiting is not offered in that case (the request just fails), because the grant is entity-shaped and a caller waiting on a name has nothing to match it against.
 

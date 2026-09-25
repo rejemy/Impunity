@@ -307,13 +307,16 @@ namespace Impunity.GameState
 			return Collections[collectionId].Collection.Upsert(doc);
 		}
 
-		/// <summary>Merges fields from <paramref name="doc"/> into an existing document (by _id). Returns false if the document doesn't exist.</summary>
-		public bool MergeIntoDocument(int collectionId, BsonDocument doc)
+		/// <summary>Merges the top-level fields of <paramref name="doc"/> into the existing document with the same _id,
+		/// then removes the top-level fields named in <paramref name="unsetKeys"/>. Returns false, and changes nothing,
+		/// if the document doesn't exist.</summary>
+		public bool MergeIntoDocument(int collectionId, BsonDocument doc, IList<string>? unsetKeys = null)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
+			ValidateMerge(doc, unsetKeys);
 
 			var collection = Collections[collectionId].Collection;
 			var existing = collection.FindById(doc["_id"]);
@@ -322,35 +325,94 @@ namespace Impunity.GameState
 				return false;
 			}
 
-			foreach (var data in doc)
-			{
-				existing[data.Key] = data.Value;
-			}
-
-			return Collections[collectionId].Collection.Update(existing);
+			ApplyMerge(existing, doc, unsetKeys);
+			return collection.Update(existing);
 		}
 
-		/// <summary>Merges fields into an existing document, or inserts a new one if it doesn't exist.</summary>
-		public bool MergeInsertDocument(int collectionId, BsonDocument doc)
+		/// <summary>Merges into the existing document with the same _id as <see cref="MergeIntoDocument"/> does, or
+		/// inserts <paramref name="doc"/> as a new document if there is none (<paramref name="unsetKeys"/> then has
+		/// nothing to remove). Returns true if a new document was inserted, false if an existing one was merged into
+		/// — the same convention as <see cref="UpsertDocument"/>.</summary>
+		public bool MergeInsertDocument(int collectionId, BsonDocument doc, IList<string>? unsetKeys = null)
 		{
 			if (collectionId <= 0 || collectionId >= Collections.Length)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "Invalid collection id: " + collectionId);
 			}
+			ValidateMerge(doc, unsetKeys);
 
 			var collection = Collections[collectionId].Collection;
 			var existing = collection.FindById(doc["_id"]);
 			if (existing == null)
 			{
-				return Collections[collectionId].Collection.Upsert(doc);
+				collection.Insert(doc);
+				return true;
 			}
 
+			ApplyMerge(existing, doc, unsetKeys);
+			collection.Update(existing);
+			return false;
+		}
+
+		/// <summary>Why a merge patch and unset list are invalid, or null if they are fine: the patch needs a non-null
+		/// <c>_id</c>, and each unset key must be a non-empty top-level name other than <c>_id</c> that the patch does
+		/// not also set.</summary>
+		internal static string? GetMergeError(BsonDocument? doc, IEnumerable<string>? unsetKeys)
+		{
+			if (doc == null)
+			{
+				return "Merge has no document";
+			}
+			if (!doc.TryGetValue("_id", out BsonValue id) || id == null || id.IsNull)
+			{
+				return "Merge document has no _id";
+			}
+			if (unsetKeys != null)
+			{
+				foreach (string key in unsetKeys)
+				{
+					if (string.IsNullOrEmpty(key))
+					{
+						return "Merge unset key is empty";
+					}
+					if (key == "_id")
+					{
+						return "Merge cannot unset _id";
+					}
+					if (doc.ContainsKey(key))
+					{
+						return "Merge both sets and unsets '" + key + "'";
+					}
+				}
+			}
+			return null;
+		}
+
+		private static void ValidateMerge(BsonDocument doc, IList<string>? unsetKeys)
+		{
+			string? error = GetMergeError(doc, unsetKeys);
+			if (error != null)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, error);
+			}
+		}
+
+		// Top-level only: a patch field replaces the stored field whole, and an unset key names a top-level field
+		// (a dot in it is part of the name, not a path).
+		private static void ApplyMerge(BsonDocument existing, BsonDocument doc, IList<string>? unsetKeys)
+		{
 			foreach (var data in doc)
 			{
 				existing[data.Key] = data.Value;
 			}
 
-			return Collections[collectionId].Collection.Update(existing);
+			if (unsetKeys != null)
+			{
+				foreach (string key in unsetKeys)
+				{
+					existing.Remove(key);
+				}
+			}
 		}
 
 		/// <summary>Finds a document by its _id in the specified collection. Returns null if not found.</summary>

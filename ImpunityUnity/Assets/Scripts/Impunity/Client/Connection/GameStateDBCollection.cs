@@ -27,7 +27,7 @@ namespace Impunity.Connection
 	/// </para>
 	/// <para>
 	/// Documents are keyed by their BSON <c>_id</c> field. Operations that target an existing document
-	/// (update, upsert, find, delete) match on that <c>_id</c>; insert assigns one automatically when the
+	/// (update, upsert, merge, find, delete) match on that <c>_id</c>; insert assigns one automatically when the
 	/// document has none.
 	/// </para>
 	/// </summary>
@@ -50,7 +50,9 @@ namespace Impunity.Connection
 		/// </summary>
 		public BsonMapper Mapper;
 		BaseGameConnection Connection;
-		int CollectionId;
+
+		/// <summary>The server collection's numeric id, for building raw document actions against it.</summary>
+		public int CollectionId { get; }
 
 		/// <summary>Creates a typed view over a server collection.</summary>
 		/// <param name="connection">The connection whose server hosts the collection. All operations are routed through it.</param>
@@ -94,6 +96,52 @@ namespace Impunity.Connection
 		public void UpsertDocument(DTYPE doc, ImpunityCallback<bool> onComplete)
 		{
 			Connection.UpsertDocument(CollectionId, Mapper.ToDocument(doc), onComplete);
+		}
+
+		/// <summary>Merges the top-level fields of <paramref name="patch"/> into the existing document with the same
+		/// <c>_id</c>, leaving its other fields intact, then removes the fields named in <paramref name="unsetKeys"/>.
+		/// Nothing is inserted if the document doesn't exist.</summary>
+		/// <remarks>A patch is partial, so it is a raw <see cref="BsonDocument"/> rather than a
+		/// <typeparamref name="DTYPE"/>. Build its values with <see cref="Mapper"/> (<c>Mapper.Serialize(value)</c>) so
+		/// they are stored the way <see cref="FindDocumentById"/> expects to read them back. Merges to different fields
+		/// of one document commute, which makes a field-per-key document safe to write from conditional actions; see
+		/// the "Ordering against later writes" note in docs/guides/DistributedEntities.md.</remarks>
+		/// <param name="patch">The fields to write. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Invoked on the main thread with <c>true</c> if the document existed and was merged, <c>false</c> if it was not found.</param>
+		/// <param name="unsetKeys">Top-level fields to remove, or null for none. Must not include <c>_id</c> or a field
+		/// <paramref name="patch"/> also sets.</param>
+		/// <exception cref="ArgumentException"><paramref name="patch"/> has no <c>_id</c>.</exception>
+		public void MergeIntoDocument(BsonDocument patch, ImpunityCallback<bool> onComplete, IEnumerable<string>? unsetKeys = null)
+		{
+			CheckPatch(patch);
+			Connection.MergeIntoDocument(CollectionId, patch, onComplete, unsetKeys);
+		}
+
+		/// <summary>Merges <paramref name="patch"/> into the existing document with the same <c>_id</c> as
+		/// <see cref="MergeIntoDocument"/> does, or inserts it as a new document if there is none.</summary>
+		/// <param name="patch">The fields to write, or the whole new document. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Invoked on the main thread with <c>true</c> if a new document was inserted, or
+		/// <c>false</c> if an existing one was merged into.</param>
+		/// <param name="unsetKeys">Top-level fields to remove from an existing document, or null for none.</param>
+		/// <exception cref="ArgumentException"><paramref name="patch"/> has no <c>_id</c>.</exception>
+		public void MergeInsertDocument(BsonDocument patch, ImpunityCallback<bool> onComplete, IEnumerable<string>? unsetKeys = null)
+		{
+			CheckPatch(patch);
+			Connection.MergeInsertDocument(CollectionId, patch, onComplete, unsetKeys);
+		}
+
+		// A patch without an _id is always a bug, so it is refused before anything is sent (and, from a builder, before
+		// an action exists to resolve). The server checks the rest.
+		private static void CheckPatch(BsonDocument patch)
+		{
+			if (patch == null)
+			{
+				throw new ArgumentNullException(nameof(patch));
+			}
+			if (!patch.TryGetValue("_id", out BsonValue id) || id == null || id.IsNull)
+			{
+				throw new ArgumentException("A merge patch must include the target document's _id", nameof(patch));
+			}
 		}
 
 		/// <summary>Retrieves a single document by its <c>_id</c> and maps it to <typeparamref name="DTYPE"/>.</summary>
@@ -208,6 +256,28 @@ namespace Impunity.Connection
 		public UpsertDocumentAction MakeUpsertAction(DTYPE doc, ImpunityCallback<bool>? onComplete = null)
 		{
 			return new UpsertDocumentAction(CollectionId, Mapper.ToDocument(doc), onComplete);
+		}
+
+		/// <summary>Builds, without sending, a merge of <paramref name="patch"/> into an existing document. See <see cref="MergeIntoDocument"/>.</summary>
+		/// <param name="patch">The fields to write. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Receives <c>true</c> if the document existed and was merged, <c>false</c> if not. May be null.</param>
+		/// <param name="unsetKeys">Top-level fields to remove, or null for none.</param>
+		/// <exception cref="ArgumentException"><paramref name="patch"/> has no <c>_id</c>.</exception>
+		public MergeIntoDocumentAction MakeMergeIntoAction(BsonDocument patch, ImpunityCallback<bool>? onComplete = null, IEnumerable<string>? unsetKeys = null)
+		{
+			CheckPatch(patch);
+			return new MergeIntoDocumentAction(CollectionId, patch, onComplete, unsetKeys);
+		}
+
+		/// <summary>Builds, without sending, a merge-or-insert of <paramref name="patch"/>. See <see cref="MergeInsertDocument"/>.</summary>
+		/// <param name="patch">The fields to write, or the whole new document. Must include the target <c>_id</c>.</param>
+		/// <param name="onComplete">Receives <c>true</c> if inserted as new, <c>false</c> if merged into an existing one. May be null.</param>
+		/// <param name="unsetKeys">Top-level fields to remove from an existing document, or null for none.</param>
+		/// <exception cref="ArgumentException"><paramref name="patch"/> has no <c>_id</c>.</exception>
+		public MergeInsertDocumentAction MakeMergeInsertAction(BsonDocument patch, ImpunityCallback<bool>? onComplete = null, IEnumerable<string>? unsetKeys = null)
+		{
+			CheckPatch(patch);
+			return new MergeInsertDocumentAction(CollectionId, patch, onComplete, unsetKeys);
 		}
 
 		/// <summary>Builds, without sending, a delete of the document with the given <c>_id</c>. See <see cref="DeleteDocument"/>.</summary>

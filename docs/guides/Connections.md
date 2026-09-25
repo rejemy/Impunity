@@ -179,7 +179,9 @@ Most actions are sent **guaranteed** (reliably, over TCP). A few high-frequency 
 
 A request that has a callback waits for exactly one reply; a callback-less request is flagged "no reply" so the server doesn't send one. On a remote connection each reply-expecting request is given a correlation id in its message header, and the server echoes that id on the reply, so replies are matched to requests **by id** and need not arrive in send order. A late reply to a request that already timed out simply matches nothing. The reply timeout (`ActionTimeoutMillis`, remote only) is the only thing that completes a request the server never answers; a local connection has no timeout.
 
-A `CreateObject`, `DeleteEntity`, or entity update carrying a **conditional action** (a database action run only if the entity operation succeeds — see [`DistributedEntities.md`](DistributedEntities.md) §11) is one message with two replies (for a plain update, which has no reply of its own, just the conditional's). The conditional gets a second correlation id, carried in the request body, and its reply always arrives after the entity operation's. Each has its own callback and times out independently.
+A `CreateObject`, `DeleteEntity`, or entity update carrying a **conditional action** (a database action run only if the entity operation succeeds — see [`DistributedEntities.md`](DistributedEntities.md) §11) is one message with two replies (for a plain update, which has no reply of its own, just the conditional's). The conditional gets a second correlation id, carried in the request body, and its callback always fires after the entity operation's, on local connections too. Each times out on its own, and when both time out in the same `Update()`, the entity operation's timeout is still delivered first.
+
+A request made on a remote connection after `Dispose()` is not sent. Its callback, and any conditional's, fires on the next `Update()` with `ClientConnectionBrokenError`. A reply that arrives but can't be read completes its request with `UnknownError`, so a callback is never lost.
 
 ### Compound actions
 
@@ -214,8 +216,8 @@ All take a `collectionId` (the collection's `Index`) and deliver results via cal
 | `InsertDocument(cid, doc, cb)` | the assigned `_id` | Fails on a duplicate id |
 | `UpdateDocument(cid, doc, cb)` | `bool` — found & replaced | Matched by `_id` |
 | `UpsertDocument(cid, doc, cb)` | `bool` — **`true` = inserted new, `false` = replaced existing** | |
-| `MergeIntoDocument(cid, doc, cb)` | `bool` — merged (`false` if not found) | Copies the given fields over an existing doc; never inserts |
-| `MergeInsertDocument(cid, doc, cb)` | `bool` — success | Merge if present, else insert |
+| `MergeIntoDocument(cid, doc, cb, unsetKeys?)` | `bool` — merged (`false` if not found) | Copies the given fields over an existing doc; never inserts |
+| `MergeInsertDocument(cid, doc, cb, unsetKeys?)` | `bool` — **`true` = inserted new, `false` = merged into existing** | Merge if present, else insert |
 | `FindDocumentById(cid, id, cb)` | the document, or `null` | |
 | `DeleteDocument(cid, id, cb)` | `bool` — found & deleted | |
 | `ListDocuments(cid, cb)` | all documents (empty list if none) | |
@@ -226,6 +228,20 @@ conn.UpsertDocument(itemsCollection, doc, (err, wasInserted) => { /* … */ });
 ```
 
 Database operations run on the server's dedicated **DB worker thread**, separate from live-state work, so a slow query doesn't stall replication.
+
+### Merges
+
+A merge patch is a partial document that must include the target `_id` (a patch without one fails with `ActionBadRequest`). Merging works on **top-level fields only**: each field in the patch replaces the stored field whole, and fields the patch doesn't mention are left alone. To delete fields, pass their names as `unsetKeys`:
+
+```csharp
+// Slot 3 now holds a sword; slot 5 is empty.
+var patch = new BsonDocument { ["_id"] = playerId, ["slot3"] = "sword#812" };
+conn.MergeIntoDocument(inventoryCollection, patch, (err, found) => { /* … */ }, unsetKeys: new[] { "slot5" });
+```
+
+A key in `unsetKeys` must not be `_id` or a field the patch also sets (both fail with `ActionBadRequest`). Removing a field the document doesn't have is fine. A dot in a key is part of the field name, not a path. Writing `null` still stores a real `null`; only `unsetKeys` removes a field. Servers from before `unsetKeys` existed ignore it.
+
+Merges into **different** fields of one document commute: they give the same result in either order. That makes a field-per-key document (one field per inventory slot, quest flag or NPC) safe to update from several places at once, including from conditional actions, which a whole-document upsert is not (see [`DistributedEntities.md`](DistributedEntities.md#ordering-against-your-other-writes)).
 
 ### The typed wrapper
 
@@ -240,6 +256,8 @@ players.FindDocumentById("ada", (err, record) => { /* record is a PlayerRecord *
 // async and yield variants exist too:
 List<PlayerRecord>? all = await players.ListDocumentsAsync();
 ```
+
+Merges take a raw `BsonDocument` patch rather than a `T`, since a patch is partial: `MergeIntoDocument(patch, cb, unsetKeys?)` and `MergeInsertDocument(patch, cb, unsetKeys?)`. The wrapper throws `ArgumentException` for a patch without an `_id`. Every operation also has a `Make…Action` builder (`MakeInsertAction`, `MakeUpdateAction`, `MakeUpsertAction`, `MakeMergeIntoAction`, `MakeMergeInsertAction`, `MakeDeleteAction`) that returns the request unsent, for use as a conditional action or a step of a compound. `CollectionId` is public if you need to build any other raw action against the same collection.
 
 The mapping is **client-side only** — the wire payload is always BSON — and uses `BsonMapper.Global` unless you pass your own mapper. Custom type registrations that affect *storage* must be made on both client and server, since the server (de)serializes documents with its own mapper.
 
@@ -330,7 +348,8 @@ Codes you'll actually branch on:
 
 | Code | Meaning |
 |---|---|
-| `TimeoutError` | No reply within `ActionTimeoutMillis` (remote only) |
+| `TimeoutError` | No reply within `ActionTimeoutMillis` (remote only). The request may or may not have run |
+| `ClientConnectionBrokenError` | The request was made on a disposed remote connection and was never sent |
 | `ClientMappingError` | A `GameStateDBCollection<T>` find/list got a document it couldn't map to `T` (wrong shape, or a `_type` the mapper doesn't allow) |
 | `ServerVersionIncompatible` | The client's format doesn't match the server and can't be upgraded |
 | `ServerPasswordIncorrect` | Wrong world password |
@@ -341,7 +360,7 @@ Codes you'll actually branch on:
 | `ActionNotFound` | The target entity/document doesn't exist |
 | `ActionBadRequest` / `ActionInvalidParameter` | Malformed request (e.g. a non-DB action in a compound batch, a bad collection id) |
 | `ActionCompoundFailure` | At least one sub-action of a compound action failed |
-| `ActionConditionNotMet` | A conditional action was not run because the create/delete it was attached to did not succeed |
+| `ActionConditionNotMet` | A conditional action was not run: the create, delete or update it was attached to did not succeed, or the client refused to send it (`SkipUnsent`) |
 
 A **fatal** server error (e.g. an incompatible version at connect) closes the connection after reporting. Transport-level failures on a remote connection surface through `OnNetworkError` — note the caveat in [§13](#13-known-caveats) about *clean* disconnects.
 

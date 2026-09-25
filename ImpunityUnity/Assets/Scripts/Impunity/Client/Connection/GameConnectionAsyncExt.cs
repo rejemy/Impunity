@@ -218,17 +218,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<bool> MergeIntoDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		public static Task<bool> MergeIntoDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.MergeIntoDocument(collectionId, doc, t.OnComplete);
+			connection.MergeIntoDocument(collectionId, doc, t.OnComplete, unsetKeys);
 			return t.Task;
 		}
 
-		public static Task<bool> MergeInsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		public static Task<bool> MergeInsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
-			connection.MergeInsertDocument(collectionId, doc, t.OnComplete);
+			connection.MergeInsertDocument(collectionId, doc, t.OnComplete, unsetKeys);
 			return t.Task;
 		}
 
@@ -377,6 +377,20 @@ namespace Impunity.Connection
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
 			collection.UpsertDocument(doc, t.OnComplete);
+			return t.Task;
+		}
+
+		public static Task<bool> MergeIntoDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			collection.MergeIntoDocument(patch, t.OnComplete, unsetKeys);
+			return t.Task;
+		}
+
+		public static Task<bool> MergeInsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			collection.MergeInsertDocument(patch, t.OnComplete, unsetKeys);
 			return t.Task;
 		}
 

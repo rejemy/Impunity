@@ -508,7 +508,21 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
-			Manager.Connection?.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+			BaseGameConnection? connection = Manager?.Connection;
+			if (connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError());
+				return;
+			}
+
+			connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+		}
+
+		// The error every request fails with when this entity has no manager or its manager has no connection. With no
+		// connection there is no queue to defer through, so such refusals invoke their callbacks immediately.
+		private protected static ImpunityErrorResponse NotRegisteredError()
+		{
+			return new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection");
 		}
 
 		/// <inheritdoc/>
@@ -517,12 +531,8 @@ namespace Impunity.Connection
 			if (Manager == null)
 			{
 				// No manager means the entity was never registered with a connection; there is no queue to defer through.
-				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection"));
-				if (onReplicatedAction != null)
-				{
-					onReplicatedAction.Error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with a connection");
-					onReplicatedAction.InvokeOnCompleteCallback();
-				}
+				onComplete?.Invoke(NotRegisteredError());
+				onReplicatedAction?.FailLocally(NotRegisteredError());
 				return;
 			}
 
@@ -548,10 +558,20 @@ namespace Impunity.Connection
 		/// rejected because the entity is locked by another client; the error argument is non-null on failure. May be null.</param>
 		/// <param name="onDeletedAction">Optional database action sent in the same message and run by the server only if
 		/// this request deleted the entity — e.g. adding a picked-up item to the player's inventory. Its own callback
-		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
+		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>. If the entity has
+		/// no connection, both callbacks fire immediately, in that order, with
+		/// <see cref="ImpunityErrorCode.ActionBadRequest"/>.</param>
 		public void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
 		{
-			Manager.Connection?.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
+			BaseGameConnection? connection = Manager?.Connection;
+			if (connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), false);
+				onDeletedAction?.FailLocally(NotRegisteredError());
+				return;
+			}
+
+			connection.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
@@ -560,7 +580,14 @@ namespace Impunity.Connection
 		/// <c>false</c> if another client holds it; the error argument is non-null on failure. May be null.</param>
 		public void TryLock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection?.TryToLockEntity(DistributedEntityId, onComplete);
+			BaseGameConnection? connection = Manager?.Connection;
+			if (connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), false);
+				return;
+			}
+
+			connection.TryToLockEntity(DistributedEntityId, onComplete);
 		}
 
 		/// <summary>Acquires the exclusive lock, queueing for it on the server when another client holds it. The
@@ -571,6 +598,12 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Receives the <see cref="LockWaitResult"/> and any error. May be null.</param>
 		public void WaitForLock(ImpunityCallback<LockWaitResult> onComplete)
 		{
+			if (Manager == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), LockWaitResult.Error);
+				return;
+			}
+
 			Manager.WaitForEntityLock(this, onComplete);
 		}
 
@@ -598,6 +631,12 @@ namespace Impunity.Connection
 		/// immediately when the lock is held by someone else.</param>
 		public void RunExclusive(Action body, ImpunityCallback<RunExclusiveResult>? onComplete, float timeoutSeconds = -1f)
 		{
+			if (Manager == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), RunExclusiveResult.Failed);
+				return;
+			}
+
 			Manager.RunExclusive(this, body, onComplete, timeoutSeconds);
 		}
 
@@ -608,7 +647,14 @@ namespace Impunity.Connection
 		/// hold the lock; the error argument is non-null on failure. May be null.</param>
 		public void Unlock(ImpunityCallback<bool> onComplete)
 		{
-			Manager.Connection?.UnlockEntity(DistributedEntityId, onComplete);
+			BaseGameConnection? connection = Manager?.Connection;
+			if (connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), false);
+				return;
+			}
+
+			connection.UnlockEntity(DistributedEntityId, onComplete);
 		}
 
 		/// <summary>Called when the entity becomes locked on the server, by any client. <see cref="IsLocked"/> is set
@@ -714,6 +760,12 @@ namespace Impunity.Connection
 		/// <param name="immediate">If true, tear down synchronously and suppress further updates instead of waiting for the server ack.</param>
 		public void Unsubscribe(ImpunityCallback onComplete, bool immediate = false)
 		{
+			if (Manager == null)
+			{
+				onComplete?.Invoke(NotRegisteredError());
+				return;
+			}
+
 			Manager.UnsubscribeFromChannel(this, onComplete, immediate);
 		}
 

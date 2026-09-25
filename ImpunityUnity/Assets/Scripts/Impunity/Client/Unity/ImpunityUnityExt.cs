@@ -129,17 +129,17 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<bool> MergeIntoDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		public static ImpunityYield<bool> MergeIntoDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.MergeIntoDocument(collectionId, doc, action.OnComplete);
+			connection.MergeIntoDocument(collectionId, doc, action.OnComplete, unsetKeys);
 			return action;
 		}
 
-		public static ImpunityYield<bool> MergeInsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
+		public static ImpunityYield<bool> MergeInsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var action = new ImpunityYield<bool>();
-			connection.MergeInsertDocument(collectionId, doc, action.OnComplete);
+			connection.MergeInsertDocument(collectionId, doc, action.OnComplete, unsetKeys);
 			return action;
 		}
 
@@ -287,6 +287,20 @@ namespace Impunity.Unity
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
 			collection.UpsertDocument(doc, action.OnComplete);
+			return action;
+		}
+
+		public static ImpunityYield<bool> MergeIntoDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			collection.MergeIntoDocument(patch, action.OnComplete, unsetKeys);
+			return action;
+		}
+
+		public static ImpunityYield<bool> MergeInsertDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
+		{
+			ImpunityYield<bool> action = new ImpunityYield<bool>();
+			collection.MergeInsertDocument(patch, action.OnComplete, unsetKeys);
 			return action;
 		}
 

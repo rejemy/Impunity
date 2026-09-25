@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Net;
 
@@ -185,7 +186,9 @@ namespace Impunity.Connection
 
 		/// <summary>
 		/// Closes the connection: stops accepting new outbound actions (which lets the writer thread exit) and disposes
-		/// the transport. Does not flush actions still queued in <c>PendingSend</c>.
+		/// the transport. Does not flush actions still queued in <c>PendingSend</c>. Actions submitted afterwards are not
+		/// sent: their callbacks (and any conditional action's) fire on the next <see cref="Update"/> with
+		/// <see cref="ImpunityErrorCode.ClientConnectionBrokenError"/>.
 		/// </summary>
 		public override void Dispose()
 		{
@@ -272,6 +275,7 @@ namespace Impunity.Connection
 			var tooOld = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(this.Options.ActionTimeoutMillis);
 
 			// Iterating a ConcurrentDictionary tolerates concurrent adds (send path) and removes (reply matching).
+			List<GameStateActionBase>? expired = null;
 			foreach (var pending in AwaitingReceive)
 			{
 				if (pending.Value.SentAt >= tooOld)
@@ -281,12 +285,53 @@ namespace Impunity.Connection
 
 				if (AwaitingReceive.TryRemove(pending.Key, out var timedOut))
 				{
-					timedOut.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + timedOut.GetType().Name + " took too long to complete");
-					CompletedActions.Enqueue(timedOut);
+					expired ??= new List<GameStateActionBase>();
+					expired.Add(timedOut);
 				}
 			}
 
+			if (expired != null)
+			{
+				QueueTimeouts(expired);
+			}
+
 			base.Update();
+		}
+
+		// Completes timed-out actions with a TimeoutError. A parent and its conditional share SentAt, so they expire in
+		// the same sweep, and the dictionary hands them over in no particular order: each conditional is queued right
+		// after its parent to keep the documented "parent's callback first" order.
+		private void QueueTimeouts(List<GameStateActionBase> expired)
+		{
+			HashSet<GameStateActionBase>? heldForParent = null;
+			foreach (GameStateActionBase action in expired)
+			{
+				if (action is IHasConditionalAction parent && parent.ConditionalAction != null && expired.Contains(parent.ConditionalAction))
+				{
+					heldForParent ??= new HashSet<GameStateActionBase>();
+					heldForParent.Add(parent.ConditionalAction);
+				}
+			}
+
+			foreach (GameStateActionBase action in expired)
+			{
+				if (heldForParent != null && heldForParent.Contains(action))
+				{
+					continue;
+				}
+
+				QueueTimeout(action);
+				if (heldForParent != null && action is IHasConditionalAction parent && parent.ConditionalAction != null && heldForParent.Contains(parent.ConditionalAction))
+				{
+					QueueTimeout(parent.ConditionalAction);
+				}
+			}
+		}
+
+		private void QueueTimeout(GameStateActionBase action)
+		{
+			action.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + action.GetType().Name + " took too long to complete");
+			CompletedActions.Enqueue(action);
 		}
 
 		// Allocates the next header correlation id. Called only on the (single-threaded) send path, so it needs no
@@ -418,8 +463,9 @@ namespace Impunity.Connection
 			}
 			catch (Exception e)
 			{
+				// Still complete the action, so its callback fires exactly once rather than never.
 				ImpunityLogger.LogError("Error deserializing reply message body for message type " + action.GetActionType() + " id " + messageId, e);
-				return;
+				action.Error = new ImpunityErrorResponse(ImpunityErrorCode.UnknownError, "Couldn't read the server's reply: " + e.Message);
 			}
 
 			// Ready for callback!
@@ -435,8 +481,33 @@ namespace Impunity.Connection
 		public override void DoAction(GameStateActionBase action)
 		{
 			action.SentAt = DateTimeOffset.UtcNow;
-			PendingSend.Add(action);
 
+			// After Dispose the send queue is closed. Fail the action (and any conditional riding on it) through the
+			// normal completion queue instead of throwing, so the caller's callbacks still fire, in order, once each.
+			if (PendingSend.IsAddingCompleted)
+			{
+				FailUnsent(action);
+				return;
+			}
+
+			try
+			{
+				PendingSend.Add(action);
+			}
+			catch (InvalidOperationException)
+			{
+				// Lost a race with Dispose.
+				FailUnsent(action);
+			}
+		}
+
+		private void FailUnsent(GameStateActionBase action)
+		{
+			QueueLocalFailure(action, new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, "Connection is closed; " + action.GetType().Name + " was not sent"));
+			if (action is IHasConditionalAction parent && parent.ConditionalAction != null)
+			{
+				QueueLocalFailure(parent.ConditionalAction, new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, "Connection is closed; the conditional action was not sent"));
+			}
 		}
 
 	}

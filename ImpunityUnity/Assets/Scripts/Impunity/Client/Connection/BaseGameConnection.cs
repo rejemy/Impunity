@@ -504,22 +504,31 @@ namespace Impunity.Connection
 			DoAction(new UpsertDocumentAction(collectionId, doc, onComplete));
 		}
 
-		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>), leaving its other fields intact.</summary>
+		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>), leaving its other fields
+		/// intact, then removes the fields named in <paramref name="unsetKeys"/>. Top-level only: a patch field replaces
+		/// the stored field whole.</summary>
 		/// <param name="collectionId">Target collection id.</param>
 		/// <param name="doc">A partial document whose fields are copied over the stored document. Must include the target <c>_id</c>.</param>
 		/// <param name="onComplete">Invoked with <c>true</c> if the target document existed and was merged, <c>false</c> if it was not found (nothing is inserted).</param>
-		public void MergeIntoDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
+		/// <param name="unsetKeys">Top-level fields to remove from the stored document, or null for none. Must not include
+		/// <c>_id</c> or a field <paramref name="doc"/> also sets (<see cref="ImpunityErrorCode.ActionBadRequest"/>).
+		/// Removing a field the document doesn't have is not an error.</param>
+		public void MergeIntoDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete, IEnumerable<string>? unsetKeys = null)
 		{
-			DoAction(new MergeIntoDocumentAction(collectionId, doc, onComplete));
+			DoAction(new MergeIntoDocumentAction(collectionId, doc, onComplete, unsetKeys));
 		}
 
-		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>), or inserts <paramref name="doc"/> as a new document if none exists.</summary>
+		/// <summary>Merges the given fields into an existing document (matched by <c>_id</c>) as
+		/// <see cref="MergeIntoDocument"/> does, or inserts <paramref name="doc"/> as a new document if none exists.</summary>
 		/// <param name="collectionId">Target collection id.</param>
 		/// <param name="doc">A partial document to merge, or the full document to insert when absent. Must include the target <c>_id</c>.</param>
-		/// <param name="onComplete">Invoked with a success flag (true on insert of a new document; the merge path likewise reports success).</param>
-		public void MergeInsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete)
+		/// <param name="onComplete">Invoked with <c>true</c> if a new document was inserted, or <c>false</c> if an
+		/// existing one was merged into (the same convention as <see cref="UpsertDocument"/>).</param>
+		/// <param name="unsetKeys">Top-level fields to remove from an existing document, or null for none; see
+		/// <see cref="MergeIntoDocument"/>.</param>
+		public void MergeInsertDocument(int collectionId, BsonDocument doc, ImpunityCallback<bool>? onComplete, IEnumerable<string>? unsetKeys = null)
 		{
-			DoAction(new MergeInsertDocumentAction(collectionId, doc, onComplete));
+			DoAction(new MergeInsertDocumentAction(collectionId, doc, onComplete, unsetKeys));
 		}
 
 		/// <summary>Retrieves a single document from a server database collection by its <c>_id</c>.</summary>

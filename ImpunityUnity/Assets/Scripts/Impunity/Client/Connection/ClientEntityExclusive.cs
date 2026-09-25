@@ -404,7 +404,13 @@ namespace Impunity.Connection
 		{
 			uint entityId = entity.DistributedEntityId;
 
-			Connection?.TryToLockEntity(entityId, true, (err, locked) =>
+			if (Connection == null)
+			{
+				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"), LockWaitResult.Error);
+				return;
+			}
+
+			Connection.TryToLockEntity(entityId, true, (err, locked) =>
 			{
 				if (err != null)
 				{
