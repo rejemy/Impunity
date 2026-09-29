@@ -34,11 +34,14 @@ namespace Impunity.Networking
 		private Thread? ClientTCPSocketThread;
 		private NetworkStream? TCPSocketStream;
 
-		private UdpClient? ClientUDPSocket;
+		private volatile UdpClient? ClientUDPSocket;
 		private Thread? ClientUDPSocketThread;
 
 		private ImpunityCallback? OnConnectCallback;
 
+
+		// UDP pings sent at ~1s intervals before settling for TCP-only
+		const int UdpPingAttempts = 5;
 
 		byte[] SessionDataPacket = default!;
 		byte[] PingPacket = default!;
@@ -113,12 +116,10 @@ namespace Impunity.Networking
 				client.Close();
 			}
 
-			if (ClientUDPSocket != null)
-			{
-				UdpClient client = ClientUDPSocket;
-				ClientUDPSocket = null;
-				client.Close();
-			}
+			// Don't close the UDP socket from here: on .NET Core that waits out the reader thread's in-flight Poll
+			// (up to 1s, on the caller's thread), and on macOS closing from another thread is unreliable anyway.
+			// Clearing the field tells the reader to stop; it closes its own socket on the way out.
+			ClientUDPSocket = null;
 		}
 
 
@@ -143,7 +144,7 @@ namespace Impunity.Networking
 					ClientTCPSocket.Connect(ServerEndpoint);
 				}
 
-				ServerEndpoint = (IPEndPoint)ClientTCPSocket.Client.RemoteEndPoint;
+				ServerEndpoint = ToIPv4IfMapped((IPEndPoint)ClientTCPSocket.Client.RemoteEndPoint);
 				ClientTCPSocket.Client.ReceiveTimeout = 1000;
 				TCPSocketStream = ClientTCPSocket.GetStream();
 
@@ -272,25 +273,36 @@ namespace Impunity.Networking
 				return;
 			}
 
+			UdpClient? udp = null;
 			try
 			{
 				// Open Udp socket on same port/address as established TCP session
-				IPEndPoint localEndpoint = (IPEndPoint)ClientTCPSocket.Client.LocalEndPoint;
+				IPEndPoint localEndpoint = ToIPv4IfMapped((IPEndPoint)ClientTCPSocket.Client.LocalEndPoint);
 				ImpunityLogger.LogInformation("Client listening for udp on " + localEndpoint.ToString());
-				ClientUDPSocket = new UdpClient(localEndpoint);
+				udp = new UdpClient(localEndpoint);
+				ClientUDPSocket = udp;
 
 				// See if we can reach the server and vice versa
 				SendUdpPing();
+				int pingsSent = 1;
 
-				while (ClientUDPSocket != null && !ImpunityLifecycle.ShuttingDown)
+				while (ClientUDPSocket == udp && !ImpunityLifecycle.ShuttingDown)
 				{
-					if (!ClientUDPSocket.Client.Poll(1_000_000, SelectMode.SelectRead))
+					if (!udp.Client.Poll(1_000_000, SelectMode.SelectRead))
 					{
+						// The server only answers pings from sessions it has accepted, and its accept loop can
+						// lag our connect, so the first ping is often dropped. Retry until answered (or give up
+						// and stay TCP-only).
+						if (!SupportsUnguaranteed && pingsSent < UdpPingAttempts)
+						{
+							SendUdpPing();
+							pingsSent++;
+						}
 						continue;
 					}
 
 					IPEndPoint sender = default!;
-					byte[] packet = ClientUDPSocket.Receive(ref sender);
+					byte[] packet = udp.Receive(ref sender);
 					if (!sender.Equals(ServerEndpoint))
 					{
 						// Some other random stray packet
@@ -314,7 +326,7 @@ namespace Impunity.Networking
 			}
 			catch (SocketException e)
 			{
-				if (ClientUDPSocket == null)
+				if (udp == null || ClientUDPSocket != udp)
 				{
 					return;
 				}
@@ -323,12 +335,23 @@ namespace Impunity.Networking
 			}
 			finally
 			{
-				if (ClientUDPSocket != null)
+				if (udp != null)
 				{
-					ClientUDPSocket.Close();
-					ClientUDPSocket = null;
+					if (ClientUDPSocket == udp)
+					{
+						ClientUDPSocket = null;
+					}
+					udp.Close();
 				}
 			}
+		}
+
+		// .NET Core's default TcpClient is a dual-mode IPv6 socket, so an IPv4 connection reports IPv4-mapped IPv6
+		// endpoints (::ffff:a.b.c.d). A UdpClient bound to one of those never exchanged packets with the server's IPv4
+		// UDP socket, so use the plain IPv4 form for the UDP side (and for matching the server's replies).
+		private static IPEndPoint ToIPv4IfMapped(IPEndPoint endpoint)
+		{
+			return endpoint.Address.IsIPv4MappedToIPv6 ? new IPEndPoint(endpoint.Address.MapToIPv4(), endpoint.Port) : endpoint;
 		}
 
 		private void OnSessionDataPacket(ArraySegment<byte> data)
@@ -384,7 +407,8 @@ namespace Impunity.Networking
 		/// <summary>Sends a message via UDP if available, otherwise falls back to TCP.</summary>
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
-			if (ClientUDPSocket == null || !this.SupportsUnguaranteed)
+			UdpClient? udp = ClientUDPSocket;
+			if (udp == null || !this.SupportsUnguaranteed)
 			{
 				SendGuaranteedMessage(messageBytes);
 				return;
@@ -394,7 +418,7 @@ namespace Impunity.Networking
 			Buffer.BlockCopy(SessionDataPacket, 0, buffer, 0, SessionDataPacket.Length);
 			Buffer.BlockCopy(messageBytes.Array, messageBytes.Offset, buffer, SessionDataPacket.Length, messageBytes.Count);
 
-			ClientUDPSocket.Send(buffer, buffer.Length, this.ServerEndpoint);
+			udp.Send(buffer, buffer.Length, this.ServerEndpoint);
 		}
 
 		public void Dispose()

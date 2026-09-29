@@ -37,6 +37,7 @@ namespace Impunity.Networking
 		ImpunityTCPServer Server;
 		TcpClient? Client;
 		NetworkStream ClientStream;
+		int Disconnected;
 
 		byte[] ReceiveBuffer;
 		int BytesReceived = 0;
@@ -205,6 +206,13 @@ namespace Impunity.Networking
 		/// <summary>Closes and disposes the TCP connection, notifies the server, and fires the disconnect callback.</summary>
 		public void Disconnect()
 		{
+			// Several paths can race to close a connection (peer EOF on the read continuation, a server-requested
+			// close on the writer thread, shutdown). Only the first one tears down and notifies.
+			if (Interlocked.Exchange(ref Disconnected, 1) != 0)
+			{
+				return;
+			}
+
 			try
 			{
 				TcpClient? client = Client;
@@ -283,6 +291,12 @@ namespace Impunity.Networking
 		byte[] PingPacket;
 		byte[] PongPacket;
 
+		/// <summary>Where LAN discovery announces are sent. Defaults to the limited broadcast address on
+		/// <see cref="ImpunityOptions.ClientPort"/>; tests point it somewhere unsendable to exercise the failure path.</summary>
+		internal IPEndPoint AnnounceEndpoint { get; set; }
+		// Only touched on the UDP listener thread.
+		bool AnnounceFailureLogged;
+
 		/// <summary>Number of currently connected TCP clients.</summary>
 		public int ClientsConnected { get => ClientsByRemoteEndpoint.Count; }
 		ConcurrentDictionary<IPEndPoint, ImpunityTCPServerClientContext> ClientsByRemoteEndpoint;
@@ -303,6 +317,8 @@ namespace Impunity.Networking
 			SessionDataPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerSessionDataPacketHeader + Options.GameTypeCode + ":");
 			PingPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPingPacketHeader + Options.GameTypeCode + ":");
 			PongPacket = Encoding.UTF8.GetBytes(ImpunityConstants.ServerPongPacketHeader + Options.GameTypeCode + ":");
+
+			AnnounceEndpoint = new IPEndPoint(IPAddress.Broadcast, Options.ClientPort);
 
 			Running = true;
 		}
@@ -514,7 +530,14 @@ namespace Impunity.Networking
 			ServerUdpSocket = null;
 
 			// Send a ping to ourselves to the Udp receive will hang forever
-			socket.Send(PingPacket, PingPacket.Length, new IPEndPoint(IPAddress.Loopback, Options.ServerPort));
+			try
+			{
+				socket.Send(PingPacket, PingPacket.Length, new IPEndPoint(IPAddress.Loopback, Options.ServerPort));
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogDebug("Couldn't send UDP wake-up ping during shutdown: " + e.Message);
+			}
 
 			socket.Close();
 
@@ -526,12 +549,24 @@ namespace Impunity.Networking
 		{
 			ServerUdpSocket = null;
 
-			ServerUdpSocket = new UdpClient(Options.ServerPort);
-			ServerUdpSocket.EnableBroadcast = true;
-			//ServerUdpSocket.AllowNatTraversal(true); // Breaks things, not sure why
+			try
+			{
+				ServerUdpSocket = new UdpClient(Options.ServerPort);
+				ServerUdpSocket.EnableBroadcast = true;
+				//ServerUdpSocket.AllowNatTraversal(true); // Breaks things, not sure why
+			}
+			catch (Exception e)
+			{
+				// Without UDP the server still works over TCP: no LAN discovery and no unguaranteed delivery.
+				ImpunityLogger.LogError("Couldn't open server UDP socket on port " + Options.ServerPort + ", running TCP-only", e);
+				ServerUdpSocket = null;
+				return;
+			}
 
 			ImpunityLogger.LogInformation("Server UDP Socket listener started");
 
+			// Must not throw: this runs outside the receive loop's try, and the thread is the only thing
+			// answering UDP pings, so an escaping exception would silently drop every client to TCP-only.
 			SendServerAnnounce();
 
 			while (ServerUdpSocket != null && !ImpunityLifecycle.ShuttingDown)
@@ -621,14 +656,34 @@ namespace Impunity.Networking
 				return;
 			}
 
-			ImpunityLogger.LogDebug("Sent server announce");
-			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, Options.ClientPort);
+			IPEndPoint announceEp = AnnounceEndpoint;
 
-			foreach (PerGameTCPServerData gameData in PerGameData.Values)
+			try
 			{
-				ServerUdpSocket?.Send(gameData.AnnouncePacket.Array!, gameData.AnnouncePacket.Count, broadcastEp);
+				foreach (PerGameTCPServerData gameData in PerGameData.Values)
+				{
+					ServerUdpSocket?.Send(gameData.AnnouncePacket.Array!, gameData.AnnouncePacket.Count, announceEp);
+				}
+			}
+			catch (Exception e)
+			{
+				// Typically the OS refusing the broadcast (no route, or macOS Local Network privacy). Discovery is
+				// best-effort: keep the listener alive for pings and session data, and don't repeat the warning on
+				// every search packet.
+				if (!AnnounceFailureLogged)
+				{
+					AnnounceFailureLogged = true;
+					ImpunityLogger.LogWarning("LAN discovery announce to " + announceEp + " failed, server won't be discoverable on the LAN (direct connects still work): " + e.Message);
+				}
+				else
+				{
+					ImpunityLogger.LogDebug("LAN discovery announce failed again: " + e.Message);
+				}
+				return;
 			}
 
+			AnnounceFailureLogged = false;
+			ImpunityLogger.LogDebug("Sent server announce");
 		}
 
 		private void OnPingPacket(IPEndPoint sender)

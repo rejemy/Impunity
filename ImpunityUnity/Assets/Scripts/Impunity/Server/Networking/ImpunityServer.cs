@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,6 +36,10 @@ namespace Impunity.Networking
 		byte[] SendBuffer;
 		ByteWriter SendBufferWriter;
 		Semaphore SendLock;
+
+		// Set once the connection is closed (by the peer, a transport error, or a server-requested close). Pushes
+		// queued for the writer thread before the close was noticed are then dropped instead of hitting a disposed stream.
+		volatile bool Closed;
 
 		/// <summary>Server-assigned unique ID for this connection.</summary>
 		public string ConnectionId { get => ClientContext.ConnectionId; }
@@ -147,6 +153,13 @@ namespace Impunity.Networking
 			SendLock.WaitOne();
 			// Lock is released in the OnDataWritten continuation
 
+			if (Closed)
+			{
+				SendLock.Release();
+				ImpunityLogger.LogDebug("Dropping message type " + messageType + " for closed connection " + ConnectionId);
+				return;
+			}
+
 			try
 			{
 				encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, 0, messageType, results);
@@ -163,8 +176,33 @@ namespace Impunity.Networking
 			catch (Exception e)
 			{
 				SendLock.Release();
+				if (IsClosedConnectionError(e))
+				{
+					// Lost the race with the close: the stream was disposed after the Closed check above.
+					ImpunityLogger.LogDebug("Dropping message type " + messageType + " for closed connection " + ConnectionId + ": " + e.Message);
+					return;
+				}
 				ImpunityLogger.LogError("Exception encoding message: " + e.ToString());
 			}
+		}
+
+		// True when a send failed only because the connection is (being) closed, which is routine after a disconnect
+		// and not worth an error. Encoding failures and other bugs don't match and still log as errors.
+		private bool IsClosedConnectionError(Exception e)
+		{
+			if (e is AggregateException aggregate && aggregate.InnerException != null)
+			{
+				e = aggregate.GetBaseException();
+			}
+
+			if (Closed || e is ObjectDisposedException)
+			{
+				return true;
+			}
+
+			// A peer that vanished mid-write (broken pipe, connection reset) surfaces as an IOException wrapping a
+			// SocketException; the reader side notices the same failure and runs the disconnect.
+			return e is SocketException || (e is IOException && e.InnerException is SocketException);
 		}
 
 		/// <summary>Waits for any pending send to complete, then disconnects the client.</summary>
@@ -172,7 +210,11 @@ namespace Impunity.Networking
 		{
 			SendLock.WaitOne();
 
-			ClientContext.Disconnect();
+			if (!Closed)
+			{
+				Closed = true;
+				ClientContext.Disconnect();
+			}
 
 			SendLock.Release();
 		}
@@ -185,7 +227,14 @@ namespace Impunity.Networking
 
 			if (!writeTask.IsCompletedSuccessfully)
 			{
-				ImpunityLogger.LogError("Error writing to socket: ", writeTask.Exception!);
+				Exception error = writeTask.Exception ?? (Exception)new OperationCanceledException();
+				if (IsClosedConnectionError(error))
+				{
+					ImpunityLogger.LogDebug("Write to closed connection " + ConnectionId + " failed: " + error.GetBaseException().Message);
+					return;
+				}
+
+				ImpunityLogger.LogError("Error writing to socket: ", error);
 
 				// Close socket or something?
 
@@ -237,6 +286,7 @@ namespace Impunity.Networking
 		// Called on socket thread
 		private void ClientDisconnected(IImpunityNetworkServerClientContext client)
 		{
+			Closed = true;
 			NetworkServer.ClientDisconnected(this);
 			GameServer?.ConnectionClosed(this);
 		}
@@ -292,6 +342,9 @@ namespace Impunity.Networking
 
 		/// <summary>Number of currently connected clients.</summary>
 		public int NumConnections { get { return ClientsByConnectionId.Count; } }
+
+		/// <summary>The TCP/UDP transport, exposed for tests that need to reach its internal seams.</summary>
+		internal ImpunityTCPServer TCPTransport { get { return TCPServer; } }
 
 		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer> { gameState }, options)
 		{

@@ -23,6 +23,7 @@ namespace Impunity.Networking
 		bool Running;
 
 		byte[] SearchPacket;
+		volatile bool SearchFailureLogged;
 
 		Action<ServerInfo> OnServerFoundCallback;
 
@@ -132,7 +133,15 @@ namespace Impunity.Networking
 					if (ImpunityUtil.StartsWith(packet, ServerAnnounceHeader))
 					{
 						ImpunityLogger.LogDebug("Got server announce");
-						OnServerAnnounce(packet, ref groupEP);
+						try
+						{
+							OnServerAnnounce(packet, ref groupEP);
+						}
+						catch (Exception e)
+						{
+							// A malformed announce from some other host must not take the finder down.
+							ImpunityLogger.LogWarning("Ignoring bad server announce from " + groupEP + ": " + e.Message);
+						}
 					}
 					// Some other packet, ignore!
 				}
@@ -208,7 +217,26 @@ namespace Impunity.Networking
 			ImpunityLogger.LogDebug("Sending server search");
 
 			IPEndPoint broadcastEp = new IPEndPoint(IPAddress.Broadcast, Options.ServerPort);
-			FinderUdpSocket?.Send(SearchPacket, SearchPacket.Length, broadcastEp);
+			try
+			{
+				FinderUdpSocket?.Send(SearchPacket, SearchPacket.Length, broadcastEp);
+				SearchFailureLogged = false;
+			}
+			catch (Exception e)
+			{
+				// Typically the OS refusing the broadcast (no route, or macOS Local Network privacy). Keep listening:
+				// servers announce unprompted when they start, and Retry() may succeed later. Called from both the
+				// listener thread and Retry() on the main thread, so it must never throw.
+				if (!SearchFailureLogged)
+				{
+					SearchFailureLogged = true;
+					ImpunityLogger.LogWarning("LAN server search broadcast to " + broadcastEp + " failed, still listening for announces: " + e.Message);
+				}
+				else
+				{
+					ImpunityLogger.LogDebug("LAN server search broadcast failed again: " + e.Message);
+				}
+			}
 		}
 	}
 }

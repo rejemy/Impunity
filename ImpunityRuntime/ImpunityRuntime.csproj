@@ -34,6 +34,11 @@
 
 
 <ItemGroup>
+  <!-- Only the dotnet test project (it compiles against this Standalone variant) sees internal test seams -->
+  <InternalsVisibleTo Include="ImpunityTests" />
+</ItemGroup>
+
+<ItemGroup>
    <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/**/*.cs" />
    <Compile Remove="../ImpunityUnity/Assets/Scripts/Impunity/Client/Unity/**/*.cs" />
 </ItemGroup>
