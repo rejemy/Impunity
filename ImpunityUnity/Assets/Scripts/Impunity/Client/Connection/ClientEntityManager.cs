@@ -33,6 +33,9 @@ namespace Impunity.Connection
 		public Type ValueClrType = null!;
 		/// <summary>Generated wrapper that serializes the field's dirty changes to a <see cref="BinaryWriter"/>.</summary>
 		public MethodInfo WriteMethod;
+		/// <summary>Generated wrapper that serializes the field's complete state (pending changes included) and returns
+		/// false, having written nothing, when the field holds nothing to send. Used for creates.</summary>
+		public MethodInfo FullStateWriteMethod;
 		/// <summary>Generated wrapper that reads the field's full initial value from a <see cref="BinaryReader"/>.</summary>
 		public MethodInfo InitMethod;
 		/// <summary>Generated wrapper that reads and applies a delta change for the field from a <see cref="BinaryReader"/>.</summary>
@@ -48,7 +51,7 @@ namespace Impunity.Connection
 		/// types, and the entity type's generated serialization wrapper methods.</summary>
 		public DistributedTypeFieldInfo(byte fieldId, UInt64 fieldBitmask, string fieldName, string? persistedAs, bool isTemporal,
 			GameStateEntityFieldType fieldType, GameStateEntityPropertyValueType fieldValueType,
-			MethodInfo writeMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod, MethodInfo getAsBsonMethod, MethodInfo setFromBsonMethod)
+			MethodInfo writeMethod, MethodInfo fullStateWriteMethod, MethodInfo initMethod, MethodInfo updateMethod, MethodInfo skipMethod, MethodInfo getAsBsonMethod, MethodInfo setFromBsonMethod)
 		{
 			this.FieldId = fieldId;
 			this.FieldBitmask = fieldBitmask;
@@ -58,6 +61,7 @@ namespace Impunity.Connection
 			this.FieldType = fieldType;
 			this.FieldValueType = fieldValueType;
 			this.WriteMethod = writeMethod;
+			this.FullStateWriteMethod = fullStateWriteMethod;
 			this.InitMethod = initMethod;
 			this.UpdateMethod = updateMethod;
 			this.SkipMethod = skipMethod;
@@ -283,7 +287,7 @@ namespace Impunity.Connection
 
 			int entityTypeId = distObj.DistributedEntityType;
 
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _, allProperties: true);
 
 			byte instanceFlags = 0;
 			if (distObj.IsClientAuthoritative)
@@ -373,7 +377,7 @@ namespace Impunity.Connection
 
 			int entityTypeId = distObj.DistributedEntityType;
 
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(distObj, out _, allProperties: true);
 
 			byte instanceFlags = 0;
 			if (distObj.IsClientAuthoritative)
@@ -433,7 +437,7 @@ namespace Impunity.Connection
 
 			int entityTypeId = channel.DistributedEntityType;
 
-			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel, out _);
+			ArraySegment<byte> propertyBytes = GetPropertyBytes(channel, out _, allProperties: true);
 			byte instanceFlags = 0;
 
 			if (channel.IsClientAuthoritative)
@@ -524,7 +528,7 @@ namespace Impunity.Connection
 
 				entityTypeId = createIfNeeded.DistributedEntityType;
 
-				propertyBytes = GetPropertyBytes(createIfNeeded, out _);
+				propertyBytes = GetPropertyBytes(createIfNeeded, out _, allProperties: true);
 
 				if (createIfNeeded.IsClientAuthoritative)
 				{
@@ -807,6 +811,12 @@ namespace Impunity.Connection
 					throw new Exception("Cant find write method for property " + fieldInfo.Name + " on type " + entityType.Name);
 				}
 
+				MethodInfo? fullStateWriteMethod = GetTypeMethodInherited(entityType, "_imp_WriteFullStateWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
+				if (fullStateWriteMethod == null)
+				{
+					throw new Exception("Cant find full state write method for property " + fieldInfo.Name + " on type " + entityType.Name + " (is ImpunityCodeGenerator.dll out of date?)");
+				}
+
 				MethodInfo? initMethod = GetTypeMethodInherited(entityType, "_imp_ReadInitialWrapper_" + fieldInfo.Name, BindingFlags.Instance | BindingFlags.NonPublic);
 				if (initMethod == null)
 				{
@@ -840,7 +850,7 @@ namespace Impunity.Connection
 
 				DistributedTypeFieldInfo dfield = new DistributedTypeFieldInfo(assignedFieldId, fieldBitmask, fieldInfo.Name, fieldPersistedAs,
 																				isTemporalValue, tempFieldValue.FieldType, tempFieldValue.ValueType,
-																				writeMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
+																				writeMethod, fullStateWriteMethod, initMethod, updateMethod, skipMethod, getAsBsonMethod, setFromBsonMethod);
 
 				// The field's first generic argument is the value CLR type (T), i.e. the element type
 				// for arrays/queues and the value type for dictionaries.
@@ -1379,8 +1389,9 @@ namespace Impunity.Connection
 		/// <param name="entity">The entity whose fields to serialize.</param>
 		/// <param name="guaranteed">Receives the entity's <see cref="IDistributedEntity.DirtyGuaranteed"/> flag, i.e.
 		/// whether the produced update must be delivered reliably.</param>
-		/// <param name="allProperties">If true, serialize every field regardless of dirty bits (used for the full initial
-		/// state on create); if false (default), serialize only the currently dirty fields.</param>
+		/// <param name="allProperties">If true, serialize every field's full state regardless of dirty bits, pending
+		/// changes included and default-valued fields left out (used for the initial state on every create path); if
+		/// false (default), serialize only the currently dirty fields' deltas.</param>
 		/// <returns>An <see cref="ArraySegment{T}"/> over the shared buffer holding the encoded property bytes, or a
 		/// default/null segment when there is nothing to send.</returns>
 		public ArraySegment<byte> GetPropertyBytes(IDistributedEntity entity, out bool guaranteed, bool allProperties = false)
@@ -1395,22 +1406,41 @@ namespace Impunity.Connection
 				return null;
 			}
 
-			int startPos = (int)PropertyEncodingWriter.BaseStream.Position;
+			Stream stream = PropertyEncodingWriter.BaseStream;
+			int startPos = (int)stream.Position;
 
 			foreach (var fieldInfo in typeInfo.DistributedFields)
 			{
 				if (fieldInfo == null) continue;
 
-				if ((dirtyBits & fieldInfo.FieldBitmask) != 0)
+				if (allProperties)
+				{
+					// Every field's full state, not just its delta: a create must carry the whole object even when
+					// nothing is dirty (an instance re-created after a delete flushed its fields the first time).
+					// A field with nothing to send is left out, exactly as an untouched field always was.
+					long fieldStart = stream.Position;
+					PropertyEncodingWriter.Write((byte)fieldInfo.FieldId);
+					if (!(bool)fieldInfo.FullStateWriteMethod.Invoke(entity, WriteMethodArgs))
+					{
+						stream.Position = fieldStart;
+					}
+				}
+				else if ((dirtyBits & fieldInfo.FieldBitmask) != 0)
 				{
 					PropertyEncodingWriter.Write((byte)fieldInfo.FieldId);
 					fieldInfo.WriteMethod.Invoke(entity, WriteMethodArgs);
 				}
 			}
 
-			PropertyEncodingWriter.Write((byte)0);
-
 			entity.ClearDirty();
+
+			if (stream.Position == startPos)
+			{
+				// Only reachable with allProperties: every field was at its default. Send nothing, as before.
+				return null;
+			}
+
+			PropertyEncodingWriter.Write((byte)0);
 			int bufferSize = (int)PropertyEncodingWriter.BaseStream.Position - startPos;
 
 			return new ArraySegment<byte>(PropertyEncodingBuffer, startPos, bufferSize);

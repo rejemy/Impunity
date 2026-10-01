@@ -460,6 +460,95 @@ namespace Impunity.Tests
 				"Deleted object was not removed from the channel's DistributedObjects");
 		}
 
+		// A create used to carry only the instance's DIRTY fields. A fresh instance has everything it set dirty, but
+		// one created, deleted and created again (moving an object between channels by re-creating it) had nothing
+		// dirty left from its first create — so the second create reached the server without those fields, and every
+		// client that saw it afterwards (including late joiners, from the server's snapshot) got defaults.
+		[TestCase(false), TestCase(true), Category("LiveState")]
+		public async Task CreateObject_ReCreatedInstance_ReplicatesEveryField(bool clientAuthoritative)
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var c1First = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("first", new IntegrationTestChannel()), AllConnections());
+			var c1Second = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("second", new IntegrationTestChannel()), AllConnections());
+
+			var entity = new IntegrationTestEntity { IsClientAuthoritative = clientAuthoritative };
+			entity.Health.Set(42);
+			entity.DisplayName.Set("Hero");
+			entity.Action.Set(7);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(entity, c1First, false), AllConnections());
+
+			Assert.IsTrue(await Pump(entity.DeleteAsync(null), AllConnections()), "delete failed");
+
+			// One field changes between the delete and the re-create (pending, for a non-authoritative entity);
+			// the rest are untouched since the first create flushed them.
+			entity.Health.Set(43);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(entity, c1Second, false), AllConnections());
+
+			// A client subscribing afterwards gets the object from the server's stored state.
+			var c2Second = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("second", null), AllConnections());
+			await PumpUntil(() => c2Second.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
+
+			var c2Entity = FirstEntity(c2Second);
+			Assert.IsNotNull(c2Entity, "C2 did not replicate the re-created entity");
+			Assert.AreEqual(43, c2Entity.Health.Get(), "field changed before the re-create");
+			Assert.AreEqual("Hero", c2Entity.DisplayName.Get(), "untouched field");
+			Assert.AreEqual(7, c2Entity.Action.Get(), "untouched temporal field");
+		}
+
+		// The collection half of the above, at the encoding level: a create's property bytes must decode to the
+		// full collection contents even when nothing is dirty, and must include changes still pending (not yet
+		// applied to the local value, as for a registered non-authoritative entity) without applying any twice.
+		[Test, Category("Collections")]
+		public async Task CreateObject_FullStateEncoding_CarriesCollectionsAndPendingChanges()
+		{
+			CreateServer();
+			await ConnectLocal();
+			ClientEntityManager manager = LocalGame.EntityManager;
+
+			var source = new IntegrationTestChannel();
+			source.Status.Set("open");
+			source.Grid.Replace(new[] { 1, 2, 3 });
+			source.Chat.Init(3);
+			source.Chat.Add("a");
+			source.Flags.Init();
+			source.Flags.Add(1, "x");
+			source.History.Push("p");
+
+			// Flush, as the first create would: nothing is dirty from here on.
+			manager.GetPropertyBytes(source, out _);
+			Assert.AreEqual(0ul, source.DirtyBits);
+
+			// Attached to a connected manager and not client-authoritative, further edits are only pending.
+			source.Manager = manager;
+			source.Grid.Set(0, 9);
+			source.Chat.Add("b");
+			source.Chat.Add("c");
+			source.Chat.Add("d");
+			source.Flags.Add(2, "y");
+			source.History.Push("q");
+			source.History.SetTop("r");
+			Assert.AreEqual(1, source.Grid.Get(0), "precondition: the edit is pending, not applied locally");
+
+			ArraySegment<byte> encoded = manager.GetPropertyBytes(source, out _, allProperties: true);
+			byte[] copy = new byte[encoded.Count];
+			Array.Copy(encoded.Array, encoded.Offset, copy, 0, encoded.Count);
+
+			var decoded = new IntegrationTestChannel();
+			manager.SetPropertyBytes(decoded, new ArraySegment<byte>(copy), true);
+
+			Assert.AreEqual("open", decoded.Status.Get());
+			CollectionAssert.AreEqual(new[] { 9, 2, 3 }, new[] { decoded.Grid.Get(0), decoded.Grid.Get(1), decoded.Grid.Get(2) });
+			CollectionAssert.AreEqual(new[] { "b", "c", "d" }, (System.Collections.Generic.IEnumerable<string>)decoded.Chat);
+			Assert.AreEqual(2, decoded.Flags.Count);
+			Assert.AreEqual("x", decoded.Flags.Get(1));
+			Assert.AreEqual("y", decoded.Flags.Get(2));
+			CollectionAssert.AreEqual(new[] { "r", "p" }, (System.Collections.Generic.IEnumerable<string>)decoded.History, "top to bottom");
+			Assert.AreEqual(0ul, source.DirtyBits, "a full write consumes the pending state like a flush");
+		}
+
 		// ═══════════════════════════════════════════════════════════
 		// 4. Broadcasts
 		// ═══════════════════════════════════════════════════════════

@@ -251,6 +251,11 @@ namespace SourceGenerator
 			{propInfo.PropertyName}.WriteChangesTo(w);
 		}}");
 
+			Output.AppendLine($@"		private bool _imp_WriteFullStateWrapper_{propInfo.PropertyName}(BinaryWriter w)
+		{{
+			return {propInfo.PropertyName}.WriteFullStateTo(w);
+		}}");
+
 			Output.AppendLine($@"		private void _imp_ReadInitialWrapper_{propInfo.PropertyName}(BinaryReader r)
 		{{
 			{propInfo.PropertyName}.ReadInitialFrom(r);

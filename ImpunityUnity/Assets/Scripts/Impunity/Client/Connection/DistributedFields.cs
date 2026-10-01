@@ -19,6 +19,13 @@ namespace Impunity.Connection
 
 		/// <summary>Serializes this field's pending local changes to the wire and clears the pending state. Called when the entity manager flushes dirty fields.</summary>
 		void WriteChangesTo(BinaryWriter w);
+		/// <summary>Serializes this field's complete state — this client's view of it, including any pending local
+		/// changes — in full-replacement form, and clears the pending state. Used when creating an entity, so the
+		/// create carries every field rather than only the dirty ones: an instance created, deleted and created
+		/// again has nothing dirty left from its first create. Returns false, having written nothing, when the field
+		/// holds nothing to send (a value field at its default with nothing pending, or an uninitialized collection),
+		/// which the receiver's default represents anyway.</summary>
+		bool WriteFullStateTo(BinaryWriter w);
 		/// <summary>Reads the field's full initial state from the stream, applied when the entity is first received.</summary>
 		void ReadInitialFrom(BinaryReader r);
 		/// <summary>Reads an incremental update from the stream and applies it to the current value.</summary>
@@ -187,6 +194,25 @@ namespace Impunity.Connection
 			// Only called if there's a pending value
 			FramingSerializer.Write(Serializer, PendingValue!, w);
 			PendingValue = default;
+		}
+
+		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending value is the newest; otherwise CurrentValue already holds this client's view.
+			if ((Entity.DirtyBits & FieldBitmask) != 0)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (EqualityComparer<T>.Default.Equals(CurrentValue, default!))
+			{
+				return false;
+			}
+
+			FramingSerializer.Write(Serializer, CurrentValue, w);
+			return true;
 		}
 
 		/// <inheritdoc/>
@@ -375,6 +401,25 @@ namespace Impunity.Connection
 		{
 			FramingSerializer.Write(Serializer, PendingValue!, w);
 			PendingValue = default;
+		}
+
+		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// Same as DistributedValue: the server stamps the modification time on receipt, so only the value travels.
+			if ((Entity.DirtyBits & FieldBitmask) != 0)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (EqualityComparer<T>.Default.Equals(CurrentValue, default!))
+			{
+				return false;
+			}
+
+			FramingSerializer.Write(Serializer, CurrentValue, w);
+			return true;
 		}
 
 		/// <inheritdoc/>
@@ -649,6 +694,34 @@ namespace Impunity.Connection
 			{
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
+		}
+
+		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending replacement already carries every later per-index change.
+			if (NewValue != null)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (CurrentValue == null)
+			{
+				return false;
+			}
+
+			// Overlay pending per-index changes. Where the entity applies changes locally they are already in
+			// CurrentValue, and overlaying them again is harmless.
+			w.Write((byte)DistributedCollectionUpdateType.Set);
+			w.Write((ushort)CurrentValue.Length);
+			for (int index = 0; index < CurrentValue.Length; index++)
+			{
+				T value = (Changes != null && Changes.TryGetValue(index, out T changed)) ? changed : CurrentValue[index];
+				FramingSerializer.Write(Serializer, value, w);
+			}
+			Changes?.Clear();
+			return true;
 		}
 
 		/// <inheritdoc/>
@@ -980,6 +1053,49 @@ namespace Impunity.Connection
 			{
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
+		}
+
+		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending replacement already carries every later enqueue.
+			if (NewValue != null)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (CurrentValue == null)
+			{
+				return false;
+			}
+
+			// Pending enqueues are already in CurrentValue where the entity applies changes locally; otherwise
+			// replay them onto a copy (enqueues aren't idempotent, so they must not be applied twice).
+			Queue<T> effective = CurrentValue;
+			bool appliedLocally = Entity.IsClientAuthoritative || Entity.Manager?.Connection == null;
+			if (!appliedLocally && Changes != null && Changes.Count > 0)
+			{
+				effective = new Queue<T>(CurrentValue);
+				foreach (T value in Changes)
+				{
+					if (effective.Count == CurrentCapacity)
+					{
+						effective.Dequeue();
+					}
+					effective.Enqueue(value);
+				}
+			}
+
+			w.Write((byte)DistributedCollectionUpdateType.Set);
+			w.Write((ushort)CurrentCapacity);
+			w.Write((ushort)effective.Count);
+			foreach (T value in effective)
+			{
+				FramingSerializer.Write(Serializer, value, w);
+			}
+			Changes?.Clear();
+			return true;
 		}
 
 		/// <inheritdoc/>
@@ -1430,6 +1546,57 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending replacement already carries every later push/pop/set-top.
+			if (NewValue != null)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			// Pending ops are already in CurrentValue where the entity applies changes locally; otherwise replay
+			// them onto a copy (they aren't idempotent, so they must not be applied twice).
+			List<T>? effective = CurrentValue;
+			bool appliedLocally = Entity.IsClientAuthoritative || Entity.Manager?.Connection == null;
+			if (!appliedLocally && Changes != null && Changes.Count > 0)
+			{
+				effective = CurrentValue != null ? new List<T>(CurrentValue) : new List<T>();
+				foreach (StackChange change in Changes)
+				{
+					switch (change.Op)
+					{
+						case DistributedStackUpdateType.Push:
+							effective.Add(change.Value);
+							break;
+						case DistributedStackUpdateType.Pop:
+							if (effective.Count > 0) effective.RemoveAt(effective.Count - 1);
+							break;
+						case DistributedStackUpdateType.SetTop:
+							if (effective.Count == 0) effective.Add(change.Value);
+							else effective[effective.Count - 1] = change.Value;
+							break;
+					}
+				}
+			}
+			Changes?.Clear();
+
+			if (effective == null)
+			{
+				return false;
+			}
+
+			// Bottom to top, matching WriteChangesTo's full resend.
+			w.Write((byte)DistributedCollectionUpdateType.Set);
+			w.Write((ushort)effective.Count);
+			foreach (T value in effective)
+			{
+				FramingSerializer.Write(Serializer, value, w);
+			}
+			return true;
+		}
+
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
@@ -1774,6 +1941,44 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending replacement already carries every later per-key change.
+			if (NewValue != null)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (CurrentValue == null)
+			{
+				return false;
+			}
+
+			// Overlay pending per-key changes. Where the entity applies changes locally they are already in
+			// CurrentValue, and overlaying them again is harmless.
+			Dictionary<int, T> effective = CurrentValue;
+			if (Changes != null && Changes.Count > 0)
+			{
+				effective = new Dictionary<int, T>(CurrentValue);
+				foreach (var pair in Changes)
+				{
+					effective[pair.Key] = pair.Value;
+				}
+			}
+
+			w.Write((byte)DistributedCollectionUpdateType.Set);
+			w.Write((ushort)effective.Count);
+			foreach (var pair in effective)
+			{
+				w.Write(pair.Key);
+				FramingSerializer.Write(Serializer, pair.Value, w);
+			}
+			Changes?.Clear();
+			return true;
+		}
+
+		/// <inheritdoc/>
 		public void ReadInitialFrom(BinaryReader r)
 		{
 			ReadChangesFrom(r);
@@ -2084,6 +2289,44 @@ namespace Impunity.Connection
 			{
 				w.Write((byte)DistributedCollectionUpdateType.None);
 			}
+		}
+
+		/// <inheritdoc/>
+		public bool WriteFullStateTo(BinaryWriter w)
+		{
+			// A pending replacement already carries every later per-key change.
+			if (NewValue != null)
+			{
+				WriteChangesTo(w);
+				return true;
+			}
+
+			if (CurrentValue == null)
+			{
+				return false;
+			}
+
+			// Overlay pending per-key changes. Where the entity applies changes locally they are already in
+			// CurrentValue, and overlaying them again is harmless.
+			Dictionary<string, T> effective = CurrentValue;
+			if (Changes != null && Changes.Count > 0)
+			{
+				effective = new Dictionary<string, T>(CurrentValue);
+				foreach (var pair in Changes)
+				{
+					effective[pair.Key] = pair.Value;
+				}
+			}
+
+			w.Write((byte)DistributedCollectionUpdateType.Set);
+			w.Write((ushort)effective.Count);
+			foreach (var pair in effective)
+			{
+				w.Write(pair.Key);
+				FramingSerializer.Write(Serializer, pair.Value, w);
+			}
+			Changes?.Clear();
+			return true;
 		}
 
 		/// <inheritdoc/>
