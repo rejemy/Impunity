@@ -170,8 +170,14 @@ namespace Impunity.GameState
 
 		private IStandardDistributableValueType[] Properties = null!;
 
-		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.</summary>
+		/// <summary>Per-field last-received sequence numbers from clients, indexed by propId. Used to discard stale out-of-order updates.
+		/// Only meaningful together with <see cref="LastWriter"/>: each client numbers its updates with its own counter.</summary>
 		private ushort[] RecvSeq = null!;
+
+		/// <summary>Per-field connection whose update set <see cref="RecvSeq"/>, indexed by propId. A seq is only compared
+		/// against an earlier seq from the same writer — seqs from different clients are unrelated counters, and between
+		/// writers arrival order is the order. Null = no writer to compare against.</summary>
+		private GameStateReplicant?[] LastWriter = null!;
 
 		/// <summary>Per-field <see cref="OutSeq"/> value of the last broadcast that carried each field's most recent modification,
 		/// indexed by propId. 0 = never broadcast. Used to reject stale <c>UpdateExclusive</c> optimistic-concurrency updates.</summary>
@@ -194,6 +200,7 @@ namespace Impunity.GameState
 					int maxPropIndex = typeInfo.PackedProperties[typeInfo.PackedProperties.Length - 1].Index;
 					Properties = new IStandardDistributableValueType[maxPropIndex + 1];
 					RecvSeq = new ushort[maxPropIndex + 1];
+					LastWriter = new GameStateReplicant?[maxPropIndex + 1];
 					LastModSeq = new ushort[maxPropIndex + 1];
 
 					foreach (GameStateEntityPropertyDef propDef in typeInfo.PackedProperties)
@@ -405,6 +412,27 @@ namespace Impunity.GameState
 			return LockedWith == null || LockedWith == key;
 		}
 
+		/// <summary>
+		/// Forgets <paramref name="replicant"/> as the last writer of every field. Called when it (re)subscribes: its
+		/// client builds a new entity object whose update seqs restart from zero, so its earlier seqs no longer order
+		/// anything.
+		/// </summary>
+		public void ForgetWriter(GameStateReplicant replicant)
+		{
+			if (LastWriter == null)
+			{
+				return;
+			}
+
+			for (int i = 0; i < LastWriter.Length; i++)
+			{
+				if (LastWriter[i] == replicant)
+				{
+					LastWriter[i] = null;
+				}
+			}
+		}
+
 		/// <summary>Validates the known-field-sequence blob carried by an exclusive (optimistic-concurrency) update.
 		/// The blob is a sequence of <c>[fieldId:byte][clientKnownSeq:ushort little-endian]</c> pairs terminated by a
 		/// <c>0</c> field id. For each field, the update is stale if the client's known seq is behind this entity's
@@ -492,8 +520,8 @@ namespace Impunity.GameState
 					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id: " + propId);
 				}
 
-				// Check per-field sequence number to discard stale out-of-order updates
-				if (seq != 0 && RecvSeq != null && !((short)(seq - RecvSeq[propId]) > 0))
+				// Check per-field sequence number to discard stale out-of-order updates from the same writer
+				if (seq != 0 && RecvSeq != null && LastWriter[propId] == updatedBy && !((short)(seq - RecvSeq[propId]) > 0))
 				{
 					// Stale update for this field — skip its data without applying. Still stamp LastModSeq:
 					// the field's bytes are relayed to listeners in the original message under broadcastSeq, so
@@ -512,6 +540,7 @@ namespace Impunity.GameState
 				if (RecvSeq != null && seq != 0)
 				{
 					RecvSeq[propId] = seq;
+					LastWriter[propId] = updatedBy;
 				}
 
 				if (broadcastSeq != 0 && LastModSeq != null)
@@ -649,6 +678,13 @@ namespace Impunity.GameState
 			Listeners.Add(replicant.Id, replicant);
 			replicant.AddSubscribedChannel(this);
 			IdleSinceMillis = 0;
+
+			// The subscriber gets fresh entity objects whose update seqs restart from zero.
+			ForgetWriter(replicant);
+			foreach (GameStateObject obj in Members.Values)
+			{
+				obj.ForgetWriter(replicant);
+			}
 
 			if (!sendCreate || InLoadingState)
 			{

@@ -1117,6 +1117,114 @@ namespace Impunity.Tests
 		}
 
 		// ═══════════════════════════════════════════════════════════
+		// 8b. Several writers to one field
+		// ═══════════════════════════════════════════════════════════
+		//
+		// Each client numbers its updates to an entity with its own SendSeq, so the server's per-field
+		// out-of-order guard must only compare seqs from the same writer. The checks read the SERVER's value
+		// through a fresh re-subscribe: a write the server skipped is still relayed, so live listeners
+		// cannot tell.
+
+		// Re-subscribes C2 to the channel and returns its fresh channel + the server's current copy of the entity.
+		async Task<(IntegrationTestChannel channel, IntegrationTestEntity entity)> ResubscribeRemote(IntegrationTestChannel c2Channel, string channelName)
+		{
+			await Pump(c2Channel.UnsubscribeAsync(immediate: true), AllConnections());
+			var fresh = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+			await PumpUntil(() => fresh.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
+			return (fresh, FirstEntity(fresh));
+		}
+
+		// SetupTwoClientEntity, plus C2's channel for re-subscribing.
+		async Task<(IntegrationTestEntity c1Entity, IntegrationTestChannel c2Channel, IntegrationTestEntity c2Entity)> SetupMultiWriter(string channelName)
+		{
+			var c1Channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+
+			var c1Entity = new IntegrationTestEntity();
+			c1Entity.Health.Set(100);
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(c1Entity, c1Channel, false), AllConnections());
+
+			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+			await PumpUntil(() => c2Channel.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
+
+			return (c1Entity, c2Channel, FirstEntity(c2Channel));
+		}
+
+		[Test, Category("MultiWriter")]
+		public async Task MultiWriter_SecondWriterWithLowerSendSeq_IsStoredByServer()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var (c1Entity, c2Channel, c2Entity) = await SetupMultiWriter("mw1");
+
+			// C1 runs its SendSeq well ahead of C2's.
+			for (int i = 1; i <= 6; i++)
+			{
+				c1Entity.Health.Set(i);
+				await PumpUntil(() => c2Entity.Health.Get() == i, TimeSpan.FromSeconds(3), AllConnections());
+			}
+
+			// C2's first write carries SendSeq 1.
+			c2Entity.Health.Set(77);
+			await PumpUntil(() => c1Entity.Health.Get() == 77, TimeSpan.FromSeconds(3), AllConnections());
+
+			var (_, serverCopy) = await ResubscribeRemote(c2Channel, "mw1");
+			Assert.AreEqual(77, serverCopy.Health.Get(), "The server skipped a write it relayed, so late joiners see stale state");
+		}
+
+		[Test, Category("MultiWriter")]
+		public async Task MultiWriter_ExclusiveWinWithLowerSendSeq_IsStoredByServer()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var (c1Entity, c2Channel, c2Entity) = await SetupMultiWriter("mw2");
+
+			for (int i = 1; i <= 6; i++)
+			{
+				c1Entity.Health.Set(i);
+				await PumpUntil(() => c2Entity.Health.Get() == i, TimeSpan.FromSeconds(3), AllConnections());
+			}
+
+			bool done = false; ImpunityErrorResponse err = null;
+			c2Entity.Health.Set(88);
+			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.IsNull(err, "Up-to-date exclusive write should win");
+
+			var (_, serverCopy) = await ResubscribeRemote(c2Channel, "mw2");
+			Assert.AreEqual(88, serverCopy.Health.Get(), "The server reported a win for a write it never stored");
+		}
+
+		[Test, Category("MultiWriter")]
+		public async Task MultiWriter_WriterAfterResubscribe_IsStoredByServer()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var (c2Channel, c2Entity) = await SetupTwoClientChannel("mw3");
+
+			// C2 runs its SendSeq up, then re-subscribes: the new entity object starts over at SendSeq 0.
+			for (int i = 1; i <= 6; i++)
+			{
+				c2Entity.Health.Set(i);
+				await PumpUntil(() => c2Entity.Health.Get() == i, TimeSpan.FromSeconds(3), AllConnections());
+			}
+
+			var (c2FreshChannel, c2Fresh) = await ResubscribeRemote(c2Channel, "mw3");
+			Assert.AreEqual(6, c2Fresh.Health.Get());
+
+			c2Fresh.Health.Set(99);
+			await PumpUntil(() => c2Fresh.Health.Get() == 99, TimeSpan.FromSeconds(3), AllConnections());
+
+			var (_, serverCopy) = await ResubscribeRemote(c2FreshChannel, "mw3");
+			Assert.AreEqual(99, serverCopy.Health.Get(), "A re-subscribed writer's restarted SendSeq was treated as stale");
+		}
+
+		// ═══════════════════════════════════════════════════════════
 		// 9. Delete-On-Disconnect
 		// ═══════════════════════════════════════════════════════════
 
