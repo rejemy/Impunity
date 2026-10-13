@@ -1162,7 +1162,9 @@ namespace Impunity.GameState
 		/// <summary>Number of channels currently loaded into live memory.</summary>
 		public int LiveChannelCount { get { return Channels.Count; } }
 
-		uint NextId;
+		// Starts at 1: clients treat entity id 0 as "not registered" (an entity that was never created or
+		// is already gone), so the first entity created must never get it.
+		uint NextId = 1;
 
 		private BinaryReader TempBufferReader;
 		private BinaryWriter TempBufferWriter;

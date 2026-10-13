@@ -883,6 +883,38 @@ namespace Impunity.Tests
 			Assert.AreEqual(60, c1Entity.Health.Get(), "Value did not replicate to C1");
 		}
 
+		// The first entity a server registers must not get id 0: clients read id 0 as "not registered", so
+		// an exclusive update of it was refused locally, without ever reaching the server. A persisted
+		// channel reloaded right after a restart is that first entity (it takes over its load proxy's id).
+		[Test, Category("ExclusiveUpdate")]
+		public async Task Exclusive_ChannelReloadedFirstAfterRestart_Succeeds()
+		{
+			CreateServer();
+			await ConnectLocal();
+
+			await Pump(LocalGame.EntityManager.SubscribeToChannelAsync(
+				"firstreload", new MigTestChannel { IsPersisted = true }), LocalGame);
+
+			// DB actions run in FIFO order on one worker, so once this read replies the channel has landed.
+			await Pump(LocalGame.FindDocumentByIdAsync(IntegrationTestCollections.ITEMS, "flush"), LocalGame);
+
+			DisposeConnection(LocalGame);
+			GameServer.Dispose();
+			GameServer = GameStateServer.Open("test", null, GameStatePath, Options);
+			await ConnectLocal();
+
+			var reloaded = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync<MigTestChannel>("firstreload", null), LocalGame);
+			Assert.IsNotNull(reloaded, "Persisted channel did not reload");
+			Assert.AreNotEqual(0u, reloaded.DistributedEntityId, "The server's first entity got id 0, which clients treat as unregistered");
+
+			bool done = false; ImpunityErrorResponse err = null;
+			reloaded.Label.Set("updated");
+			reloaded.UpdateExclusive((e) => { done = true; err = e; });
+			await PumpUntil(() => done, TimeSpan.FromSeconds(3), LocalGame);
+
+			Assert.IsNull(err, "Exclusive update of the server's first entity should succeed");
+		}
+
 		[Test, Category("ExclusiveUpdate")]
 		public async Task Exclusive_StaleRejectsWholeUpdate()
 		{
