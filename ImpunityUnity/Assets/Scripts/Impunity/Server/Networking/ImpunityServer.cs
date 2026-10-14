@@ -335,7 +335,8 @@ namespace Impunity.Networking
 		BlockingCollection<PendingSend> PendingWrite;
 
 		Thread? NetworkWriterThread;
-		bool Running;
+		// Read on the game server thread by QueueNetworkAction.
+		volatile bool Running;
 
 		/// <summary>The local TCP endpoint the server is listening on.</summary>
 		public IPEndPoint TCPEndpoint { get; private set; } = null!;
@@ -502,7 +503,24 @@ namespace Impunity.Networking
 		// called on game server thread
 		internal void QueueNetworkAction(ServerSideNetworkConnectionProxy target, GameStateActionBase action)
 		{
-			PendingWrite.Add(new PendingSend(target, action));
+			// An in-process game server's live thread can still be finishing an action that relays to remote clients
+			// while Dispose closes the write queue. Those sends have nowhere to go, so drop them quietly.
+			try
+			{
+				if (!Running || PendingWrite.IsAddingCompleted)
+				{
+					ImpunityLogger.LogDebug("Dropping " + action.GetType().Name + " for connection " + target.ConnectionId + ": server shutting down");
+					return;
+				}
+
+				PendingWrite.Add(new PendingSend(target, action));
+			}
+			catch (InvalidOperationException e)
+			{
+				// Lost the race with Dispose: the queue was completed (or, once the writer thread exited, disposed —
+				// ObjectDisposedException is an InvalidOperationException) after the check above.
+				ImpunityLogger.LogDebug("Dropping " + action.GetType().Name + " for connection " + target.ConnectionId + ": server shutting down: " + e.Message);
+			}
 		}
 
 

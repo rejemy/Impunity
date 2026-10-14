@@ -9,6 +9,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -308,6 +309,34 @@ namespace Impunity.Tests
 			// A server-requested close after the peer already went away is a no-op, not a second disconnect.
 			proxy.ProcessCloseConnection();
 			CollectionAssert.IsEmpty(Log.At("error"));
+		}
+
+		/// <summary>Disposing the host while its in-process game server's live thread is still relaying an action to remote
+		/// clients used to throw from the closed write queue ("[On Live state worker thread] Exception running action").
+		/// Those sends are dropped at debug level instead.</summary>
+		[Test]
+		public void QueueNetworkAction_AfterServerDisposed_DropsQuietly()
+		{
+			CreateServer();
+			StartTcpServer();
+			var context = new FakeClientContext();
+			TcpServer.ClientConnected(context);
+			var proxy = (ServerSideNetworkConnectionProxy)context.OnClientDisconnected.Target;
+
+			ImpunityServer server = TcpServer;
+			TcpServer = null;
+			server.Dispose();
+
+			Assert.DoesNotThrow(() => proxy.CloseConnectionRequest(), "queueing after Dispose");
+
+			// The live thread can pass the shutdown check just before Dispose completes the queue (and the writer
+			// thread then disposes it): simulate losing that race by making the server look like it is still running.
+			typeof(ImpunityServer).GetField("Running", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(server, true);
+			Assert.DoesNotThrow(() => proxy.CloseConnectionRequest(), "queueing after the write queue was disposed");
+
+			CollectionAssert.IsEmpty(Log.At("error"));
+			Assert.AreEqual(2, Log.At("debug").Count(m => m.Contains("server shutting down")), "Log:\n" + Log.Dump());
+			Assert.AreEqual(0, context.Sends);
 		}
 
 		/// <summary>The stream can be disposed a moment before the transport reports the disconnect; a send landing
