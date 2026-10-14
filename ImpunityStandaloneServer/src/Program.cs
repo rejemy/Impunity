@@ -94,6 +94,10 @@ ImpunityOptions impOptions = new()
 	ServerPort = config.tcp_port,
 	GameTypeCode = config.game_type_code
 };
+if (config.connection_timeout_ms.HasValue)
+{
+	impOptions.ConnectionTimeoutMillis = config.connection_timeout_ms.Value;
+}
 
 WorldService worldService = new WorldService(config.datapath, config.worlds, impOptions);
 builder.Services.AddSingleton(worldService);

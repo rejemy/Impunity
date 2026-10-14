@@ -78,8 +78,20 @@ namespace Impunity.Connection
 		/// <see cref="Connect"/> to reclaim per-connection server state (locks, ownership) after a reconnect.
 		/// </summary>
 		public string ConnectionKey { get; set; }
-		/// <summary>True once the handshake and initial clock sync have completed successfully.</summary>
+		/// <summary>True once the handshake and initial clock sync have completed successfully. A remote connection goes
+		/// back to false (on the main thread, during <see cref="Update"/>) when it is lost — see
+		/// <see cref="RemoteGameConnection.OnNetworkError"/>.</summary>
 		public bool Connected { get; private set; }
+
+		/// <summary>Marks the connection as no longer connected. Called on the main thread by a subclass that has lost its transport.</summary>
+		protected void MarkDisconnected()
+		{
+			Connected = false;
+		}
+
+		/// <summary>Hook for subclasses to pick up server-dictated settings from the handshake reply. Runs on the main thread, before the clock sync.</summary>
+		/// <param name="result">The server's reply to the establish-connection action.</param>
+		protected virtual void OnHandshakeAccepted(EstablishConnectResult result) { }
 
 		/// <summary>
 		/// Set after <see cref="Connect"/> when this (higher-version) client has been offered a data migration: the world
@@ -153,6 +165,7 @@ namespace Impunity.Connection
 
 
 				this.ConnectionId = result.ConnectionId;
+				OnHandshakeAccepted(result);
 				if (result.MigrationRequired)
 				{
 					PendingMigration = new MigrationRequest(result.MigrationFromVersion, result.MigrationToVersion);

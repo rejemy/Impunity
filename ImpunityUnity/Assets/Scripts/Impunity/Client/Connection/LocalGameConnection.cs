@@ -102,6 +102,9 @@ namespace Impunity.Connection
 		/// <summary>Always false — there is no unreliable transport in-process, so every action is effectively guaranteed.</summary>
 		public bool SupportsUnguaranteed { get => false; }
 
+		/// <summary>Always 0 — an in-process connection can't go silent, so it has no keepalives.</summary>
+		public int ConnectionTimeoutMillis { get => 0; }
+
 
 		/// <summary>
 		/// <see cref="IServerSideConnectionProxy"/> hook: the server is pushing a state message (channel/object create,

@@ -26,6 +26,18 @@ namespace Impunity.Networking
 		}
 	}
 
+	/// <summary>Sentinel action queued to the network writer thread to send a keepalive. Stateless (the recipient travels
+	/// in the queue entry), so one instance is shared.</summary>
+	internal class KeepAliveAction : LocalGameStateAction
+	{
+		public static readonly KeepAliveAction Instance = new KeepAliveAction();
+
+		protected override void DoAction(GameStateServer game)
+		{
+
+		}
+	}
+
 	/// <summary>Server-side proxy for a remote client connection. Handles message parsing, send serialization (via semaphore), and connection lifecycle. One instance per connected client.</summary>
 	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy, IDisposable
 	{
@@ -41,6 +53,15 @@ namespace Impunity.Networking
 		// queued for the writer thread before the close was noticed are then dropped instead of hitting a disposed stream.
 		volatile bool Closed;
 
+		// Keepalive bookkeeping (see ImpunityKeepAlive). LastReceived is stamped on the socket thread for every inbound
+		// message, keepalives included; LastGuaranteedSend on the writer thread. Only guaranteed sends count as proof
+		// the client is hearing from us: UDP can be silently dropped, which would otherwise suppress the keepalives the
+		// client needs. KeepAliveQueued keeps the sweep from stacking keepalives behind a backed-up writer queue.
+		long LastReceivedTimestamp;
+		long LastGuaranteedSendTimestamp;
+		int KeepAliveQueued;
+		int DroppedForSilence;
+
 		/// <summary>Server-assigned unique ID for this connection.</summary>
 		public string ConnectionId { get => ClientContext.ConnectionId; }
 		/// <summary>Client-provided or auto-generated key for reconnection.</summary>
@@ -54,6 +75,9 @@ namespace Impunity.Networking
 		/// <summary>Whether the client supports UDP delivery.</summary>
 		public bool SupportsUnguaranteed { get => ClientContext.SupportsUnguaranteed; }
 
+		/// <inheritdoc/>
+		public int ConnectionTimeoutMillis { get => NetworkServer.ConnectionTimeoutMillis; }
+
 
 		public ServerSideNetworkConnectionProxy(ImpunityServer server, IImpunityNetworkServerClientContext clientContext)
 		{
@@ -62,6 +86,10 @@ namespace Impunity.Networking
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			SendBufferWriter = new ByteWriter(SendBuffer);
 			SendLock = new Semaphore(1, 1);
+
+			long now = ImpunityKeepAlive.Now();
+			LastReceivedTimestamp = now;
+			LastGuaranteedSendTimestamp = now;
 
 			ClientContext.OnMessageRecieved = ClientMessageReceived;
 			ClientContext.OnNetworkError = ClientNetworkError;
@@ -74,7 +102,16 @@ namespace Impunity.Networking
 		{
 			MessageHeaderStruct msg;
 
+			Interlocked.Exchange(ref LastReceivedTimestamp, ImpunityKeepAlive.Now());
+
 			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
+
+			if (msg.MessageType == (ushort)ClientActionType.KEEPALIVE)
+			{
+				// Its only job was to refresh LastReceivedTimestamp. Accepted before the handshake completes too: the
+				// client starts its keepalive clock as soon as the transport is up.
+				return;
+			}
 
 			if (GameServer == null && msg.MessageType != (ushort)ClientActionType.ESTABLISH_CONNECTION)
 			{
@@ -166,6 +203,7 @@ namespace Impunity.Networking
 
 				if (guaranteed)
 				{
+					Interlocked.Exchange(ref LastGuaranteedSendTimestamp, ImpunityKeepAlive.Now());
 					ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
 				}
 				else
@@ -203,6 +241,56 @@ namespace Impunity.Networking
 			// A peer that vanished mid-write (broken pipe, connection reset) surfaces as an IOException wrapping a
 			// SocketException; the reader side notices the same failure and runs the disconnect.
 			return e is SocketException || (e is IOException && e.InnerException is SocketException);
+		}
+
+		/// <summary>Sends a header-only keepalive. Called on the network writer thread.</summary>
+		internal void SendKeepAlive()
+		{
+			Interlocked.Exchange(ref KeepAliveQueued, 0);
+			SendMessage((ushort)ServerActionType.KEEPALIVE, 0, true, null!);
+		}
+
+		/// <summary>Queues a keepalive for the writer thread unless one is already waiting there. Called on the keepalive sweep thread.</summary>
+		internal void QueueKeepAlive()
+		{
+			if (Interlocked.CompareExchange(ref KeepAliveQueued, 1, 0) == 0)
+			{
+				NetworkServer.QueueNetworkAction(this, KeepAliveAction.Instance);
+			}
+		}
+
+		/// <summary>Milliseconds since anything at all arrived from the client.</summary>
+		internal long MillisSinceReceived(long now)
+		{
+			return ImpunityKeepAlive.MillisSince(ref LastReceivedTimestamp, now);
+		}
+
+		/// <summary>Milliseconds since a guaranteed message was last handed to the transport for this client.</summary>
+		internal long MillisSinceGuaranteedSend(long now)
+		{
+			return ImpunityKeepAlive.MillisSince(ref LastGuaranteedSendTimestamp, now);
+		}
+
+		/// <summary>
+		/// Drops a client that has gone silent for longer than the connection timeout. Returns false if it was already
+		/// dropped. Called on the keepalive sweep thread.
+		/// </summary>
+		/// <remarks>
+		/// Deliberately does not take <c>SendLock</c> the way <see cref="ProcessCloseConnection"/> does: a dead peer stops
+		/// draining its socket, so a write to it can stay pending (holding the lock) indefinitely. Closing the transport
+		/// out from under that write faults it, which releases the lock and unblocks the writer thread. The transport's
+		/// disconnect then runs the normal close path, so the game server cleans up exactly as for a clean disconnect.
+		/// </remarks>
+		internal bool DropForSilence()
+		{
+			if (Interlocked.Exchange(ref DroppedForSilence, 1) != 0)
+			{
+				return false;
+			}
+
+			Closed = true;
+			ClientContext.Disconnect();
+			return true;
 		}
 
 		/// <summary>Waits for any pending send to complete, then disconnects the client.</summary>
@@ -347,6 +435,20 @@ namespace Impunity.Networking
 		/// <summary>The TCP/UDP transport, exposed for tests that need to reach its internal seams.</summary>
 		internal ImpunityTCPServer TCPTransport { get { return TCPServer; } }
 
+		/// <summary>
+		/// The silence window this server enforces on every remote connection and reports to clients in the handshake:
+		/// <see cref="ImpunityOptions.ConnectionTimeoutMillis"/> raised to <see cref="ImpunityKeepAlive.MinTimeoutMillis"/>,
+		/// or 0 when keepalives are disabled.
+		/// </summary>
+		public int ConnectionTimeoutMillis { get; private set; }
+
+		/// <summary>Test seam: when set, the server stops sending keepalives (it still drops silent clients), so a test can
+		/// make the server look dead to an idle client.</summary>
+		internal volatile bool KeepAlivesSuppressed = false;
+
+		Thread? KeepAliveThread;
+		readonly ManualResetEventSlim KeepAliveStop = new ManualResetEventSlim(false);
+
 		public ImpunityServer(GameStateServer gameState, ImpunityOptions options) : this(new List<GameStateServer> { gameState }, options)
 		{
 		}
@@ -357,6 +459,12 @@ namespace Impunity.Networking
 			GameServers = new Dictionary<string, GameStateServer>();
 
 			Options = options ?? new ImpunityOptions();
+
+			ConnectionTimeoutMillis = ImpunityKeepAlive.EffectiveTimeoutMillis(Options);
+			if (ConnectionTimeoutMillis > Options.ConnectionTimeoutMillis && Options.ConnectionTimeoutMillis > 0)
+			{
+				ImpunityLogger.LogWarning("ConnectionTimeoutMillis " + Options.ConnectionTimeoutMillis + " is below the minimum, using " + ConnectionTimeoutMillis);
+			}
 
 			TCPServer = new ImpunityTCPServer(Options);
 			TCPServer.OnClientConnected = ClientConnected;
@@ -424,7 +532,60 @@ namespace Impunity.Networking
 			NetworkWriterThread.Name = "Network write";
 			NetworkWriterThread.Start();
 
+			if (ConnectionTimeoutMillis > 0)
+			{
+				KeepAliveThread = new Thread(new ThreadStart(KeepAliveThreadMain));
+				KeepAliveThread.IsBackground = true;
+				KeepAliveThread.Name = "Connection keepalive";
+				KeepAliveThread.Start();
+			}
+
 			TCPEndpoint = TCPServer.Listen();
+		}
+
+		// Sweeps every connection on a short period: drops any client silent for the full timeout, and queues a
+		// keepalive to any client we haven't sent to for a third of it. Runs on its own thread rather than the writer's
+		// because a write to a dead client can block the writer thread — the very thing the sweep has to be able to undo.
+		private void KeepAliveThreadMain()
+		{
+			int timeout = ConnectionTimeoutMillis;
+			int interval = ImpunityKeepAlive.IntervalMillis(timeout);
+			// Granularity of detection: a dead client is dropped at most this long after its window expires.
+			int sweepPeriod = Math.Max(10, Math.Min(1000, interval / 4));
+
+			while (!ImpunityLifecycle.ShuttingDown)
+			{
+				if (KeepAliveStop.Wait(sweepPeriod))
+				{
+					break;
+				}
+
+				long now = ImpunityKeepAlive.Now();
+				foreach (ServerSideNetworkConnectionProxy proxy in ClientsByConnectionId.Values)
+				{
+					try
+					{
+						long silentFor = proxy.MillisSinceReceived(now);
+						if (silentFor >= timeout)
+						{
+							if (proxy.DropForSilence())
+							{
+								ImpunityLogger.LogWarning("Dropping connection " + proxy.ConnectionId + ": nothing received for " + silentFor + "ms (timeout " + timeout + "ms)");
+							}
+							continue;
+						}
+
+						if (!KeepAlivesSuppressed && proxy.MillisSinceGuaranteedSend(now) >= interval)
+						{
+							proxy.QueueKeepAlive();
+						}
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in connection keepalive sweep for " + proxy.ConnectionId, e);
+					}
+				}
+			}
 		}
 
 		private void WriterThreadMain()
@@ -465,6 +626,10 @@ namespace Impunity.Networking
 			if (action is CloseClientConnectionAction)
 			{
 				clientInfo.ProcessCloseConnection();
+			}
+			else if (action is KeepAliveAction)
+			{
+				clientInfo.SendKeepAlive();
 			}
 			else if (action is ServerActionBase)
 			{
@@ -528,6 +693,10 @@ namespace Impunity.Networking
 		/// <summary>Shuts down the server: disposes TCP, stops the writer thread, and removes game state listeners.</summary>
 		public void Dispose()
 		{
+			KeepAliveStop.Set();
+			KeepAliveThread?.Join();
+			KeepAliveThread = null;
+
 			TCPServer.Dispose();
 
 			Running = false;

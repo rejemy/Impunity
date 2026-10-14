@@ -45,6 +45,10 @@ namespace Impunity.Tests
 			};
 		}
 
+		/// <summary>The server's connection_timeout_ms. Every standalone leg runs at the minimum so the whole battery
+		/// also exercises keepalives on healthy connections (and a silence test only waits ~10s).</summary>
+		public int ConnectionTimeoutMillis => ImpunityKeepAlive.MinTimeoutMillis;
+
 		public static StandaloneServerFixture Launch()
 		{
 			var fixture = new StandaloneServerFixture();
@@ -106,6 +110,7 @@ namespace Impunity.Tests
 				"  \"game_type_code\": \"Test\",\n" +
 				$"  \"http_port\": {HttpPort},\n" +
 				$"  \"tcp_port\": {TcpPort},\n" +
+				$"  \"connection_timeout_ms\": {ConnectionTimeoutMillis},\n" +
 				"  \"datapath\": \"worlds\",\n" +
 				"  \"worlds\": [\n" +
 				$"    {{ \"id\": \"{WorldId}\", \"name\": \"Transport Test World\", \"password\": \"{Password}\", \"max_players\": 16 }}\n" +

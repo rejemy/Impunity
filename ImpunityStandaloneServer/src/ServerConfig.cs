@@ -31,6 +31,10 @@ public class ServerConfig
 
 	public string? server_hostname { get; set; }
 
+	// How long a connection may be silent before it's dropped (ImpunityOptions.ConnectionTimeoutMillis). Null keeps the
+	// library default; values below the minimum are raised to it; 0 disables keepalives.
+	public int? connection_timeout_ms { get; set; }
+
 	public List<WorldConfig>? worlds { get; set; }
 
 

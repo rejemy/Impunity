@@ -20,6 +20,8 @@ namespace Impunity.GameState
 		GameStateReplicant ConnectionReplicant { get; set; }
 		/// <summary>Whether this connection supports UDP delivery.</summary>
 		bool SupportsUnguaranteed { get; }
+		/// <summary>The silence window enforced on this connection (see <see cref="ImpunityOptions.ConnectionTimeoutMillis"/>), reported to the client in the handshake. 0 when keepalives don't apply, as for a local connection.</summary>
+		int ConnectionTimeoutMillis { get; }
 
 		/// <summary>Queues an action result to be sent back to the client.</summary>
 		void ReportActionResult(GameStateActionBase action);
@@ -290,6 +292,7 @@ namespace Impunity.GameState
 
 			EstablishConnectResult result = new EstablishConnectResult();
 			result.ConnectionId = proxy.ConnectionId;
+			result.ConnectionTimeoutMillis = proxy.ConnectionTimeoutMillis;
 
 			if (!ValidateFormat(format))
 			{

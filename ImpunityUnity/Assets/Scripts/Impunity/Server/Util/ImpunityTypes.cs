@@ -65,6 +65,75 @@ namespace Impunity
 		/// gone for good. 0 or negative disables idle-channel cleanup.
 		/// </summary>
 		public int IdleChannelTimeoutMillis = 5 * 60 * 1000;
+		/// <summary>
+		/// Upper bound, in milliseconds, on how long a remote connection can be silent before the other end declares it
+		/// dead. The server drops a client it has heard nothing from for this long — releasing its locks, deleting its
+		/// delete-on-disconnect entities, and so on, exactly as for a clean disconnect — and a client that has heard
+		/// nothing from the server for this long fails with <see cref="ImpunityErrorCode.ClientConnectionBrokenError"/>.
+		/// Both ends send a small keepalive whenever they have sent nothing for a third of this window, so an idle but
+		/// healthy connection is never dropped.
+		/// <para>
+		/// This is a <b>server</b> setting: clients adopt the server's value during the handshake, so the two ends can
+		/// never disagree. Values below <see cref="ImpunityKeepAlive.MinTimeoutMillis"/> are raised to it. 0 or negative
+		/// disables keepalives and silence detection entirely (only the OS noticing a broken socket ends a connection).
+		/// </para>
+		/// </summary>
+		public int ConnectionTimeoutMillis = 30 * 1000;
+
+		/// <summary>Floor applied to <see cref="ConnectionTimeoutMillis"/>. Test seam only: lowered by tests so silence
+		/// detection can be exercised in a couple of seconds instead of <see cref="ImpunityKeepAlive.MinTimeoutMillis"/>.</summary>
+		internal int ConnectionTimeoutFloorMillis = ImpunityKeepAlive.MinTimeoutMillis;
+	}
+
+	/// <summary>
+	/// Timing rules for connection keepalives, shared by client and server so both derive the same numbers from one
+	/// timeout. See <see cref="ImpunityOptions.ConnectionTimeoutMillis"/>.
+	/// </summary>
+	public static class ImpunityKeepAlive
+	{
+		/// <summary>
+		/// The shortest silence window a server may be configured with. A keepalive is sent after a third of the
+		/// window, so at this floor one goes out at least every ~3.3s and the receiver still tolerates it arriving
+		/// ~6.7s late. That slack has to absorb things that delay a keepalive on a perfectly healthy connection: TCP
+		/// retransmission backoff after packet loss (the RTO starts around 1s and doubles, so two consecutive losses
+		/// cost ~3s), stop-the-world GC pauses, thread-pool starvation on a busy server, and Wi-Fi power-save or
+		/// cellular radio wake-up latency. Shorter windows turn those hiccups into false disconnects, which are far more
+		/// disruptive to a game (locks dropped, entities deleted) than a few extra seconds of detection time.
+		/// </summary>
+		public const int MinTimeoutMillis = 10 * 1000;
+
+		/// <summary>A keepalive is sent once nothing has been sent for <c>timeout / IntervalDivisor</c>.</summary>
+		public const int IntervalDivisor = 3;
+
+		/// <summary>The silence window a server actually enforces for these options: 0 when disabled, otherwise
+		/// <see cref="ImpunityOptions.ConnectionTimeoutMillis"/> raised to the floor.</summary>
+		public static int EffectiveTimeoutMillis(ImpunityOptions options)
+		{
+			if (options.ConnectionTimeoutMillis <= 0)
+			{
+				return 0;
+			}
+			return Math.Max(options.ConnectionTimeoutMillis, options.ConnectionTimeoutFloorMillis);
+		}
+
+		/// <summary>How long a sender may stay quiet before it sends a keepalive, for a given silence window.</summary>
+		public static int IntervalMillis(int timeoutMillis)
+		{
+			return timeoutMillis / IntervalDivisor;
+		}
+
+		// Keepalive bookkeeping runs on a monotonic clock, so a wall-clock correction (NTP step, user changing the time)
+		// can't fake a long silence. Timestamps are Stopwatch ticks, stored and read with Interlocked so they're atomic
+		// on 32-bit platforms too.
+		internal static long Now()
+		{
+			return System.Diagnostics.Stopwatch.GetTimestamp();
+		}
+
+		internal static long MillisSince(ref long timestamp, long now)
+		{
+			return (now - System.Threading.Interlocked.Read(ref timestamp)) * 1000 / System.Diagnostics.Stopwatch.Frequency;
+		}
 	}
 
 	/// <summary>Flags describing how a game state entity instance behaves.</summary>

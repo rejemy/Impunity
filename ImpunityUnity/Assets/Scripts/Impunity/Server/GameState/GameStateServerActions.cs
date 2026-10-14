@@ -11,6 +11,9 @@ namespace Impunity.GameState
 	public enum ServerActionType
 	{
 		CLIENT_REPLY = 1,
+		// Header-only liveness ping, sent when the server has sent a client nothing for a while. Consumed by the
+		// client's network layer on receipt and never deserialized.
+		KEEPALIVE = 2,
 
 		CHANNEL_CREATE_MESSAGE = 100,
 		OBJECT_CREATE_MESSAGE = 101,

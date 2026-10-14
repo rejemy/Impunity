@@ -166,14 +166,18 @@ namespace Impunity
 
 			foreach (ClientActionType actionTypeId in Enum.GetValues(typeof(ClientActionType)))
 			{
+				// Header-only message with no body class
+				if (actionTypeId == ClientActionType.KEEPALIVE)
+					continue;
+
 				Type actionType = ClientActionFactory.GetActionClassType(actionTypeId);
 				mapper.RegisterTypeId(actionType, (int)actionTypeId);
 			}
 
 			foreach (ServerActionType actionTypeId in Enum.GetValues(typeof(ServerActionType)))
 			{
-				// Not a real server action type
-				if (actionTypeId == ServerActionType.CLIENT_REPLY)
+				// Not a real server action type, or a header-only message with no body class
+				if (actionTypeId == ServerActionType.CLIENT_REPLY || actionTypeId == ServerActionType.KEEPALIVE)
 					continue;
 
 				int intActionId = (int)actionTypeId + SERVER_ACTION_ID_OFFSET;

@@ -12,6 +12,9 @@ namespace Impunity.GameState
 		SET_SUMMARY = 101,
 		GET_SUMMARY = 102,
 		GET_TIME = 103,
+		// Header-only liveness ping, sent when the client has sent nothing for a while. Consumed by the network layer
+		// on receipt and never deserialized or queued as an action.
+		KEEPALIVE = 104,
 
 		BEGIN_MIGRATION = 110,
 		MIGRATION_GET_COLLECTIONS = 111,
@@ -194,6 +197,12 @@ namespace Impunity.GameState
 		/// <summary>When <see cref="MigrationRequired"/>, the schema version the client would migrate the world to (this client's version).</summary>
 		[BsonField("mt")]
 		public int MigrationToVersion;
+
+		/// <summary>The server's effective <see cref="ImpunityOptions.ConnectionTimeoutMillis"/> for this connection, which
+		/// the client adopts for its own keepalives and server-silence detection. 0 means keepalives are disabled (and
+		/// is always 0 for a local connection).</summary>
+		[BsonField("kt")]
+		public int ConnectionTimeoutMillis;
 	}
 
 	/// <summary>Handshake action: validates game ID, password, and format version, then registers the connection. Returns the assigned connection ID.</summary>

@@ -32,12 +32,23 @@ namespace Impunity.Connection
 	public class RemoteGameConnection : BaseGameConnection
 	{
 		/// <summary>
-		/// Invoked (on the main thread, via <see cref="Update"/>) when the transport reports a network-level failure
-		/// such as a broken or unreachable connection. Note this fires for socket <em>errors</em>; a clean,
-		/// server-initiated disconnect currently only logs and does not raise this callback (see
-		/// <see cref="OnDisconnectedByServer"/>).
+		/// Invoked once (on the main thread, via <see cref="Update"/>) when an established connection is lost, with a
+		/// <see cref="ImpunityErrorCode.ClientConnectionBrokenError"/> describing why: a socket error, the server
+		/// closing the connection (including dropping this client for going silent), or the server going silent for
+		/// longer than <see cref="ConnectionTimeoutMillis"/>. By the time it runs <see cref="BaseGameConnection.Connected"/>
+		/// is false, every action still awaiting a reply has failed with the same code, and further actions fail
+		/// without being sent. Not raised for <see cref="Dispose"/>, nor for a failure during <see cref="Connect"/>
+		/// (that is reported to the connect callback instead).
 		/// </summary>
 		public ImpunityCallback? OnNetworkError { get; set; }
+
+		/// <summary>
+		/// The silence window adopted from the server during the handshake (see
+		/// <see cref="ImpunityOptions.ConnectionTimeoutMillis"/>): the server drops this client after hearing nothing
+		/// from it for this long, and this client gives up on a server it hasn't heard from for this long. 0 before the
+		/// handshake completes, or when the server has keepalives disabled.
+		/// </summary>
+		public int ConnectionTimeoutMillis { get => ServerSilenceTimeoutMillis; }
 
 		private BlockingCollection<GameStateActionBase> PendingSend;
 		// Reply-expecting actions awaiting a server reply, keyed by the correlation id written into each message
@@ -60,6 +71,23 @@ namespace Impunity.Connection
 
 		private byte[] SendBuffer;
 		private ByteWriter SendBufferWriter;
+
+		// Keepalive state (see ImpunityKeepAlive). Until the handshake reply says otherwise, keepalives go out at the
+		// interval for the minimum timeout, which is safe against any server setting. LastReceived is stamped on the
+		// socket thread for every inbound message; LastGuaranteedSend on the send path, counting guaranteed sends only
+		// since a UDP send may never arrive.
+		private volatile int KeepAliveIntervalMillis;
+		private volatile int ServerSilenceTimeoutMillis;
+		private long LastReceivedTimestamp;
+		private long LastGuaranteedSendTimestamp;
+		// Set once by whichever of Dispose (EndedByDispose) or a lost connection (EndedByLoss) gets there first.
+		private int ConnectionEnded;
+		private const int EndedByDispose = 1;
+		private const int EndedByLoss = 2;
+
+		/// <summary>Test seam: when set, this client stops sending keepalives, so a test can make it look dead to the
+		/// server without closing its socket.</summary>
+		internal volatile bool KeepAlivesSuppressed = false;
 
 		/// <summary>
 		/// Constructs a remote connection over an already-built transport. Prefer the <c>MakeTCPRemoteConnection</c> /
@@ -91,6 +119,8 @@ namespace Impunity.Connection
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
 			SendBufferWriter = new ByteWriter(SendBuffer);
+
+			KeepAliveIntervalMillis = ImpunityKeepAlive.IntervalMillis(Options.ConnectionTimeoutFloorMillis);
 
 			ConnectionId = "unconnected";
 		}
@@ -173,6 +203,10 @@ namespace Impunity.Connection
 
 				Running = true;
 
+				long now = ImpunityKeepAlive.Now();
+				Interlocked.Exchange(ref LastReceivedTimestamp, now);
+				Interlocked.Exchange(ref LastGuaranteedSendTimestamp, now);
+
 #if !UNITY_WEBGL
 				NetworkWriterThread = new Thread(new ThreadStart(NetworkWriterThreadMain));
 				NetworkWriterThread.IsBackground = true;
@@ -192,6 +226,8 @@ namespace Impunity.Connection
 		/// </summary>
 		public override void Dispose()
 		{
+			// A deliberate close is not a lost connection: keep the transport's close notification from reporting one.
+			Interlocked.CompareExchange(ref ConnectionEnded, EndedByDispose, 0);
 			PendingSend.CompleteAdding();
 
 			NetworkClient.Dispose();
@@ -199,34 +235,66 @@ namespace Impunity.Connection
 
 
 #if !UNITY_WEBGL
-		// Background writer loop: blocks on the send queue and serializes each action onto the transport until the
-		// queue is closed (Dispose). Exceptions per action are logged and skipped so one bad send can't kill the thread.
+		// Background writer loop: waits on the send queue and serializes each action onto the transport until the
+		// queue is closed (Dispose, or the connection being lost). The wait is bounded by when the next keepalive falls
+		// due, so an idle connection still sends one. Exceptions per action are logged and skipped so one bad send
+		// can't kill the thread.
 		private void NetworkWriterThreadMain()
 		{
 
 			while (Running)
 			{
 				GameStateActionBase? action = null;
+				bool gotAction;
 
 				try
 				{
-					action = PendingSend.Take();
+					gotAction = PendingSend.TryTake(out action, MillisUntilKeepAliveDue());
 				}
-				catch (InvalidOperationException)
+				catch (Exception e) when (e is InvalidOperationException || e is ObjectDisposedException)
 				{
 					// Pending actions queue was closed
 					return;
 				}
 
-				try
+				if (gotAction)
 				{
-					SendMessage(action);
+					try
+					{
+						SendMessage(action!);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in remote connection send attempt", e);
+					}
 				}
-				catch (Exception e)
+				else if (PendingSend.IsCompleted)
 				{
-					ImpunityLogger.LogError("Exception in remote connection send attempt", e);
+					return;
 				}
+
+				// Also checked after a send: a stream of unguaranteed sends never lets the wait time out.
+				SendKeepAliveIfDue();
 			}
+		}
+
+		// How long the writer may wait for work before it has to send a keepalive. Infinite when keepalives are off.
+		private int MillisUntilKeepAliveDue()
+		{
+			int interval = KeepAliveIntervalMillis;
+			if (KeepAlivesSuppressed)
+			{
+				// Test seam: keep re-checking so un-suppressing takes effect.
+				return 1000;
+			}
+			if (interval <= 0)
+			{
+				// The server has keepalives disabled; the interval never changes again after the handshake.
+				return Timeout.Infinite;
+			}
+
+			long remaining = interval - ImpunityKeepAlive.MillisSince(ref LastGuaranteedSendTimestamp, ImpunityKeepAlive.Now());
+			return (int)Math.Max(0, Math.Min(remaining, interval));
 		}
 #else
 		// WebGL has no background threads, so the send queue is drained synchronously from Update() instead.
@@ -250,8 +318,45 @@ namespace Impunity.Connection
 				}
 			}
 
+			SendKeepAliveIfDue();
 		}
 #endif
+
+		// Sends a header-only keepalive if nothing guaranteed has gone out for the keepalive interval. Called only on the
+		// send path (writer thread, or Update on WebGL), which owns SendBufferWriter.
+		private void SendKeepAliveIfDue()
+		{
+			int interval = KeepAliveIntervalMillis;
+			if (interval <= 0 || KeepAlivesSuppressed || Volatile.Read(ref ConnectionEnded) != 0)
+			{
+				return;
+			}
+
+			long now = ImpunityKeepAlive.Now();
+			if (ImpunityKeepAlive.MillisSince(ref LastGuaranteedSendTimestamp, now) < interval)
+			{
+				return;
+			}
+
+			try
+			{
+				ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, 0, ImpunityMessageFlags.NO_REPLY, (ushort)ClientActionType.KEEPALIVE, null!);
+				Interlocked.Exchange(ref LastGuaranteedSendTimestamp, now);
+				NetworkClient.SendGuaranteedMessage(encodedMessage);
+			}
+			catch (Exception e)
+			{
+				// A broken socket is reported by the reader thread; nothing more to do here.
+				ImpunityLogger.LogDebug("Couldn't send keepalive: " + e.Message);
+			}
+		}
+
+		/// <summary>Adopts the server's silence window from the handshake reply.</summary>
+		protected override void OnHandshakeAccepted(EstablishConnectResult result)
+		{
+			ServerSilenceTimeoutMillis = Math.Max(0, result.ConnectionTimeoutMillis);
+			KeepAliveIntervalMillis = ImpunityKeepAlive.IntervalMillis(ServerSilenceTimeoutMillis);
+		}
 
 		/// <summary>
 		/// Per-frame pump. On WebGL it first drains the outbound queue (no writer thread there). It then expires any
@@ -272,6 +377,28 @@ namespace Impunity.Connection
 #if UNITY_WEBGL
 			SendPendingMessages();
 #endif
+			int ended = Volatile.Read(ref ConnectionEnded);
+			if (ended == 0)
+			{
+				// Checked here rather than on a background thread so it works on WebGL too. The timestamp is stamped by
+				// the socket thread, so a long main-thread stall (a level load) doesn't count as server silence.
+				int silenceTimeout = ServerSilenceTimeoutMillis;
+				if (silenceTimeout > 0)
+				{
+					long silentFor = ImpunityKeepAlive.MillisSince(ref LastReceivedTimestamp, ImpunityKeepAlive.Now());
+					if (silentFor >= silenceTimeout)
+					{
+						ConnectionLost(new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError,
+							"Nothing received from the server for " + silentFor + "ms (timeout " + silenceTimeout + "ms)"));
+					}
+				}
+			}
+			else if (ended == EndedByLoss)
+			{
+				// After a lost connection, catch anything the writer thread registered while ConnectionLost was draining.
+				FailAwaitingReplies();
+			}
+
 			var tooOld = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(this.Options.ActionTimeoutMillis);
 
 			// Iterating a ConcurrentDictionary tolerates concurrent adds (send path) and removes (reply matching).
@@ -298,10 +425,17 @@ namespace Impunity.Connection
 			base.Update();
 		}
 
-		// Completes timed-out actions with a TimeoutError. A parent and its conditional share SentAt, so they expire in
-		// the same sweep, and the dictionary hands them over in no particular order: each conditional is queued right
-		// after its parent to keep the documented "parent's callback first" order.
+		// Completes timed-out actions with a TimeoutError.
 		private void QueueTimeouts(List<GameStateActionBase> expired)
+		{
+			QueueFailures(expired, action => new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + action.GetType().Name + " took too long to complete"));
+		}
+
+		// Completes actions with an error. A parent and its conditional are failed together (they share SentAt, so they
+		// expire in the same sweep, and a lost connection fails everything), and the dictionary hands them over in no
+		// particular order: each conditional is queued right after its parent to keep the documented "parent's callback
+		// first" order.
+		private void QueueFailures(List<GameStateActionBase> expired, Func<GameStateActionBase, ImpunityErrorResponse> makeError)
 		{
 			HashSet<GameStateActionBase>? heldForParent = null;
 			foreach (GameStateActionBase action in expired)
@@ -320,18 +454,93 @@ namespace Impunity.Connection
 					continue;
 				}
 
-				QueueTimeout(action);
+				QueueFailure(action, makeError(action));
 				if (heldForParent != null && action is IHasConditionalAction parent && parent.ConditionalAction != null && heldForParent.Contains(parent.ConditionalAction))
 				{
-					QueueTimeout(parent.ConditionalAction);
+					QueueFailure(parent.ConditionalAction, makeError(parent.ConditionalAction));
 				}
 			}
 		}
 
-		private void QueueTimeout(GameStateActionBase action)
+		private void QueueFailure(GameStateActionBase action, ImpunityErrorResponse error)
 		{
-			action.Error = new ImpunityErrorResponse(ImpunityErrorCode.TimeoutError, "Action " + action.GetType().Name + " took too long to complete");
+			action.Error = error;
 			CompletedActions.Enqueue(action);
+		}
+
+		// Ends a connection that broke on its own (socket error, server close, server silence). Safe to call from any
+		// thread and more than once; only the first call (and only if Dispose hasn't run) does anything. Stops further
+		// sends, fails every action still waiting for a reply, closes the transport, and queues the main-thread half
+		// (OnConnectionLostOnMainThread) behind those failures.
+		private void ConnectionLost(ImpunityErrorResponse error)
+		{
+			if (Interlocked.CompareExchange(ref ConnectionEnded, EndedByLoss, 0) != 0)
+			{
+				return;
+			}
+
+			ImpunityLogger.LogWarning("Connection " + ConnectionId + " lost: " + error.Message);
+
+			// Later DoAction calls fail locally with ClientConnectionBrokenError, and the writer thread exits.
+			PendingSend.CompleteAdding();
+			FailAwaitingReplies();
+			CloseTransport();
+
+			CompletedActions.Enqueue(new NoOpAction(_ => OnConnectionLostOnMainThread(error)));
+		}
+
+		private void FailAwaitingReplies()
+		{
+			List<GameStateActionBase>? orphaned = null;
+			foreach (var pending in AwaitingReceive)
+			{
+				if (AwaitingReceive.TryRemove(pending.Key, out var action))
+				{
+					orphaned ??= new List<GameStateActionBase>();
+					orphaned.Add(action);
+				}
+			}
+
+			if (orphaned != null)
+			{
+				QueueFailures(orphaned, action => new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError,
+					"Connection lost before " + action.GetType().Name + " was answered; it may or may not have run"));
+			}
+		}
+
+		// Closes the transport without blocking the caller: on desktop WebSocket a close handshake against a dead peer
+		// waits up to a second, which would be a visible hitch when the loss is detected from Update().
+		private void CloseTransport()
+		{
+#if UNITY_WEBGL
+			NetworkClient.Disconnect();
+#else
+			ThreadPool.QueueUserWorkItem(_ =>
+			{
+				try
+				{
+					NetworkClient.Disconnect();
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogDebug("Exception closing lost connection: " + e.Message);
+				}
+			});
+#endif
+		}
+
+		// Main-thread half of ConnectionLost, dispatched by Update after the failed actions queued ahead of it. A loss
+		// before Connect completed is reported to the connect callback (its establish or clock-sync action failed), so
+		// only an established connection raises OnNetworkError.
+		private void OnConnectionLostOnMainThread(ImpunityErrorResponse error)
+		{
+			bool wasConnected = Connected;
+			MarkDisconnected();
+
+			if (wasConnected)
+			{
+				OnNetworkError?.Invoke(error);
+			}
 		}
 
 		// Allocates the next header correlation id. Called only on the (single-threaded) send path, so it needs no
@@ -364,6 +573,11 @@ namespace Impunity.Connection
 				messageId = AllocateMessageId();
 				action.MessageId = messageId;
 				AwaitingReceive[messageId] = action;
+			}
+
+			if (action.Guaranteed)
+			{
+				Interlocked.Exchange(ref LastGuaranteedSendTimestamp, ImpunityKeepAlive.Now());
 			}
 
 			// A create/delete carrying a conditional database action gets a second correlation id for the conditional's
@@ -404,7 +618,15 @@ namespace Impunity.Connection
 		{
 			MessageHeaderStruct msg;
 
+			Interlocked.Exchange(ref LastReceivedTimestamp, ImpunityKeepAlive.Now());
+
 			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
+
+			if (msg.MessageType == (ushort)ServerActionType.KEEPALIVE)
+			{
+				// Its only job was to refresh LastReceivedTimestamp.
+				return;
+			}
 
 			// Reply message
 			if (msg.MessageType == (ushort)ServerActionType.CLIENT_REPLY)
@@ -424,22 +646,17 @@ namespace Impunity.Connection
 		}
 
 
-		// Transport error callback (socket thread). Wraps the error in a no-op targeting OnNetworkError so it is
-		// reported on the main thread via Update().
+		// Transport error callback (socket thread). The transport only reports errors that end the connection.
 		private void OnNetworkErrorReceived(ImpunityErrorResponse error)
 		{
-			var errorAction = new NoOpAction(OnNetworkError);
-			errorAction.Error = error;
-			CompletedActions.Enqueue(errorAction);
+			ConnectionLost(error);
 		}
 
-		// Transport callback for a clean, server-initiated close.
-		// NOTE (flagged for review): this only logs the reason — it does not raise OnNetworkError or otherwise notify
-		// application code, so a graceful disconnect is currently invisible to callers (only socket *errors* surface,
-		// via OnNetworkErrorReceived). The reason code is also always 0 in the current TCP transport.
+		// Transport callback for the server closing the connection (socket thread). Transports don't raise it for a
+		// close this client asked for. The reason code is the WebSocket close code on WebGL and always 0 otherwise.
 		private void OnDisconnectedByServer(int reason)
 		{
-			ImpunityLogger.LogInformation("Disconnected by server with code " + reason);
+			ConnectionLost(new ImpunityErrorResponse(ImpunityErrorCode.ClientConnectionBrokenError, "The server closed the connection (code " + reason + ")"));
 		}
 
 		// Matches an incoming reply to its originating action by the header correlation id, deserializes the result into

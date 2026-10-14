@@ -120,6 +120,7 @@ There are factory helpers for each remote transport: `MakeTCPRemoteConnection` (
    - rejects the connection if it is in a no-new-connections state (`ServerUnavailable`);
    - **validates the format** (version + checksum) against its stored metadata;
    - if they don't match, **upgrades** to the client's format *only if it's safe* — the world is brand new (version 0) or this is the only connection. Otherwise it fails with `ServerVersionIncompatible`. A remote client additionally may not drive an upgrade unless the server opted in with `RemoteUpgradeAllowed`, and a world can never be reverted to an older version.
+   The reply also carries the server's **connection timeout**, which a remote client adopts (see [Losing a connection](#losing-a-connection-keepalives-and-the-disconnect-deadline) below).
 3. **Clock sync** — the client fetches the server clock and stores the offset (see [§10](#10-server-time-and-the-game-summary)).
 4. On success the connection is marked `Connected` and your callback runs.
 
@@ -127,6 +128,26 @@ There are factory helpers for each remote transport: `MakeTCPRemoteConnection` (
 
 - **`ConnectionId`** is assigned by the server and reads `"unconnected"` until the handshake completes. It identifies this connection for the duration of the session (it is also the `sender` you see on broadcasts).
 - **`ConnectionKey`** is a *client-generated* identifier (random by default; `"local_key"` for local connections). Set it **before** `Connect` to give the client a stable identity across reconnects — the server keys per-connection ownership (locks, client-authoritative entities) on it. Reusing a key on reconnect is how a returning client is recognized as the same client.
+
+### Losing a connection: keepalives and the disconnect deadline
+
+A remote connection that dies without a clean close (a crash, a pulled cable, a phone dropping off Wi-Fi) leaves the other end's socket open, and TCP alone can take many minutes to notice. Impunity puts a bound on that with **`ImpunityOptions.ConnectionTimeoutMillis`** (default **30s**): a guaranteed upper limit on how long either end can be silent before the other declares the connection dead.
+
+- **Server side.** A client the server has heard nothing from for the full timeout is dropped, and cleaned up exactly as if it had disconnected: its entity locks and named locks are released or handed to the next waiter, its delete-on-disconnect entities are deleted, its subscriptions are removed. A game can count on this: *a vanished player stops holding anything within `ConnectionTimeoutMillis` (plus up to one second).*
+- **Client side.** A client that has heard nothing from the server for the timeout gives up: in-flight actions fail with `ClientConnectionBrokenError`, `Connected` becomes `false`, and `OnNetworkError` fires once. Later actions fail immediately without being sent.
+- **Keepalives** make sure silence only happens on a dead connection. Each end sends a tiny header-only keepalive whenever it has *sent* nothing reliable for a third of the timeout, so an idle but healthy connection is never dropped. Any inbound message counts as proof of life, not just keepalives. Unreliable (UDP) sends don't count as sent traffic, since they may never arrive.
+
+**The server decides.** The timeout is a server setting. Clients take the server's value from the handshake reply (`RemoteGameConnection.ConnectionTimeoutMillis` exposes it), so client and server can't disagree; a client's own `ConnectionTimeoutMillis` is ignored. Set it to `0` (or negative) on the server to turn keepalives and silence detection off. The standalone server reads it from `connection_timeout_ms` in `config.json`.
+
+**There is a floor: `ImpunityKeepAlive.MinTimeoutMillis` = 10s.** Smaller values are raised to it, with a warning logged. A keepalive can be late on a perfectly healthy connection: TCP retransmission backoff after packet loss (around 1s, then 2s, and so on), a stop-the-world GC pause, a starved server thread pool, or a phone radio waking from power-save. At the 10s floor a keepalive goes out at least every ~3.3s, and the receiver still tolerates one arriving ~6.7s late. A false disconnect costs a game far more (locks dropped, entities deleted) than a few seconds of detection time, so the library doesn't allow tighter windows.
+
+What keeps a connection alive, and what doesn't:
+
+- **A main-thread stall is fine.** On desktop and mobile, keepalives go out on the background writer thread and inbound traffic is timestamped on the socket thread, so a long level load that blocks `Update()` doesn't count as silence on either side.
+- **A suspended process is not.** A mobile app sent to the background is suspended. If it stays suspended past the timeout, the server drops it, and on resume the client notices and reports the loss.
+- **WebGL sends keepalives from `Update()`** (there are no threads). Browsers stop calling `Update()` for a backgrounded tab, so a WebGL client whose tab stays hidden past the timeout is dropped.
+
+`OnNetworkError` is raised for every way an *established* connection ends on its own: a socket error, the server closing the connection (including dropping this client for silence), or the server going silent. It isn't raised for your own `Dispose()`, or for a failure during `Connect` (that goes to the connect callback). A local connection has no keepalives; it can't go silent.
 
 > **Server-side hosting and discovery** are out of scope here. A remote world is hosted by an `ImpunityServer` / the standalone server (see `CLAUDE.md`); clients can locate worlds via LAN UDP discovery or the HTTP discovery API, which yield `ServerInfo` records you can feed to the factory helpers.
 
@@ -142,7 +163,7 @@ Call `connection.Update()` on a regular cadence — typically once per frame fro
 
 Because dispatch happens *inside* `Update()`, **all of your callbacks run on the thread that calls it** — the main/Unity thread — where it is safe to touch game state and UI. Inbound messages are received and deserialized on a background thread (a socket thread for remote; the server's worker threads for local) and parked on a thread-safe queue until then. A callback that throws is caught and logged, so one bad handler can't stall the queue.
 
-The remote connection's `Update()` adds two transport chores before the shared steps above: on WebGL it pumps the send queue (there is no writer thread there), and on every platform it **times out** any reply-expecting action older than `ActionTimeoutMillis`, completing it with a `TimeoutError`.
+The remote connection's `Update()` adds a few transport chores before the shared steps above: on WebGL it pumps the send queue and sends any keepalive that's due (there is no writer thread there); on every platform it checks for **server silence** past the connection timeout (see [§4](#losing-a-connection-keepalives-and-the-disconnect-deadline)), and **times out** any reply-expecting action older than `ActionTimeoutMillis`, completing it with a `TimeoutError`.
 
 ---
 
@@ -349,7 +370,7 @@ Codes you'll actually branch on:
 | Code | Meaning |
 |---|---|
 | `TimeoutError` | No reply within `ActionTimeoutMillis` (remote only). The request may or may not have run |
-| `ClientConnectionBrokenError` | The request was made on a disposed remote connection and was never sent |
+| `ClientConnectionBrokenError` | The remote connection is gone: either the request was made on a disposed or lost connection and was never sent, or the connection was lost while it awaited a reply (it may or may not have run). Also the code `OnNetworkError` reports |
 | `ClientMappingError` | A `GameStateDBCollection<T>` find/list got a document it couldn't map to `T` (wrong shape, or a `_type` the mapper doesn't allow) |
 | `ServerVersionIncompatible` | The client's format doesn't match the server and can't be upgraded |
 | `ServerPasswordIncorrect` | Wrong world password |
@@ -362,7 +383,7 @@ Codes you'll actually branch on:
 | `ActionCompoundFailure` | At least one sub-action of a compound action failed |
 | `ActionConditionNotMet` | A conditional action was not run: the create, delete or update it was attached to did not succeed, or the client refused to send it (`SkipUnsent`) |
 
-A **fatal** server error (e.g. an incompatible version at connect) closes the connection after reporting. Transport-level failures on a remote connection surface through `OnNetworkError` — note the caveat in [§13](#13-known-caveats) about *clean* disconnects.
+A **fatal** server error (e.g. an incompatible version at connect) closes the connection after reporting. When an established remote connection ends on its own (socket error, server close, or silence past the connection timeout), `OnNetworkError` reports it once (see [§4](#losing-a-connection-keepalives-and-the-disconnect-deadline)).
 
 ---
 
@@ -402,7 +423,7 @@ Channels, entities, distributed fields, entity locks, events → use `connection
 A few sharp edges in the current implementation (candidates for cleanup; the XML doc comments flag them inline too):
 
 - **`GameStateDBCollection<T>.FindDocumentById` doesn't guard the not-found/error case** the way `ListDocuments` does — it maps the (possibly null) result unconditionally. Check `err` first and treat a null/default result as "not found".
-- **A clean, server-initiated disconnect is invisible to application code.** Only socket *errors* raise `OnNetworkError`; a graceful close is merely logged (and its reason code is always 0). Don't rely on a callback to learn the server hung up gracefully.
+- **One dead client can stall the server's sends to everyone, for up to the connection timeout.** The server has a single network writer thread, and it waits for each client's previous write to finish before starting the next. A client that stops reading lets its socket buffer fill, and then the writer blocks on it. The keepalive sweep runs on its own thread and drops that client once its timeout expires, which unblocks the writer. Before keepalives existed, the stall never ended. Under heavy traffic, healthy clients can still go without pushes for part of the window.
 - **`WaitForLock` has no timeout.** A lock that never frees leaves the callback pending indefinitely, and there is no way to cancel a named-lock wait. Only one waiter per lock name per connection is tracked; a second `WaitForLock` for the same name replaces the first.
 - **Named locks share the `NamedEntities` namespace with channels.** A lock name that matches an existing channel locks *that channel* — broadcasting lock/unlock pushes to its subscribers and blocking their updates and deletes. Waiting is not offered for such a collision (the request simply fails). Keep lock names distinct from channel names.
 - **`GetServerTime` ignores network latency.** The clock offset doesn't subtract round-trip time, so it can be off by roughly the RTT plus drift between resyncs.
