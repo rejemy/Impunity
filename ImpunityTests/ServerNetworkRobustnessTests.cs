@@ -296,11 +296,13 @@ namespace Impunity.Tests
 
 			var proxy = (ServerSideNetworkConnectionProxy)context.OnClientDisconnected.Target;
 			proxy.SendMessage((ushort)ServerActionType.CLIENT_REPLY, 1, true, new BsonDocument());
+			TcpServer.StartScheduledWrites(); // the writer thread isn't running; stand in for it
 			Assert.AreEqual(1, context.Sends, "send before disconnect should go through");
 
 			context.Disconnect();
 			proxy.SendMessage((ushort)ServerActionType.CLIENT_REPLY, 2, true, new BsonDocument());
 			proxy.SendMessage((ushort)ServerActionType.CLIENT_REPLY, 3, false, new BsonDocument());
+			TcpServer.StartScheduledWrites();
 
 			Assert.AreEqual(1, context.Sends, "sends after disconnect should be dropped");
 			CollectionAssert.IsEmpty(Log.At("error"));
@@ -351,13 +353,15 @@ namespace Impunity.Tests
 
 			context.StreamDisposed = true;
 			proxy.SendMessage((ushort)ServerActionType.CLIENT_REPLY, 1, true, new BsonDocument());
+			TcpServer.StartScheduledWrites(); // the writer thread isn't running; stand in for it
 
 			CollectionAssert.IsEmpty(Log.At("error"));
 			Assert.IsTrue(Log.At("debug").Any(m => m.Contains("closed connection")));
 
-			// The send lock was released: later sends aren't blocked.
+			// The failed write didn't wedge the queue: later sends aren't blocked.
 			context.StreamDisposed = false;
 			proxy.SendMessage((ushort)ServerActionType.CLIENT_REPLY, 2, true, new BsonDocument());
+			TcpServer.StartScheduledWrites();
 			Assert.AreEqual(1, context.Sends);
 		}
 	}

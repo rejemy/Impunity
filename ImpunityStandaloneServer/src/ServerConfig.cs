@@ -35,6 +35,10 @@ public class ServerConfig
 	// library default; values below the minimum are raised to it; 0 disables keepalives.
 	public int? connection_timeout_ms { get; set; }
 
+	// Most outbound bytes held for one client that isn't reading before it's dropped
+	// (ImpunityOptions.MaxSendBacklogBytes). Null keeps the library default; 0 means no limit.
+	public long? max_send_backlog_bytes { get; set; }
+
 	public List<WorldConfig>? worlds { get; set; }
 
 

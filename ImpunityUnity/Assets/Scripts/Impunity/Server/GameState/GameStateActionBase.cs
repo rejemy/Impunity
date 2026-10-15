@@ -298,6 +298,13 @@ namespace Impunity.GameState
 	{
 		public void SetGuaranteed(bool guaranteed) { this.Guaranteed = guaranteed; }
 
+		/// <summary>This push encoded for the network, cached by the server's network writer thread the first time it
+		/// sends it. A push is broadcast to every listener as one instance and its bytes are the same for each, so the
+		/// rest share this array instead of re-encoding. Only the writer thread touches it; two servers hosting the same
+		/// game could both encode it, harmlessly, since the results are identical.</summary>
+		[BsonIgnore]
+		internal byte[]? EncodedMessage { get; set; }
+
 		public override bool IsDBOperation() { return false; }
 
 		public override void DeserializeResults(ArraySegment<byte> messageBytes)

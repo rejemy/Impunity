@@ -23,6 +23,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	private IPAddress RemoteIPAddress = IPAddress.Any;
 
 	private const int ConnectEstablishTimeout = 2500;
+	private const int CloseHandshakeTimeout = 2000;
 
 	private readonly byte[] ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 
@@ -148,28 +149,39 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 					ImpunityLogger.LogError("Exception in websocket error handler", e);
 				}
 
-				if (Socket.State != WebSocketState.Closed && Socket.State != WebSocketState.Aborted)
-				{
-					await Socket.CloseAsync(
-						WebSocketCloseStatus.EndpointUnavailable,
-						"Closed",
-						CancellationToken.None);
-				}
+				await CloseSocketAsync(Socket, WebSocketCloseStatus.EndpointUnavailable);
 
 				OnDisconnected();
 				return;
 			}
 		}
 
-		if (Socket.State != WebSocketState.Closed && Socket.State != WebSocketState.Aborted)
-		{
-			await Socket.CloseAsync(
-				WebSocketCloseStatus.NormalClosure,
-				"Closed",
-				CancellationToken.None);
-		}
+		await CloseSocketAsync(Socket, WebSocketCloseStatus.NormalClosure);
 
 		OnDisconnected();
+	}
+
+	// Runs the close handshake, but never lets it keep the disconnect from being reported. A peer that stopped reading
+	// leaves one of our sends pending forever, and the close frame would queue behind it; the server drops such a client
+	// (silence, send backlog) precisely so its locks and entities get cleaned up, which only happens once
+	// OnClientDisconnected fires. So the close is bounded, and anything that goes wrong aborts the socket instead.
+	private static async Task CloseSocketAsync(WebSocket socket, WebSocketCloseStatus status)
+	{
+		if (socket.State == WebSocketState.Closed || socket.State == WebSocketState.Aborted)
+		{
+			return;
+		}
+
+		using var timeout = new CancellationTokenSource(CloseHandshakeTimeout);
+		try
+		{
+			await socket.CloseAsync(status, "Closed", timeout.Token);
+		}
+		catch (Exception)
+		{
+			// Timed out or the connection is already broken: nothing more to say to this peer.
+			socket.Abort();
+		}
 	}
 
 	public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
@@ -180,7 +192,24 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 			return Task.CompletedTask;
 		}
 
-		return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
+		if (ImpunityNetworkingUtil.GetMessageLength(messageBytes) >= messageBytes.Count)
+		{
+			return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
+		}
+
+		return SendEachAsync(socket, messageBytes);
+	}
+
+	// The server batches several framed messages into one send; WebSocket clients expect exactly one per WebSocket
+	// message, so split them back apart on their length prefixes.
+	private static async Task SendEachAsync(WebSocket socket, ArraySegment<byte> messages)
+	{
+		while (messages.Count > 0)
+		{
+			int length = ImpunityNetworkingUtil.GetMessageLength(messages);
+			await socket.SendAsync(messages.Slice(0, length), WebSocketMessageType.Binary, true, CancellationToken.None);
+			messages = messages.Slice(length);
+		}
 	}
 
 	public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)

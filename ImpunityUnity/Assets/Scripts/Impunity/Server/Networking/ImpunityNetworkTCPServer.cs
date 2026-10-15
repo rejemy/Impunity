@@ -434,6 +434,10 @@ namespace Impunity.Networking
 					}
 
 					TcpClient client = TCPSocket.AcceptTcpClient();
+					// Small state updates must not sit in Nagle's buffer waiting for an ACK. The send path batches
+					// messages into one write itself (see ServerSideNetworkConnectionProxy), so this doesn't mean a
+					// packet per message.
+					client.NoDelay = true;
 
 					if (ClientsConnected >= Options.MaxConnections)
 					{

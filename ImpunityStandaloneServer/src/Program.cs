@@ -98,6 +98,10 @@ if (config.connection_timeout_ms.HasValue)
 {
 	impOptions.ConnectionTimeoutMillis = config.connection_timeout_ms.Value;
 }
+if (config.max_send_backlog_bytes.HasValue)
+{
+	impOptions.MaxSendBacklogBytes = config.max_send_backlog_bytes.Value;
+}
 
 WorldService worldService = new WorldService(config.datapath, config.worlds, impOptions);
 builder.Services.AddSingleton(worldService);

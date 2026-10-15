@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -38,29 +39,55 @@ namespace Impunity.Networking
 		}
 	}
 
-	/// <summary>Server-side proxy for a remote client connection. Handles message parsing, send serialization (via semaphore), and connection lifecycle. One instance per connected client.</summary>
+	/// <summary>Server-side proxy for a remote client connection. Handles message parsing, the per-connection outbound queue, and connection lifecycle. One instance per connected client.</summary>
+	/// <remarks>
+	/// <para>Outbound messages are encoded on the shared network writer thread and appended to this connection's own
+	/// queue. The writer thread doesn't start a socket write until it has run out of other work (see
+	/// <see cref="ImpunityServer"/>), so a burst of pushes reaches the transport as one batched write. While a write is in
+	/// flight, its continuation keeps draining the queue in further batches. The writer thread never waits for a
+	/// client's socket, so a client that stops reading (dead peer, half-open TCP) can only back up its own queue, never
+	/// delay sends to anyone else. The queue is capped at <see cref="ImpunityOptions.MaxSendBacklogBytes"/>; a client
+	/// that exceeds it is dropped.</para>
+	/// <para>Unguaranteed messages for a client with UDP skip the queue and go out immediately: they have no ordering
+	/// promise, and stale movement data shouldn't wait behind a reliable backlog.</para>
+	/// </remarks>
 	public class ServerSideNetworkConnectionProxy : IServerSideConnectionProxy, IDisposable
 	{
+		/// <summary>The most bytes gathered into one transport write. Any single message fits (they are all under
+		/// <see cref="ImpunityConstants.MaxMessageSize"/>).</summary>
+		internal const int MaxBatchBytes = 64 * 1024;
+
 		IImpunityNetworkServerClientContext ClientContext;
 		ImpunityServer NetworkServer;
 		GameStateServer? GameServer;
 
-		byte[] SendBuffer;
-		ByteWriter SendBufferWriter;
-		Semaphore SendLock;
+		// The outbound queue of encoded messages (each an exact-size array, possibly shared with other recipients of the
+		// same push), guarded by OutboundLock. WriteInFlight is true from the moment a write is started until the queue
+		// is found empty, so at most one transport write is ever pending: transports are not thread-safe, and
+		// one-at-a-time keeps this connection's messages in order. WriteScheduled means the writer thread will start
+		// writing when it next runs out of work. BacklogBytes counts queued and in-flight bytes. CloseWhenFlushed is a
+		// server-requested close waiting for the queue to drain.
+		readonly object OutboundLock = new object();
+		readonly Queue<byte[]> Outbound = new Queue<byte[]>();
+		bool WriteInFlight;
+		bool WriteScheduled;
+		bool CloseWhenFlushed;
+		long BacklogBytes;
 
 		// Set once the connection is closed (by the peer, a transport error, or a server-requested close). Pushes
 		// queued for the writer thread before the close was noticed are then dropped instead of hitting a disposed stream.
 		volatile bool Closed;
+		// Set by whichever server-side path (requested close, silence, backlog overflow) tears the transport down first.
+		int CloseStarted;
 
 		// Keepalive bookkeeping (see ImpunityKeepAlive). LastReceived is stamped on the socket thread for every inbound
-		// message, keepalives included; LastGuaranteedSend on the writer thread. Only guaranteed sends count as proof
-		// the client is hearing from us: UDP can be silently dropped, which would otherwise suppress the keepalives the
-		// client needs. KeepAliveQueued keeps the sweep from stacking keepalives behind a backed-up writer queue.
+		// message, keepalives included; LastGuaranteedSend whenever a reliable write is started. Only reliable sends
+		// count as proof the client is hearing from us: UDP can be silently dropped, which would otherwise suppress the
+		// keepalives the client needs. KeepAliveQueued keeps the sweep from stacking keepalives behind a backed-up
+		// writer queue.
 		long LastReceivedTimestamp;
 		long LastGuaranteedSendTimestamp;
 		int KeepAliveQueued;
-		int DroppedForSilence;
 
 		/// <summary>Server-assigned unique ID for this connection.</summary>
 		public string ConnectionId { get => ClientContext.ConnectionId; }
@@ -78,14 +105,23 @@ namespace Impunity.Networking
 		/// <inheritdoc/>
 		public int ConnectionTimeoutMillis { get => NetworkServer.ConnectionTimeoutMillis; }
 
+		/// <summary>Bytes encoded for this client but not yet written to its transport, including any write in progress.</summary>
+		internal long SendBacklogBytes
+		{
+			get
+			{
+				lock (OutboundLock)
+				{
+					return BacklogBytes;
+				}
+			}
+		}
+
 
 		public ServerSideNetworkConnectionProxy(ImpunityServer server, IImpunityNetworkServerClientContext clientContext)
 		{
 			NetworkServer = server;
 			ClientContext = clientContext;
-			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
-			SendBufferWriter = new ByteWriter(SendBuffer);
-			SendLock = new Semaphore(1, 1);
 
 			long now = ImpunityKeepAlive.Now();
 			LastReceivedTimestamp = now;
@@ -177,51 +213,238 @@ namespace Impunity.Networking
 			GameServer.QueueAction(action);
 		}
 
-		/// <summary>Serializes and sends a message to the client. Acquires the send lock to serialize access to the shared send buffer. Called on the network writer thread.</summary>
+		/// <summary>Encodes a message and queues it for this client. Called on the network writer thread.</summary>
 		/// <param name="messageType">The action/message type id written to the header.</param>
 		/// <param name="messageId">Correlation id echoed in the header (the request's id for replies; 0 for server-originated pushes).</param>
 		/// <param name="guaranteed">Whether to send reliably (TCP) or over the unguaranteed channel when available.</param>
 		/// <param name="results">The object serialized into the message body.</param>
 		public void SendMessage(ushort messageType, ushort messageId, bool guaranteed, object results)
 		{
-			ArraySegment<byte> encodedMessage;
-
-			// Lock send buffer (or wait for it to be available)
-			SendLock.WaitOne();
-			// Lock is released in the OnDataWritten continuation
-
-			if (Closed)
+			if (Closed || CloseWhenFlushed)
 			{
-				SendLock.Release();
 				ImpunityLogger.LogDebug("Dropping message type " + messageType + " for closed connection " + ConnectionId);
 				return;
 			}
 
+			byte[]? message = NetworkServer.EncodeMessage(messageType, messageId, results);
+			if (message != null)
+			{
+				QueueMessage(message, guaranteed);
+			}
+		}
+
+		/// <summary>
+		/// Queues an encoded message for this client. Never waits for the client's socket: the write is started when the
+		/// writer thread runs out of other work, or by the continuation of a write already in progress. An unguaranteed
+		/// message for a client with UDP is sent right away instead. Called on the network writer thread.
+		/// </summary>
+		/// <param name="message">One complete framed message. Not modified, so it can be shared between recipients.</param>
+		/// <param name="guaranteed">Whether the message must be delivered reliably.</param>
+		internal void QueueMessage(byte[] message, bool guaranteed)
+		{
+			if (Closed || CloseWhenFlushed)
+			{
+				ImpunityLogger.LogDebug("Dropping message for closed connection " + ConnectionId);
+				return;
+			}
+
+			if (!guaranteed && ClientContext.SupportsUnguaranteed)
+			{
+				SendUnguaranteedNow(message);
+				return;
+			}
+
+			long limit = NetworkServer.Options.MaxSendBacklogBytes;
+			bool queued = false;
+			bool schedule = false;
+			long backlog;
+			lock (OutboundLock)
+			{
+				backlog = BacklogBytes;
+				// A single message is always accepted into an empty backlog, whatever the limit.
+				bool overLimit = limit > 0 && backlog > 0 && backlog + message.Length > limit;
+				if (!Closed && !CloseWhenFlushed && !overLimit)
+				{
+					Outbound.Enqueue(message);
+					BacklogBytes += message.Length;
+					queued = true;
+					if (!WriteInFlight && !WriteScheduled)
+					{
+						WriteScheduled = true;
+						schedule = true;
+					}
+				}
+			}
+
+			if (queued)
+			{
+				NetworkServer.NoteQueued(message.Length);
+				if (schedule)
+				{
+					NetworkServer.ScheduleWrite(this);
+				}
+				return;
+			}
+
+			if (Closed || CloseWhenFlushed)
+			{
+				// Lost the race with a close on another thread.
+				ImpunityLogger.LogDebug("Dropping message for closed connection " + ConnectionId);
+			}
+			else if (CloseTransport())
+			{
+				ImpunityLogger.LogWarning("Dropping connection " + ConnectionId + ": " + backlog + " bytes of outbound messages backed up, over the " + limit + " byte limit (client not reading?)");
+			}
+		}
+
+		// UDP has no ordering promise to keep and no backlog worth waiting behind. The transport allows this alongside a
+		// reliable write in flight (see IImpunityNetworkServerClientContext.SendUnguaranteedMessageAsync).
+		private void SendUnguaranteedNow(byte[] message)
+		{
+			Task send;
 			try
 			{
-				encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, 0, messageType, results);
-
-				if (guaranteed)
-				{
-					Interlocked.Exchange(ref LastGuaranteedSendTimestamp, ImpunityKeepAlive.Now());
-					ClientContext.SendGuaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
-				}
-				else
-				{
-					ClientContext.SendUnguaranteedMessageAsync(encodedMessage).ContinueWith(OnDataWritten);
-				}
+				send = ClientContext.SendUnguaranteedMessageAsync(new ArraySegment<byte>(message));
 			}
 			catch (Exception e)
 			{
-				SendLock.Release();
-				if (IsClosedConnectionError(e))
+				send = Task.FromException(e);
+			}
+
+			if (send.IsCompleted)
+			{
+				ReportUnguaranteedFailure(send);
+			}
+			else
+			{
+				send.ContinueWith(ReportUnguaranteedFailure, TaskScheduler.Default);
+			}
+		}
+
+		private void ReportUnguaranteedFailure(Task send)
+		{
+			if (send.IsCompletedSuccessfully)
+			{
+				return;
+			}
+
+			Exception error = send.Exception ?? (Exception)new OperationCanceledException();
+			if (IsClosedConnectionError(error))
+			{
+				ImpunityLogger.LogDebug("Unguaranteed send to closed connection " + ConnectionId + " failed: " + error.GetBaseException().Message);
+				return;
+			}
+			ImpunityLogger.LogError("Error sending unguaranteed message: ", error);
+		}
+
+		/// <summary>Starts writing this connection's queue, if a write isn't already in progress. Called on the network
+		/// writer thread once it has drained its own queue (or tests, standing in for it).</summary>
+		internal void StartScheduledWrite()
+		{
+			lock (OutboundLock)
+			{
+				WriteScheduled = false;
+				if (WriteInFlight || Outbound.Count == 0)
 				{
-					// Lost the race with the close: the stream was disposed after the Closed check above.
-					ImpunityLogger.LogDebug("Dropping message type " + messageType + " for closed connection " + ConnectionId + ": " + e.Message);
 					return;
 				}
-				ImpunityLogger.LogError("Exception encoding message: " + e.ToString());
+				WriteInFlight = true;
 			}
+
+			WriteQueued();
+		}
+
+		/// <summary>
+		/// Writes queued messages, in batches of up to <see cref="MaxBatchBytes"/>, until the queue is empty or a write
+		/// has to wait for the client. Runs on the writer thread to start a write, then on whichever thread completes
+		/// each pending write. Only ever runs on one thread at a time for a connection (guarded by <c>WriteInFlight</c>).
+		/// </summary>
+		private void WriteQueued()
+		{
+			while (TakeNextBatch(out ArraySegment<byte> batch, out bool pooled))
+			{
+				Task write;
+				try
+				{
+					Interlocked.Exchange(ref LastGuaranteedSendTimestamp, ImpunityKeepAlive.Now());
+					write = ClientContext.SendGuaranteedMessageAsync(batch);
+				}
+				catch (Exception e)
+				{
+					// e.g. the stream was disposed out from under us; reported the same way as a failed write.
+					write = Task.FromException(e);
+				}
+
+				if (!write.IsCompleted)
+				{
+					// The client's socket buffer is full (or the transport is just slow): pick up where we left off when
+					// this write finishes, on the thread that finishes it. The writer thread is free to move on.
+					write.ContinueWith(t =>
+					{
+						OnDataWritten(t, batch, pooled);
+						WriteQueued();
+					}, TaskScheduler.Default);
+					return;
+				}
+
+				OnDataWritten(write, batch, pooled);
+			}
+		}
+
+		// Takes the next batch to write, or returns false and clears WriteInFlight when there is none. A lone message is
+		// written from its own array; several are gathered into a pooled buffer. A close request waiting on the flush is
+		// carried out here, once the queue is found empty.
+		private bool TakeNextBatch(out ArraySegment<byte> batch, out bool pooled)
+		{
+			lock (OutboundLock)
+			{
+				if (Closed)
+				{
+					// Whatever is still queued can never be delivered.
+					DiscardBacklog();
+					WriteInFlight = false;
+					batch = default;
+					pooled = false;
+					return false;
+				}
+
+				if (Outbound.Count > 0)
+				{
+					byte[] first = Outbound.Dequeue();
+					if (Outbound.Count == 0 || first.Length + Outbound.Peek().Length > MaxBatchBytes)
+					{
+						batch = new ArraySegment<byte>(first);
+						pooled = false;
+						return true;
+					}
+
+					byte[] buffer = ArrayPool<byte>.Shared.Rent(MaxBatchBytes);
+					Buffer.BlockCopy(first, 0, buffer, 0, first.Length);
+					int length = first.Length;
+					while (Outbound.Count > 0 && length + Outbound.Peek().Length <= MaxBatchBytes)
+					{
+						byte[] next = Outbound.Dequeue();
+						Buffer.BlockCopy(next, 0, buffer, length, next.Length);
+						length += next.Length;
+					}
+
+					batch = new ArraySegment<byte>(buffer, 0, length);
+					pooled = true;
+					return true;
+				}
+
+				WriteInFlight = false;
+				batch = default;
+				pooled = false;
+				if (!CloseWhenFlushed)
+				{
+					return false;
+				}
+			}
+
+			// Everything queued before the close request has been written.
+			CloseTransport();
+			return false;
 		}
 
 		// True when a send failed only because the connection is (being) closed, which is routine after a disconnect
@@ -265,53 +488,95 @@ namespace Impunity.Networking
 			return ImpunityKeepAlive.MillisSince(ref LastReceivedTimestamp, now);
 		}
 
-		/// <summary>Milliseconds since a guaranteed message was last handed to the transport for this client.</summary>
+		/// <summary>Milliseconds since a reliable write to this client was last started.</summary>
 		internal long MillisSinceGuaranteedSend(long now)
 		{
 			return ImpunityKeepAlive.MillisSince(ref LastGuaranteedSendTimestamp, now);
 		}
 
 		/// <summary>
-		/// Drops a client that has gone silent for longer than the connection timeout. Returns false if it was already
-		/// dropped. Called on the keepalive sweep thread.
+		/// Drops a client that has gone silent for longer than the connection timeout. Returns false if the connection
+		/// was already closed or being closed. Called on the keepalive sweep thread.
 		/// </summary>
 		/// <remarks>
-		/// Deliberately does not take <c>SendLock</c> the way <see cref="ProcessCloseConnection"/> does: a dead peer stops
-		/// draining its socket, so a write to it can stay pending (holding the lock) indefinitely. Closing the transport
-		/// out from under that write faults it, which releases the lock and unblocks the writer thread. The transport's
-		/// disconnect then runs the normal close path, so the game server cleans up exactly as for a clean disconnect.
+		/// Doesn't wait for this client's queue to drain the way <see cref="ProcessCloseConnection"/> does: a dead peer
+		/// stops draining its socket, so a write to it can stay pending indefinitely. Closing the transport out from under
+		/// that write faults it, and the rest of the queue is discarded. The transport's disconnect then runs the normal
+		/// close path, so the game server cleans up exactly as for a clean disconnect.
 		/// </remarks>
 		internal bool DropForSilence()
 		{
-			if (Interlocked.Exchange(ref DroppedForSilence, 1) != 0)
+			return CloseTransport();
+		}
+
+		/// <summary>Closes the connection once every message queued before this call has been written. Called on the
+		/// network writer thread; returns immediately (the close happens once the queue drains, if anything is still
+		/// queued).</summary>
+		public void ProcessCloseConnection()
+		{
+			lock (OutboundLock)
+			{
+				if (Closed)
+				{
+					return;
+				}
+
+				if (WriteInFlight || Outbound.Count > 0)
+				{
+					// TakeNextBatch closes the transport when it finds the queue empty (a non-empty queue with no write in
+					// flight already has one scheduled). Later sends are dropped.
+					CloseWhenFlushed = true;
+					return;
+				}
+			}
+
+			CloseTransport();
+		}
+
+		// Tears down the transport from the server side and discards anything still queued. Only the first caller (of a
+		// requested close, a silence drop, or a backlog overflow) does anything, and not at all if the peer is already
+		// gone. Returns whether this call closed it.
+		private bool CloseTransport()
+		{
+			if (Closed || Interlocked.Exchange(ref CloseStarted, 1) != 0)
 			{
 				return false;
 			}
 
-			Closed = true;
+			MarkClosed();
 			ClientContext.Disconnect();
 			return true;
 		}
 
-		/// <summary>Waits for any pending send to complete, then disconnects the client.</summary>
-		public void ProcessCloseConnection()
+		private void MarkClosed()
 		{
-			SendLock.WaitOne();
-
-			if (!Closed)
+			Closed = true;
+			lock (OutboundLock)
 			{
-				Closed = true;
-				ClientContext.Disconnect();
+				DiscardBacklog();
 			}
-
-			SendLock.Release();
 		}
 
-		// Called on TCP socket thread
-		private void OnDataWritten(Task writeTask)
+		// Caller holds OutboundLock. A write already in flight keeps its bytes until it completes.
+		private void DiscardBacklog()
 		{
-			// Unlock send buffer
-			SendLock.Release();
+			while (Outbound.Count > 0)
+			{
+				BacklogBytes -= Outbound.Dequeue().Length;
+			}
+		}
+
+		// Called on whichever thread completed the write (possibly the writer thread, for a write that finished at once)
+		private void OnDataWritten(Task writeTask, ArraySegment<byte> batch, bool pooled)
+		{
+			lock (OutboundLock)
+			{
+				BacklogBytes -= batch.Count;
+			}
+			if (pooled)
+			{
+				ArrayPool<byte>.Shared.Return(batch.Array!);
+			}
 
 			if (!writeTask.IsCompletedSuccessfully)
 			{
@@ -330,7 +595,6 @@ namespace Impunity.Networking
 			}
 
 		}
-
 		/// <summary>Queues an action result to be sent back to the client. Called on the game server thread.</summary>
 		public void ReportActionResult(GameStateActionBase action)
 		{
@@ -374,17 +638,14 @@ namespace Impunity.Networking
 		// Called on socket thread
 		private void ClientDisconnected(IImpunityNetworkServerClientContext client)
 		{
-			Closed = true;
+			MarkClosed();
 			NetworkServer.ClientDisconnected(this);
 			GameServer?.ConnectionClosed(this);
 		}
 
 		public void Dispose()
 		{
-			if (SendLock != null)
-			{
-				SendLock.Dispose();
-			}
+			MarkClosed();
 
 			if (ClientContext != null)
 			{
@@ -423,6 +684,18 @@ namespace Impunity.Networking
 		BlockingCollection<PendingSend> PendingWrite;
 
 		Thread? NetworkWriterThread;
+
+		// Writer-thread state. Every message is encoded into this scratch buffer and copied out to an exact-size array.
+		// WritesToStart lists connections that have had messages queued since the writer last ran out of work; their
+		// socket writes are started together then, so a burst of messages reaches each client as one batched write.
+		readonly byte[] EncodeBuffer = new byte[ImpunityConstants.MaxMessageSize];
+		readonly ByteWriter EncodeWriter;
+		readonly List<ServerSideNetworkConnectionProxy> WritesToStart = new List<ServerSideNetworkConnectionProxy>();
+		long BytesQueuedSinceWriting;
+
+		/// <summary>How many queued sends the writer thread handles before it starts socket writes even though more work
+		/// is waiting. Bounds the latency batching can add when the queue never runs dry.</summary>
+		internal const int MaxSendsPerBatch = 64;
 		// Read on the game server thread by QueueNetworkAction.
 		volatile bool Running;
 
@@ -470,6 +743,7 @@ namespace Impunity.Networking
 			TCPServer.OnClientConnected = ClientConnected;
 
 			PendingWrite = new BlockingCollection<PendingSend>();
+			EncodeWriter = new ByteWriter(EncodeBuffer);
 
 			foreach (GameStateServer game in gameStates)
 			{
@@ -544,8 +818,8 @@ namespace Impunity.Networking
 		}
 
 		// Sweeps every connection on a short period: drops any client silent for the full timeout, and queues a
-		// keepalive to any client we haven't sent to for a third of it. Runs on its own thread rather than the writer's
-		// because a write to a dead client can block the writer thread — the very thing the sweep has to be able to undo.
+		// keepalive to any client we haven't sent to for a third of it. Runs on its own thread so its timing doesn't
+		// depend on how busy the writer thread is.
 		private void KeepAliveThreadMain()
 		{
 			int timeout = ConnectionTimeoutMillis;
@@ -590,6 +864,8 @@ namespace Impunity.Networking
 
 		private void WriterThreadMain()
 		{
+			int sendsSinceWriting = 0;
+
 			while (Running)
 			{
 				PendingSend send;
@@ -613,9 +889,71 @@ namespace Impunity.Networking
 					ImpunityLogger.LogError("Exception sending action result over network", e);
 				}
 
+				// Hold the socket writes until the queue runs dry, so everything the game threads produced together goes
+				// out together. Nothing waits on a socket here, so this only ever delays by the time to encode. Once a
+				// batch's worth of bytes is waiting there's nothing more to gain, and holding more would only inflate
+				// every client's backlog (which MaxSendBacklogBytes counts) while the writes haven't started.
+				if (++sendsSinceWriting >= MaxSendsPerBatch
+					|| BytesQueuedSinceWriting >= ServerSideNetworkConnectionProxy.MaxBatchBytes
+					|| PendingWrite.Count == 0)
+				{
+					StartScheduledWrites();
+					sendsSinceWriting = 0;
+				}
 			}
 
 			PendingWrite.Dispose();
+		}
+
+		/// <summary>Records that a connection has messages waiting for <see cref="StartScheduledWrites"/>. Called on the
+		/// network writer thread.</summary>
+		internal void ScheduleWrite(ServerSideNetworkConnectionProxy proxy)
+		{
+			WritesToStart.Add(proxy);
+		}
+
+		/// <summary>Counts bytes queued for any connection since writes were last started. Called on the network writer
+		/// thread.</summary>
+		internal void NoteQueued(int bytes)
+		{
+			BytesQueuedSinceWriting += bytes;
+		}
+
+		/// <summary>Starts socket writes for every connection with newly queued messages. Called on the network writer
+		/// thread (tests that drive a proxy directly call it in its place).</summary>
+		internal void StartScheduledWrites()
+		{
+			for (int i = 0; i < WritesToStart.Count; i++)
+			{
+				try
+				{
+					WritesToStart[i].StartScheduledWrite();
+				}
+				catch (Exception e)
+				{
+					ImpunityLogger.LogError("Exception starting write to " + WritesToStart[i].ConnectionId, e);
+				}
+			}
+			WritesToStart.Clear();
+			BytesQueuedSinceWriting = 0;
+		}
+
+		/// <summary>Encodes one framed message into a new exact-size array, or returns null (having logged why) if it
+		/// can't be encoded. Called on the network writer thread.</summary>
+		internal byte[]? EncodeMessage(ushort messageType, ushort messageId, object body)
+		{
+			try
+			{
+				ArraySegment<byte> encoded = ImpunityNetworkingUtil.WriteMessage(EncodeWriter, messageId, 0, messageType, body);
+				byte[] message = new byte[encoded.Count];
+				Buffer.BlockCopy(encoded.Array!, encoded.Offset, message, 0, encoded.Count);
+				return message;
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception encoding message: " + e.ToString());
+				return null;
+			}
 		}
 
 		private void SendActionResults(PendingSend send)
@@ -631,10 +969,21 @@ namespace Impunity.Networking
 			{
 				clientInfo.SendKeepAlive();
 			}
-			else if (action is ServerActionBase)
+			else if (action is ServerActionBase push)
 			{
-				// Server originated push — not a reply, so it carries no correlation id.
-				clientInfo.SendMessage(action.GetActionType(), 0, action.Guaranteed, action);
+				// Server originated push — not a reply, so it carries no correlation id, and its bytes are the same for
+				// every recipient: encode it once and share the array among all the listeners it was fanned out to.
+				byte[]? message = push.EncodedMessage;
+				if (message == null)
+				{
+					message = EncodeMessage(push.GetActionType(), 0, push);
+					if (message == null)
+					{
+						return;
+					}
+					push.EncodedMessage = message;
+				}
+				clientInfo.QueueMessage(message, push.Guaranteed);
 			}
 			else
 			{

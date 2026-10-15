@@ -80,6 +80,16 @@ namespace Impunity
 		/// </summary>
 		public int ConnectionTimeoutMillis = 30 * 1000;
 
+		/// <summary>
+		/// The most outbound data, in bytes, the server holds for one remote client that isn't keeping up. Each client has
+		/// its own send queue, so a slow or dead client never delays anyone else's sends, but its queue grows while its
+		/// socket is backed up. A client whose queue would grow past this limit is dropped, with the same cleanup as a
+		/// disconnect. A single message is always accepted into an empty queue. The default leaves room for a large
+		/// channel snapshot to a slow link. 0 or negative means no limit; a dead client is then only dropped by
+		/// <see cref="ConnectionTimeoutMillis"/>.
+		/// </summary>
+		public long MaxSendBacklogBytes = 32L * 1024 * 1024;
+
 		/// <summary>Floor applied to <see cref="ConnectionTimeoutMillis"/>. Test seam only: lowered by tests so silence
 		/// detection can be exercised in a couple of seconds instead of <see cref="ImpunityKeepAlive.MinTimeoutMillis"/>.</summary>
 		internal int ConnectionTimeoutFloorMillis = ImpunityKeepAlive.MinTimeoutMillis;

@@ -29,6 +29,10 @@ namespace Impunity.Networking
 		void SendGuaranteedMessage(ArraySegment<byte> messageBytes);
 		/// <summary>Sends a binary message via the unguaranteed channel if available, other wise will send guaranteed.</summary>
 		void SendUnguaranteedMessage(ArraySegment<byte> messageBytes);
+		/// <summary>Pushes out any guaranteed sends the transport has buffered. A transport may hold small sends back to
+		/// put several in one packet, but only until this is called; the connection calls it whenever its send queue
+		/// runs empty. Called on the same thread as the sends.</summary>
+		void Flush();
 
 	}
 

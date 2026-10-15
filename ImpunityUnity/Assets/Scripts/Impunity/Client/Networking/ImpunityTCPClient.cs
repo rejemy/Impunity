@@ -1,6 +1,7 @@
 #if !UNITY_WEBGL
 
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -33,6 +34,10 @@ namespace Impunity.Networking
 		private TcpClient? ClientTCPSocket;
 		private Thread? ClientTCPSocketThread;
 		private NetworkStream? TCPSocketStream;
+		// Guaranteed sends go through this, so a burst of small messages leaves as one write (Nagle is off, so without
+		// it each would be its own packet). Only the connection's send thread touches it; reads use TCPSocketStream.
+		private BufferedStream? TCPWriteStream;
+		private const int WriteBufferSize = 32 * 1024;
 
 		private volatile UdpClient? ClientUDPSocket;
 		private Thread? ClientUDPSocketThread;
@@ -146,7 +151,10 @@ namespace Impunity.Networking
 
 				ServerEndpoint = ToIPv4IfMapped((IPEndPoint)ClientTCPSocket.Client.RemoteEndPoint);
 				ClientTCPSocket.Client.ReceiveTimeout = 1000;
+				// Small state updates must not sit in Nagle's buffer waiting for an ACK; batching is done in TCPWriteStream.
+				ClientTCPSocket.NoDelay = true;
 				TCPSocketStream = ClientTCPSocket.GetStream();
+				TCPWriteStream = new BufferedStream(TCPSocketStream, WriteBufferSize);
 
 				// Open Udp socket on the same port as the TCP connection
 				OpenUdpClient();
@@ -401,7 +409,18 @@ namespace Impunity.Networking
 				return;
 			}
 
-			TCPSocketStream?.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+			TCPWriteStream?.Write(messageBytes.Array, messageBytes.Offset, messageBytes.Count);
+		}
+
+		/// <inheritdoc/>
+		public void Flush()
+		{
+			if (ClientTCPSocket == null || !ClientTCPSocket.Connected)
+			{
+				return;
+			}
+
+			TCPWriteStream?.Flush();
 		}
 
 		/// <summary>Sends a message via UDP if available, otherwise falls back to TCP.</summary>
@@ -490,6 +509,11 @@ namespace Impunity.Networking
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			
+		}
+
+		public void Flush()
+		{
+
 		}
 
 		public void Dispose()

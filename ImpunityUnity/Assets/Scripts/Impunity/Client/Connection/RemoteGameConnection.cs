@@ -275,6 +275,12 @@ namespace Impunity.Connection
 
 				// Also checked after a send: a stream of unguaranteed sends never lets the wait time out.
 				SendKeepAliveIfDue();
+
+				// Let the transport batch whatever is queued up right now, but never hold anything back while idle.
+				if (PendingSend.Count == 0)
+				{
+					FlushTransport();
+				}
 			}
 		}
 
@@ -319,8 +325,22 @@ namespace Impunity.Connection
 			}
 
 			SendKeepAliveIfDue();
+			FlushTransport();
 		}
 #endif
+
+		// Pushes out whatever the transport buffered. Called on the send path whenever the send queue runs empty.
+		private void FlushTransport()
+		{
+			try
+			{
+				NetworkClient.Flush();
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Exception in remote connection send attempt", e);
+			}
+		}
 
 		// Sends a header-only keepalive if nothing guaranteed has gone out for the keepalive interval. Called only on the
 		// send path (writer thread, or Update on WebGL), which owns SendBufferWriter.

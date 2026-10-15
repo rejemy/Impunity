@@ -99,6 +99,12 @@ namespace Impunity.Networking
 		}
 
 		/// <inheritdoc/>
+		public void Flush()
+		{
+			// Each send is already its own WebSocket message; nothing is buffered.
+		}
+
+		/// <inheritdoc/>
 		public void Disconnect()
 		{
 			if (InstanceId >= 0)
@@ -433,6 +439,12 @@ namespace Impunity.Networking
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
 			SendGuaranteedMessage(messageBytes);
+		}
+
+		/// <inheritdoc/>
+		public void Flush()
+		{
+			// Each send is already its own WebSocket message; nothing is buffered.
 		}
 
 		/// <inheritdoc/>

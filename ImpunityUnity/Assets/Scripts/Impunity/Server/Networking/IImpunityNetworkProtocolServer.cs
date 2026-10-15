@@ -11,7 +11,14 @@ namespace Impunity.Networking
 	/// <summary>Callback for when a client connection is closed.</summary>
 	public delegate void ImpunityServerClientContextCallback(IImpunityNetworkServerClientContext client);
 
-	/// <summary>Represents a single client connection on the server side. Protocol-agnostic interface implemented by TCP, WebSocket, etc. Sends are NOT thread-safe; callers must serialize access (e.g., via a semaphore).</summary>
+	/// <summary>Represents a single client connection on the server side. Protocol-agnostic interface implemented by TCP, WebSocket, etc.</summary>
+	/// <remarks>
+	/// Send threading, as <see cref="ServerSideNetworkConnectionProxy"/> uses it: at most one
+	/// <see cref="SendGuaranteedMessageAsync"/> is in flight at a time, and the next is started from the previous one's
+	/// completion, so an implementation may return a task that stays pending while the peer isn't reading.
+	/// <see cref="SendUnguaranteedMessageAsync"/> is only called when <see cref="SupportsUnguaranteed"/> is true, never
+	/// concurrently with itself, but possibly while a guaranteed send is in flight.
+	/// </remarks>
 	public interface IImpunityNetworkServerClientContext : IDisposable
 	{
 		/// <summary>Called when a complete framed message is received from this client.</summary>
@@ -28,9 +35,12 @@ namespace Impunity.Networking
 		/// <summary>Whether this transport supports unguaranteed (UDP-like) delivery.</summary>
 		bool SupportsUnguaranteed { get; }
 
-		/// <summary>Sends a length-prefixed binary message reliably (TCP/WebSocket). Not thread-safe.</summary>
+		/// <summary>Sends reliably (TCP/WebSocket). <paramref name="messageBytes"/> holds one or more complete
+		/// length-prefixed messages back to back; a transport that needs per-message boundaries (WebSocket) splits them on
+		/// the length prefixes. The array is only valid until the returned task completes.</summary>
 		Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes);
-		/// <summary>Sends a binary message via the unguaranteed channel if available, otherwise falls back to guaranteed. Not thread-safe.</summary>
+		/// <summary>Sends one message via the unguaranteed channel (UDP). Only called when <see cref="SupportsUnguaranteed"/>
+		/// is true; may overlap a guaranteed send in flight.</summary>
 		Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes);
 
 		/// <summary>Closes the connection and releases resources.</summary>
