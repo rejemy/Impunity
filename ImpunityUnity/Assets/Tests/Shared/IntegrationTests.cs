@@ -10,6 +10,7 @@
 #nullable disable
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -458,6 +459,72 @@ namespace Impunity.Tests
 			Assert.AreSame(c2Entity, removedObj, "Channel OnObjectRemoved did not fire for the deleted object");
 			Assert.IsFalse(c2Channel.DistributedObjects.ContainsKey(c2Entity.DistributedEntityId),
 				"Deleted object was not removed from the channel's DistributedObjects");
+		}
+
+		// Sets up one entity seen by both clients: C1 (local) creates it, C2 (remote) gets the replica.
+		private async Task<(IntegrationTestEntity c1Entity, IntegrationTestEntity c2Entity)> SharedEventEntity(string channelName)
+		{
+			var c1Channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+
+			var entity = new IntegrationTestEntity();
+			await Pump(LocalGame.EntityManager.CreateObjectAsync(entity, c1Channel, false), AllConnections());
+
+			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+			await PumpUntil(() => c2Channel.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
+
+			return (entity, FirstEntity(c2Channel));
+		}
+
+		[Test, Category("LiveState")]
+		public async Task EntityEvent_IncludeSender_ReachesEveryoneStampedWithSendTime()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+			var (c1Entity, c2Entity) = await SharedEventEntity("events");
+
+			var c1Got = new List<EntityEvent>();
+			var c2Got = new List<EntityEvent>();
+			c1Entity.OnEventTriggeredEvent += e => c1Got.Add(e);
+			c2Entity.OnEventTriggeredEvent += e => c2Got.Add(e);
+
+			long before = RemoteGame.GetServerTime();
+			await Pump(c2Entity.TriggerEventAsync(7, "boom"), AllConnections());
+			long after = RemoteGame.GetServerTime();
+
+			await PumpUntil(() => c1Got.Count == 1 && c2Got.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual(7, c1Got[0].Type);
+			Assert.AreEqual("boom", c1Got[0].Data.AsString);
+			Assert.AreEqual(7, c2Got[0].Type, "the sender gets its own event back by default");
+
+			// The sender's own clock estimate, carried as is to every receiver
+			Assert.That(c1Got[0].SentServerMs, Is.InRange(before, after));
+			Assert.AreEqual(c1Got[0].SentServerMs, c2Got[0].SentServerMs);
+		}
+
+		[Test, Category("LiveState")]
+		public async Task EntityEvent_ExcludeSender_SkipsOnlyTheSender()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+			var (c1Entity, c2Entity) = await SharedEventEntity("events_x");
+
+			var c1Got = new List<int>();
+			var c2Got = new List<int>();
+			c1Entity.OnEventTriggeredEvent += e => c1Got.Add(e.Type);
+			c2Entity.OnEventTriggeredEvent += e => c2Got.Add(e.Type);
+
+			await Pump(c2Entity.TriggerEventAsync(1, null, EntityEventEcho.ExcludeSender), AllConnections());
+			await PumpUntil(() => c1Got.Count == 1, TimeSpan.FromSeconds(3), AllConnections());
+
+			// A second, echoed event from the same sender: once it is back, the first would have been too (one ordered
+			// stream per connection), so its absence means it was never sent here
+			await Pump(c2Entity.TriggerEventAsync(2, null, EntityEventEcho.IncludeSender), AllConnections());
+			await PumpUntil(() => c2Got.Count >= 1 && c1Got.Count == 2, TimeSpan.FromSeconds(3), AllConnections());
+
+			CollectionAssert.AreEqual(new[] { 1, 2 }, c1Got);
+			CollectionAssert.AreEqual(new[] { 2 }, c2Got);
 		}
 
 		// A create used to carry only the instance's DIRTY fields. A fresh instance has everything it set dirty, but

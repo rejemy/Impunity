@@ -202,12 +202,17 @@ namespace Impunity.GameState
 		[BsonField("ed")]
 		public BsonValue EventData = null!;
 
+		/// <summary>Server time (Unix ms) the sender fired the event at: its own stamp, or the server's clock at the relay
+		/// for a sender that didn't stamp one.</summary>
+		[BsonField("st")]
+		public long SentServerMs;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_EVENT_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleEntityEvent(EntityId, EventType, EventData);
+			handler.HandleEntityEvent(EntityId, EventType, EventData, SentServerMs);
 		}
 	}
 

@@ -233,6 +233,16 @@ namespace Impunity.Connection
 		/// <param name="eventData">Arbitrary BSON payload delivered with the event.</param>
 		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
 		void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete);
+		/// <summary>Fires a one-shot event on this entity, choosing whether this connection receives it back. The server
+		/// relays it to every other client subscribed to the entity's channel, and to this one too unless
+		/// <paramref name="echo"/> is <see cref="EntityEventEcho.ExcludeSender"/>. The event is stamped with this client's
+		/// estimate of the server time (<see cref="EntityEvent.SentServerMs"/>). Events carry no entity state and are not
+		/// persisted.</summary>
+		/// <param name="eventType">Application-defined event type id.</param>
+		/// <param name="eventData">Arbitrary BSON payload delivered with the event.</param>
+		/// <param name="echo">Whether the sending connection receives its own event.</param>
+		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
+		void TriggerEvent(int eventType, BsonValue eventData, EntityEventEcho echo, ImpunityCallback? onComplete);
 		/// <summary>Immediately flushes this entity's pending dirty fields to the server as an exclusive (optimistic-concurrency)
 		/// update, instead of waiting for the per-frame dirty sweep. The server applies and relays the update only if this
 		/// client has seen the latest change to every field being written; otherwise the whole update is rejected (nothing
@@ -327,13 +337,12 @@ namespace Impunity.Connection
 		/// <summary>Raised by <see cref="OnFullyInitialized"/> when the entity is fully initialized.</summary>
 		event Action? OnFullyInitializedEvent;
 
-		/// <summary>Called when a one-shot event fired on this entity (via <see cref="TriggerEvent"/> on any client,
-		/// including this one) is received.</summary>
-		/// <param name="eventType">The application-defined event type id supplied by the sender.</param>
-		/// <param name="eventData">The BSON payload supplied by the sender.</param>
-		void OnEventTriggered(int eventType, BsonValue eventData);
+		/// <summary>Called when a one-shot event fired on this entity (via <c>TriggerEvent</c> on any client, including
+		/// this one unless it excluded itself) is received.</summary>
+		/// <param name="e">The event: its type id, payload, and when it was sent.</param>
+		void OnEventTriggered(EntityEvent e);
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
-		event Action<int, BsonValue>? OnEventTriggeredEvent;
+		event Action<EntityEvent>? OnEventTriggeredEvent;
 
 		// When an object is specifically deleted
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
@@ -508,6 +517,20 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
 		public void TriggerEvent(int eventType, BsonValue eventData, ImpunityCallback onComplete)
 		{
+			TriggerEvent(eventType, eventData, EntityEventEcho.IncludeSender, onComplete);
+		}
+
+		/// <summary>Fires a one-shot event on this entity, choosing whether this connection receives it back. The server
+		/// relays it to every other client subscribed to the entity's channel, and to this one too unless
+		/// <paramref name="echo"/> is <see cref="EntityEventEcho.ExcludeSender"/>. The event is stamped with this client's
+		/// estimate of the server time (<see cref="EntityEvent.SentServerMs"/>). Events carry no entity state and are not
+		/// persisted.</summary>
+		/// <param name="eventType">Application-defined event type id.</param>
+		/// <param name="eventData">Arbitrary BSON payload delivered with the event.</param>
+		/// <param name="echo">Whether the sending connection receives its own event.</param>
+		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
+		public void TriggerEvent(int eventType, BsonValue eventData, EntityEventEcho echo, ImpunityCallback? onComplete)
+		{
 			BaseGameConnection? connection = Manager?.Connection;
 			if (connection == null)
 			{
@@ -515,7 +538,7 @@ namespace Impunity.Connection
 				return;
 			}
 
-			connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, onComplete);
+			connection.TriggerEntityEvent(DistributedEntityId, eventType, eventData, echo, onComplete);
 		}
 
 		// The error every request fails with when this entity has no manager or its manager has no connection. With no
@@ -694,16 +717,15 @@ namespace Impunity.Connection
 		/// <summary>Raised by <see cref="OnFullyInitialized"/> when the entity is fully initialized.</summary>
 		public event Action? OnFullyInitializedEvent;
 
-		/// <summary>Called when a one-shot event fired on this entity (via <see cref="TriggerEvent"/> on any client,
-		/// including this one) is received.</summary>
-		/// <param name="eventType">The application-defined event type id supplied by the sender.</param>
-		/// <param name="eventData">The BSON payload supplied by the sender.</param>
-		public virtual void OnEventTriggered(int eventType, BsonValue eventData)
+		/// <summary>Called when a one-shot event fired on this entity (via <c>TriggerEvent</c> on any client, including
+		/// this one unless it excluded itself) is received.</summary>
+		/// <param name="e">The event: its type id, payload, and when it was sent.</param>
+		public virtual void OnEventTriggered(EntityEvent e)
 		{
-			OnEventTriggeredEvent?.Invoke(eventType, eventData);
+			OnEventTriggeredEvent?.Invoke(e);
 		}
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
-		public event Action<int, BsonValue>? OnEventTriggeredEvent;
+		public event Action<EntityEvent>? OnEventTriggeredEvent;
 
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>

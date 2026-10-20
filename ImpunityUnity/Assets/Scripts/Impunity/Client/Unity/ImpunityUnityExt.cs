@@ -229,10 +229,11 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield TriggerEntityEventYield(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData)
+		public static ImpunityYield TriggerEntityEventYield(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData,
+			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
 			var action = new ImpunityYield();
-			connection.TriggerEntityEvent(entityId, eventType, eventData, action.OnComplete);
+			connection.TriggerEntityEvent(entityId, eventType, eventData, echo, action.OnComplete);
 			return action;
 		}
 
@@ -361,10 +362,11 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityYieldExtensions
 	{
-		public static ImpunityYield TriggerEventYield(this IDistributedEntity entity, int eventType, BsonValue eventData)
+		public static ImpunityYield TriggerEventYield(this IDistributedEntity entity, int eventType, BsonValue eventData,
+			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
 			var t = new ImpunityYield();
-			entity.TriggerEvent(eventType, eventData, t.OnComplete);
+			entity.TriggerEvent(eventType, eventData, echo, t.OnComplete);
 			return t;
 		}
 

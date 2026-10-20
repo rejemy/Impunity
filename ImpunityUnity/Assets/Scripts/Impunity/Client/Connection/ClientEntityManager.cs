@@ -1215,7 +1215,8 @@ namespace Impunity.Connection
 		/// <param name="entityId">The entity id the event was fired on.</param>
 		/// <param name="eventType">The application-defined event type id.</param>
 		/// <param name="eventData">The BSON payload delivered with the event.</param>
-		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
+		/// <param name="sentServerMs">Server time the sender fired the event at (<see cref="EntityEvent.SentServerMs"/>).</param>
+		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
@@ -1228,7 +1229,7 @@ namespace Impunity.Connection
 
 			try
 			{
-				entity.OnEventTriggered(eventType, eventData);
+				entity.OnEventTriggered(new EntityEvent(eventType, eventData, sentServerMs));
 			}
 			catch (Exception e)
 			{

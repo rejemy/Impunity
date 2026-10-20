@@ -1287,7 +1287,7 @@ namespace Impunity.GameState
 		}
 	}
 
-	/// <summary>Sends a one-shot event to all subscribers of an entity's channel.</summary>
+	/// <summary>Sends a one-shot event to all subscribers of an entity's channel (all but the sender, if it asked).</summary>
 	public class EventEntityAction : ClientActionResultlessBase
 	{
 		[BsonField("id")]
@@ -1299,22 +1299,40 @@ namespace Impunity.GameState
 		[BsonField("mb")]
 		public BsonValue EventData = null!;
 
+		/// <summary>The sender's estimate of server time when it fired the event. 0 (absent, from an older client) means
+		/// unstamped: the server stamps the relay with its own clock instead.</summary>
+		[BsonField("st")]
+		public long SentServerMs;
+
+		/// <summary>Whether the sending connection is left out of the relay. Absent (from an older client) reads as false,
+		/// the original deliver-to-everyone behavior.</summary>
+		[BsonField("xs")]
+		public bool ExcludeSender;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.EVENT_ENTITY; }
 		public override bool IsDBOperation() { return false; }
 
 		public EventEntityAction() { }
 
 		public EventEntityAction(uint entityId, int eventType, BsonValue eventData, ImpunityCallback? onComplete = null)
+			: this(entityId, eventType, eventData, 0, false, onComplete)
+		{
+		}
+
+		public EventEntityAction(uint entityId, int eventType, BsonValue eventData, long sentServerMs, bool excludeSender, ImpunityCallback? onComplete = null)
 		{
 			EntityId = entityId;
 			EventType = eventType;
 			EventData = eventData;
+			SentServerMs = sentServerMs;
+			ExcludeSender = excludeSender;
 			OnCompleteCallback = onComplete;
 		}
 
 		protected override void DoAction(GameStateServer game)
 		{
-			game.Live.SendEntityEvent(EntityId, EventType, EventData);
+			long sentServerMs = SentServerMs != 0 ? SentServerMs : GameStateServer.GetServerTime();
+			game.Live.SendEntityEvent(EntityId, EventType, EventData, sentServerMs, ExcludeSender ? Origin.ConnectionReplicant : null);
 		}
 	}
 

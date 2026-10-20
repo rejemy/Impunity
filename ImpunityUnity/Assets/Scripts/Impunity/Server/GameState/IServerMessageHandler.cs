@@ -15,8 +15,9 @@ namespace Impunity.GameState
 		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq);
 		/// <summary>Called when an entity's properties are updated (dirty fields only).</summary>
 		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq);
-		/// <summary>Called when a custom event is fired on an entity.</summary>
-		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData);
+		/// <summary>Called when a custom event is fired on an entity. <paramref name="sentServerMs"/> is the server time
+		/// the sender fired it at.</summary>
+		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs);
 		/// <summary>Called when an entity becomes locked by a connection.</summary>
 		void HandleEntityLocked(uint entityId);
 		/// <summary>Called when an entity lock is released.</summary>

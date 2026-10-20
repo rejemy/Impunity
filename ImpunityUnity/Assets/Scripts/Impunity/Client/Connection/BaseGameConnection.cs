@@ -299,9 +299,9 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData)
+		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs)
 		{
-			EntityManager.HandleEntityEvent(entityId, eventType, eventData);
+			EntityManager.HandleEntityEvent(entityId, eventType, eventData, sentServerMs);
 		}
 
 		/// <inheritdoc/>
@@ -798,7 +798,21 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Optional completion callback.</param>
 		public void TriggerEntityEvent(uint entityId, int eventType, BsonValue eventData, ImpunityCallback? onComplete)
 		{
-			DoAction(new EventEntityAction(entityId, eventType, eventData, onComplete));
+			TriggerEntityEvent(entityId, eventType, eventData, EntityEventEcho.IncludeSender, onComplete);
+		}
+
+		/// <summary>Fires a one-shot, fire-and-forget event on an entity, choosing whether this connection receives it back.
+		/// The server relays it to every other subscriber of the entity's channel, and to this connection too unless
+		/// <paramref name="echo"/> is <see cref="EntityEventEcho.ExcludeSender"/>. Stamped with <see cref="GetServerTime"/>
+		/// at the send (<see cref="EntityEvent.SentServerMs"/>).</summary>
+		/// <param name="entityId">The entity to raise the event on.</param>
+		/// <param name="eventType">Application-defined event category.</param>
+		/// <param name="eventData">The event payload.</param>
+		/// <param name="echo">Whether this connection receives its own event.</param>
+		/// <param name="onComplete">Optional completion callback.</param>
+		public void TriggerEntityEvent(uint entityId, int eventType, BsonValue eventData, EntityEventEcho echo, ImpunityCallback? onComplete)
+		{
+			DoAction(new EventEntityAction(entityId, eventType, eventData, GetServerTime(), echo == EntityEventEcho.ExcludeSender, onComplete));
 		}
 
 		/// <summary>Tries to acquire an exclusive lock on a specific live entity for this connection. While held, the server rejects other connections' updates and deletes to that entity.</summary>

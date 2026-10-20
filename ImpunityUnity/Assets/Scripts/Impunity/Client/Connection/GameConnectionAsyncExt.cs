@@ -318,10 +318,11 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData)
+		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData,
+			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			connection.TriggerEntityEvent(entityId, eventType, eventData, t.OnComplete);
+			connection.TriggerEntityEvent(entityId, eventType, eventData, echo, t.OnComplete);
 			return t.Task;
 		}
 
@@ -452,10 +453,11 @@ namespace Impunity.Connection
 	/// <summary>Async/await extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityAsyncExtensions
 	{
-		public static Task TriggerEventAsync(this IDistributedEntity entity, int eventType, BsonValue eventData)
+		public static Task TriggerEventAsync(this IDistributedEntity entity, int eventType, BsonValue eventData,
+			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
 			var t = new ImpunityTaskCompletionSource();
-			entity.TriggerEvent(eventType, eventData, t.OnComplete);
+			entity.TriggerEvent(eventType, eventData, echo, t.OnComplete);
 			return t.Task;
 		}
 

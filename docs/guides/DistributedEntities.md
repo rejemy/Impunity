@@ -404,7 +404,7 @@ Every entity (override the method, or subscribe to the paired `…Event`) receiv
 | `OnFullyInitialized` | The entity has been created locally and its initial field values applied — it is ready to use. For a channel with existing members, this fires on the channel *before* its members are created. |
 | `OnObjectAdded(obj, newlyCreated)` *(channels)* | An object joins the channel. `newlyCreated` is `false` for members in the initial snapshot, `true` for objects created later while you watch — **including objects you create yourself** via `CreateObject` (see [§7](#7-creating-channels-and-objects)). |
 | `OnObjectRemoved(obj)` *(channels)* | An object leaves the channel. *(See [§15](#15-known-caveats).)* |
-| `OnEventTriggered(type, data)` | A one-shot [event](#12-events) is fired on the entity. |
+| `OnEventTriggered(e)` | A one-shot [event](#12-events) is fired on the entity (`EntityEvent`: type, data, send time). |
 | `OnLocked` / `OnUnlocked` | The entity's [lock](#10-locks) is taken / released (by anyone). |
 | `OnDeleted(deleteData)` | The entity is deleted on the server. Always followed by `OnUndistributed`. |
 | `OnUndistributed` | The entity stops being replicated to you — you unsubscribed, the channel was deleted, or the entity was deleted. Release any references here. |
@@ -757,15 +757,27 @@ It is **not a transaction**. The two halves are separate operations and separate
 
 ## 12. Events
 
-An event is a one-shot, fire-and-forget message attached to an entity — no stored state, not persisted. The server relays it to **every** subscriber of the entity's channel, **including the sender**.
+An event is a one-shot, fire-and-forget message attached to an entity — no stored state, not persisted. The server relays it to every subscriber of the entity's channel, **including the sender** unless the sender opts out.
 
 ```csharp
-// send
+// send — echoed back to this connection too (the original behavior)
 entity.TriggerEvent(eventType: 1, eventData: new BsonDocument { ["msg"] = "hi" }, onComplete);
 
+// send to everyone else only: the usual choice when the sender acts on the event itself as it fires it
+entity.TriggerEvent(1, data, EntityEventEcho.ExcludeSender, onComplete);
+
 // receive (override or subscribe to OnEventTriggeredEvent)
-public override void OnEventTriggered(int eventType, BsonValue eventData) { … }
+public override void OnEventTriggered(EntityEvent e)
+{
+    // e.Type, e.Data, and e.SentServerMs: when the sender fired it, in server time
+    long lateMs = Manager.Connection.GetServerTime() - e.SentServerMs;
+}
 ```
+
+- **`EntityEventEcho.ExcludeSender`** leaves out the sending *connection* (the server already knows it), so a client that presents its own events immediately has no echo to recognize and skip. Every other subscriber, on any transport, still gets it.
+- **`SentServerMs`** is stamped by the sender (`GetServerTime()` at the send), so receivers can tell how late an event arrived, e.g. to start a timed effect that far in. An event from a sender that didn't stamp one (an older client) carries the server's clock at relay time.
+- Events are guaranteed (reliable, ordered per connection) like guaranteed field updates, but they're sent at once, while field changes wait for the next update sweep. So an event fired right after a `Set` can arrive before the new value does. Put everything the receiver needs in the payload.
+- Late subscribers never see past events: anything that must be seen later belongs in a field.
 
 Use events for transient signals — a hit, a sound cue, a one-off notification — anything that shouldn't live in a field.
 

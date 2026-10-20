@@ -196,9 +196,9 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		//ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	public override void OnEventTriggered(int eventType, BsonValue eventData)
+	public override void OnEventTriggered(EntityEvent e)
 	{
-		ImpunityLogger.LogInformation("Got event " + eventType + " on TestPlayer with data " + eventData.ToString());
+		ImpunityLogger.LogInformation("Got event " + e.Type + " on TestPlayer with data " + e.Data?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
@@ -362,9 +362,9 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		ImpunityLogger.LogInformation("Got quests change on ZonePersistedObject, key " + key + " from " + oldQuest + " to " + newQuest);
 	}
 
-	public override void OnEventTriggered(int eventType, BsonValue eventData)
+	public override void OnEventTriggered(EntityEvent e)
 	{
-		ImpunityLogger.LogInformation("Got event " + eventType + " on ZonePersistedObject with data " + eventData.ToString());
+		ImpunityLogger.LogInformation("Got event " + e.Type + " on ZonePersistedObject with data " + e.Data?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 

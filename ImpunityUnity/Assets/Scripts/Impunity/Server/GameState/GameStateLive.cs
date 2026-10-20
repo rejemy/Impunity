@@ -622,7 +622,8 @@ namespace Impunity.GameState
 			return propBytes;
 		}
 
-		public virtual void SendEvent(int eventType, BsonValue eventData)
+		/// <summary>Relays a one-shot event to the entity's listeners, all but <paramref name="except"/> when given.</summary>
+		public virtual void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
 		{
 			throw new Exception("SendEvent unimplemented in abstract base class");
 		}
@@ -772,14 +773,15 @@ namespace Impunity.GameState
 			SendToListeners(updateMessage, except);
 		}
 
-		public override void SendEvent(int eventType, BsonValue eventData)
+		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
 		{
 			EntityEventMessageAction eventMessage = new EntityEventMessageAction();
 			eventMessage.EntityId = Id;
 			eventMessage.EventType = eventType;
 			eventMessage.EventData = eventData;
+			eventMessage.SentServerMs = sentServerMs;
 
-			SendToListeners(eventMessage, null);
+			SendToListeners(eventMessage, except);
 		}
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
@@ -1050,7 +1052,7 @@ namespace Impunity.GameState
 			Channel.SendToListeners(updateMessage, except);
 		}
 
-		public override void SendEvent(int eventType, BsonValue eventData)
+		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
 		{
 			if (Channel == null)
 			{
@@ -1061,8 +1063,9 @@ namespace Impunity.GameState
 			eventMessage.EntityId = Id;
 			eventMessage.EventType = eventType;
 			eventMessage.EventData = eventData;
+			eventMessage.SentServerMs = sentServerMs;
 
-			Channel.SendToListeners(eventMessage, null);
+			Channel.SendToListeners(eventMessage, except);
 		}
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
@@ -1790,7 +1793,9 @@ namespace Impunity.GameState
 
 
 
-		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData)
+		/// <summary>Relays a one-shot event fired on an entity to its channel's listeners, all but <paramref name="except"/>
+		/// when given (the sender, when it excluded itself).</summary>
+		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1798,7 +1803,7 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			entity.SendEvent(eventType, eventData);
+			entity.SendEvent(eventType, eventData, sentServerMs, except);
 		}
 
 		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData)
