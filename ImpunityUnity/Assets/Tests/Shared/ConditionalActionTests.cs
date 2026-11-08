@@ -12,6 +12,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -368,6 +369,105 @@ namespace Impunity.Tests
 			Assert.AreEqual(ImpunityErrorCode.ActionUniqueNameExists, createProbe.Code);
 			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, removeProbe.Code);
 			Assert.IsNotNull(await FindDoc(conn, "bag_gem"), "Conditional ran even though the create failed");
+		}
+
+		// ───────── Conditional replace (replaceEntityId) ─────────
+
+		/// <summary>A hole becoming a crop: the create replaces exactly the named entity, everyone sees the old one go
+		/// (the replacer included) and the new one arrive, and the conditional (spending the seed) runs.</summary>
+		[Test, Category("Conditional")]
+		public async Task Replace_TheExpectedEntity_ReplacesAndRunsConditional()
+		{
+			CreateServer();
+			var planter = await ConnectClient("cond_replace_a");
+			var watcher = await ConnectClient("cond_replace_b");
+			var channel = await Pump(planter.EntityManager.SubscribeToChannelAsync("cond_replace", new IntegrationTestChannel()), AllConnections());
+			var watching = await Pump(watcher.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("cond_replace", null), AllConnections());
+			await Pump(planter.InsertDocumentAsync(ITEMS, InventoryDoc("bag_seed", "seed")), AllConnections());
+
+			var hole = new IntegrationTestEntity { UniqueName = "tile_1_2" };
+			hole.DisplayName.Set("hole");
+			await Pump(planter.EntityManager.CreateObjectAsync(hole, channel, false), AllConnections());
+			await PumpUntil(() => watching.DistributedObjects.Count == 1, AllConnections());
+			uint holeId = hole.DistributedEntityId;
+
+			var createProbe = new CallbackProbe<IntegrationTestEntity>();
+			var spendProbe = new CallbackProbe<bool>();
+			var crop = new IntegrationTestEntity { UniqueName = "tile_1_2" };
+			crop.DisplayName.Set("crop");
+			planter.EntityManager.CreateObject(crop, channel, false, createProbe.OnComplete,
+				new DeleteDocumentAction(ITEMS, "bag_seed", spendProbe.OnComplete), holeId);
+
+			await PumpUntil(() => createProbe.Fired && spendProbe.Fired, AllConnections());
+			await PumpUntil(() => watching.DistributedObjects.Count == 1
+				&& ((IntegrationTestEntity)watching.DistributedObjects.Values.First()).DisplayName.Get() == "crop", AllConnections());
+
+			Assert.IsNull(createProbe.Error, "Replace failed: " + createProbe.Error?.Message);
+			Assert.IsNull(spendProbe.Error, "Conditional failed: " + spendProbe.Error?.Message);
+			Assert.IsNull(await FindDoc(planter, "bag_seed"), "The conditional should have spent the seed");
+
+			Assert.AreEqual(1, channel.DistributedObjects.Count, "The replacer should hold only the new object");
+			Assert.IsFalse(channel.DistributedObjects.ContainsKey(holeId), "The replacer still holds the replaced entity");
+			Assert.AreSame(crop, channel.DistributedObjects.Values.First());
+		}
+
+		/// <summary>Two planters, one hole: the second replace names an entity that no longer holds the name, so it
+		/// fails and its seed stays.</summary>
+		[Test, Category("Conditional")]
+		public async Task Replace_AfterSomeoneElseReplacedIt_FailsAndSkipsConditional()
+		{
+			CreateServer();
+			var conn = await ConnectClient("cond_replace_race");
+			var channel = await Pump(conn.EntityManager.SubscribeToChannelAsync("cond_replace_race", new IntegrationTestChannel()), AllConnections());
+			await Pump(conn.InsertDocumentAsync(ITEMS, InventoryDoc("bag_seed2", "seed")), AllConnections());
+
+			var hole = new IntegrationTestEntity { UniqueName = "tile_3_3" };
+			await Pump(conn.EntityManager.CreateObjectAsync(hole, channel, false), AllConnections());
+			uint holeId = hole.DistributedEntityId;
+
+			var first = new IntegrationTestEntity { UniqueName = "tile_3_3" };
+			await Pump(conn.EntityManager.CreateObjectAsync(first, channel, false, null, holeId), AllConnections());
+
+			var createProbe = new CallbackProbe<IntegrationTestEntity>();
+			var spendProbe = new CallbackProbe<bool>();
+			var second = new IntegrationTestEntity { UniqueName = "tile_3_3" };
+			conn.EntityManager.CreateObject(second, channel, false, createProbe.OnComplete,
+				new DeleteDocumentAction(ITEMS, "bag_seed2", spendProbe.OnComplete), holeId);
+
+			await PumpUntil(() => createProbe.Fired && spendProbe.Fired, AllConnections());
+
+			Assert.AreEqual(ImpunityErrorCode.ActionUniqueNameExists, createProbe.Code);
+			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, spendProbe.Code);
+			Assert.IsNotNull(await FindDoc(conn, "bag_seed2"), "Conditional ran even though the replace failed");
+			Assert.AreSame(first, channel.DistributedObjects.Values.Single(), "The first replacement should still stand");
+		}
+
+		/// <summary>The hole was filled in (deleted) first: nothing holds the name, so nothing is created.</summary>
+		[Test, Category("Conditional")]
+		public async Task Replace_WhenNothingHoldsTheName_FailsNotFoundAndCreatesNothing()
+		{
+			CreateServer();
+			var conn = await ConnectClient("cond_replace_gone");
+			var channel = await Pump(conn.EntityManager.SubscribeToChannelAsync("cond_replace_gone", new IntegrationTestChannel()), AllConnections());
+			await Pump(conn.InsertDocumentAsync(ITEMS, InventoryDoc("bag_seed3", "seed")), AllConnections());
+
+			var hole = new IntegrationTestEntity { UniqueName = "tile_4_4" };
+			await Pump(conn.EntityManager.CreateObjectAsync(hole, channel, false), AllConnections());
+			uint holeId = hole.DistributedEntityId;
+			await Pump(hole.DeleteAsync(null), AllConnections());
+
+			var createProbe = new CallbackProbe<IntegrationTestEntity>();
+			var spendProbe = new CallbackProbe<bool>();
+			var crop = new IntegrationTestEntity { UniqueName = "tile_4_4" };
+			conn.EntityManager.CreateObject(crop, channel, false, createProbe.OnComplete,
+				new DeleteDocumentAction(ITEMS, "bag_seed3", spendProbe.OnComplete), holeId);
+
+			await PumpUntil(() => createProbe.Fired && spendProbe.Fired, AllConnections());
+
+			Assert.AreEqual(ImpunityErrorCode.ActionNotFound, createProbe.Code);
+			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, spendProbe.Code);
+			Assert.AreEqual(0, channel.DistributedObjects.Count);
+			Assert.IsNotNull(await FindDoc(conn, "bag_seed3"));
 		}
 
 		// ───────── Persistence and rejection paths ─────────

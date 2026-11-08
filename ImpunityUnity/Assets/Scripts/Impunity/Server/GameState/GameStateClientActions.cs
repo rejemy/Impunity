@@ -1115,6 +1115,11 @@ namespace Impunity.GameState
 		[BsonField("r")]
 		public bool ReplaceExisting;
 
+		/// <summary>Non-zero: replace exactly this entity, which must hold <see cref="UniqueName"/>; the create
+		/// fails if nothing holds the name or another entity does. 0 for none (<see cref="ReplaceExisting"/> alone).</summary>
+		[BsonField("re")]
+		public uint ReplaceEntityId;
+
 		/// <summary>Database action to run on the database thread if, and only if, the object is created. Null for none.</summary>
 		[BsonField("ca")]
 		public GameStateActionBase? OnCreatedAction;
@@ -1131,8 +1136,9 @@ namespace Impunity.GameState
 
 		public CreateObjectAction() { }
 
-		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete = null, GameStateActionBase? onCreatedAction = null)
+		public CreateObjectAction(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete = null, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0)
 		{
+			ReplaceEntityId = replaceEntityId;
 			EntityTypeId = entityTypeId;
 			InstanceFlags = instanceFlags;
 			ChannelId = channelId;
@@ -1149,7 +1155,7 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false);
+				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false, ReplaceEntityId);
 				created = true;
 			}
 			finally

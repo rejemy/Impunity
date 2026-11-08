@@ -698,9 +698,17 @@ namespace Impunity.Connection
 		/// Not a transaction: a failing conditional does not undo the create. See docs/guides/DistributedEntities.md,
 		/// "Conditional actions".
 		/// </param>
-		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete, GameStateActionBase? onCreatedAction = null)
+		/// <param name="replaceEntityId">
+		/// Non-zero: a conditional replace — the object replaces exactly this entity, which must hold
+		/// <paramref name="uniqueName"/> (implies <paramref name="replace"/>). Fails with
+		/// <see cref="ImpunityErrorCode.ActionNotFound"/> when nothing holds the name, or
+		/// <see cref="ImpunityErrorCode.ActionUniqueNameExists"/> when another entity does (someone replaced it first), and
+		/// then nothing changes and the conditional action is skipped. So of two clients replacing the same entity, only
+		/// the first succeeds — e.g. a hole becoming the crop planted in it, with the seed spent as the conditional.
+		/// </param>
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, onComplete, onCreatedAction));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace || replaceEntityId != 0, onComplete, onCreatedAction, replaceEntityId));
 		}
 
 		/// <summary>Sends a serialized property delta for a live entity to the server, which validates and relays it to other subscribers.</summary>

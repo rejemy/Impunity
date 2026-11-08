@@ -1667,7 +1667,9 @@ namespace Impunity.GameState
 			channel.RemoveListener(origin);
 		}
 
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force)
+		// replaceEntityId non-zero: replace exactly this entity, which must hold uniqueName — fails with ActionNotFound
+		// when nothing holds the name, and with ActionUniqueNameExists when another entity does. Implies replace.
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force, uint replaceEntityId = 0)
 		{
 			ValidateInstanceFlags(instanceFlags);
 
@@ -1677,6 +1679,27 @@ namespace Impunity.GameState
 			if (channel == null || channel.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with ID " + channelId);
+			}
+
+			if (replaceEntityId != 0)
+			{
+				if (uniqueName == null)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Replacing entity " + replaceEntityId + " needs a unique name");
+				}
+
+				GameStateObject? holder = channel.HasUniqueName(uniqueName) ? channel.GetNamedObject(uniqueName) : null;
+				if (holder == null)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "Channel has no object named " + uniqueName + " to replace");
+				}
+
+				if (holder.Id != replaceEntityId)
+				{
+					throw new ImpunityServerException(ImpunityErrorCode.ActionUniqueNameExists, "Object " + uniqueName + " is no longer entity " + replaceEntityId);
+				}
+
+				replace = true;
 			}
 
 			if (uniqueName != null && channel.HasUniqueName(uniqueName))

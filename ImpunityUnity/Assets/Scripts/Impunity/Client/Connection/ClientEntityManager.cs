@@ -273,7 +273,10 @@ namespace Impunity.Connection
 		/// <see cref="BaseGameConnection.CreateObject"/>. If this method throws, the action was never taken and is left
 		/// unresolved: the caller still owns it, and should resolve it (<see cref="GameStateActionBase.SkipUnsent"/>) if
 		/// something is waiting on its callback.</param>
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		/// <param name="replaceEntityId">Non-zero: replace exactly this entity, which must hold the object's unique name,
+		/// or fail without changing anything (see <see cref="BaseGameConnection.CreateObject"/>). Implies
+		/// <paramref name="replace"/>.</param>
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0) where T : class, IDistributedObject
 		{
 			if (Connection == null)
 			{
@@ -323,6 +326,11 @@ namespace Impunity.Connection
 				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
+			if (replaceEntityId != 0 && distObj.UniqueName == null)
+			{
+				throw new Exception("A conditional replace needs the object's unique name");
+			}
+
 			Connection.CreateObject(entityTypeId, instanceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName, replace, (ImpunityErrorResponse? err, uint objectId) =>
 			{
 				if (err != null)
@@ -363,7 +371,7 @@ namespace Impunity.Connection
 				}
 
 				onComplete?.Invoke(err, distObj);
-			}, onCreatedAction);
+			}, onCreatedAction, replaceEntityId);
 		}
 
 		private ObjectCreateData MakeObjectCreateData(IDistributedObject distObj, IDistributedChannel channel)

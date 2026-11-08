@@ -297,10 +297,10 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null)
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete, onCreatedAction);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete, onCreatedAction, replaceEntityId);
 			return t.Task;
 		}
 
@@ -421,10 +421,10 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0) where T : class, IDistributedObject
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId);
 			return t.Task;
 		}
 
