@@ -513,6 +513,22 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.Transact"/>. The body is synchronous and may run
+		/// more than once (once per attempt), so it must not await anything or have side effects outside the entity.</summary>
+		/// <param name="entity">The entity to change.</param>
+		/// <param name="body">Reads and sets the entity's fields; returns true to commit, false to send nothing.</param>
+		/// <param name="maxAttempts">Runs of the body before <see cref="TransactResult.Conflict"/>; negative uses the
+		/// manager's default.</param>
+		/// <returns>A task for the outcome: <see cref="TransactResult.Committed"/>, <see cref="TransactResult.Declined"/> or
+		/// <see cref="TransactResult.Conflict"/>. It faults with <see cref="ImpunityErrorResponseException"/> when the
+		/// outcome is <see cref="TransactResult.Failed"/> (the body threw, the entity went away, or the update failed).</returns>
+		public static Task<TransactResult> TransactAsync(this IDistributedEntity entity, Func<bool> body, int maxAttempts = -1)
+		{
+			var t = new ImpunityTaskCompletionSource<TransactResult>();
+			entity.Transact(body, t.OnComplete, maxAttempts);
+			return t.Task;
+		}
+
 		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.RunExclusive"/> with an awaitable body. The
 		/// lock is held for as long as <paramref name="body"/> takes, so the scope may span many frames — keep it short
 		/// or other clients will sit in the waiter queue.</summary>

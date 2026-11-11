@@ -256,6 +256,47 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>
+		/// Transact over each real transport: two clients fire increments at once, each also queueing several on its
+		/// own instance in one frame. Every one commits and none is lost, which needs both the per-entity queue (no
+		/// self-races) and the rerun on staleness (the other client's writes) to work over the wire.
+		/// </summary>
+		[Test, Category("Transport"), Category("Transact")]
+		public async Task TransactIncrementsFromTwoClients()
+		{
+			const int N = 4;
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("tx");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var a = new IntegrationTestEntity();
+			await Pump(connA.EntityManager.CreateObjectAsync(a, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			IntegrationTestEntity b = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				b = (IntegrationTestEntity)obj;
+			}
+
+			var results = new List<Task<TransactResult>>();
+			for (int i = 0; i < N; i++)
+			{
+				results.Add(a.TransactAsync(() => { a.Health.Set(a.Health.Get() + 1); return true; }, 4 * N));
+				results.Add(b.TransactAsync(() => { b.Health.Set(b.Health.Get() + 1); return true; }, 4 * N));
+			}
+
+			foreach (var result in results)
+			{
+				Assert.AreEqual(TransactResult.Committed, await Pump(result, AllConnections()));
+			}
+
+			await PumpUntil(() => a.Health.Get() == 2 * N && b.Health.Get() == 2 * N, TimeSpan.FromSeconds(5), AllConnections());
+		}
+
+		/// <summary>
 		/// Regression: a channel broadcast reaches EVERY listener, including the client that wrote it.
 		/// GameStateChannel.SendToListeners hands the SAME action instance to each listener, so the
 		/// outbound queue must carry the recipient alongside the action rather than stamping it onto

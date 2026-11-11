@@ -22,7 +22,7 @@ This document covers the essentials. It assumes you already have a working `Game
 10. [Locks](#10-locks)
 11. [Conditional actions](#11-conditional-actions) — moving items between the world (create, delete, update) and the database without duplicates
 12. [Events](#12-events)
-13. [Niche topics](#13-niche-topics) — exclusive updates, temporal fields, local-only setters, unguaranteed sends
+13. [Niche topics](#13-niche-topics) — exclusive updates, transactions, temporal fields, local-only setters, unguaranteed sends
 14. [Quick reference](#14-quick-reference)
 15. [Known caveats](#15-known-caveats)
 
@@ -548,7 +548,7 @@ entity.Unlock((err, released) => { });
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
-A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§13](#13-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.)
+A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§13](#13-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.) When the write is a read-modify-write that should be retried rather than dropped on a conflict — add to a counter, take one from a stack — use `Transact` ([§13](#transactions-transact)), which reruns your logic against the winner's values; keep `RunExclusive` for when the logic can't be run twice or must span frames.
 
 ### `RunExclusive` — the scoped form
 
@@ -813,6 +813,50 @@ Details worth knowing:
 - **Reliable delivery.** Exclusive updates are always sent guaranteed (over TCP), even if the fields were set with `SetUnguaranteed`.
 - Yield/async wrappers: `entity.UpdateExclusiveYield()` (coroutine) and `entity.UpdateExclusiveAsync()` (faults on rejection).
 
+### Transactions (`Transact`)
+
+`UpdateExclusive` tells you that you lost; it doesn't try again. For a read-modify-write (add to a counter, take one item from a stack, move a value between two fields), losing usually means "read the new value and do it again", and doing that by hand has two traps: the retry has to wait for the winner's value to arrive, and your *own* writes race each other, because on an entity that is not client-authoritative a `Set` isn't readable until the server echoes it and a second exclusive update sent before the first one's reply is rejected as stale. `Transact` handles both:
+
+```csharp
+counter.Transact(() =>
+{
+    // Runs against confirmed values, with none of this connection's writes to the counter in flight.
+    if (counter.Value.Get() >= counter.Max.Get())
+        return false;                       // Declined: nothing is sent
+    counter.Value.Set(counter.Value.Get() + 1);
+    return true;                            // commit: sent as an exclusive update
+},
+(err, result) =>
+{
+    // Committed, Declined, Conflict (out of attempts) or Failed (err says why)
+});
+```
+
+What it does:
+
+- **Commit.** When the body returns true, everything it set — plus any replicated action it attached ([§11](#11-conditional-actions)) — goes out as one exclusive update. Accepted: `Committed`, and the new values are already local when the callback runs. A body that sets nothing commits without sending.
+- **Rerun on staleness.** If another client changed a written field first, the update is rejected with nothing applied, the winner's values are already local, and the body runs again against them. After `maxAttempts` runs in total (default `ClientEntityManager.DefaultTransactMaxAttempts`, 5; minimum 1) it gives up with `Conflict`. **The body may run more than once**, so it must not have side effects outside the entity: no inventory writes, no sounds, no UI. Put those in the callback, or attach them as a replicated action: a rejected update skips its actions, and the body attaches a fresh one on every run, so the action runs exactly once, with the update that was accepted.
+- **Decline.** Return false and nothing is sent: the fields the body set are discarded (no later flush sends them) and its replicated actions are resolved with `ActionConditionNotMet`, the same code a server-side skip uses.
+- **One at a time per entity.** Transactions from one connection on one entity run in call order, each starting after the previous one has resolved, so it sees that one's committed value. Firing ten increments in one frame gives ten, with no reruns. Transactions on different entities don't wait for each other.
+- **Waits for your own writes.** A body runs only when none of this connection's writes to the entity are awaiting a reply: a plain `UpdateExclusive` you sent earlier holds it back until that update's reply has arrived. A plain `UpdateExclusive` issued *while* a transaction is active is still sent at once, as before, and may make the transaction rerun.
+- **Changes already pending go first.** If the entity has unflushed `Set`s when a body is due to run, they are sent as an ordinary update and the body waits for its reply. So `x.Name.Set("a"); x.Transact(...)` runs the body with `"a"` already confirmed, the body's changes are exactly its own (a decline never throws away your earlier `Set`s), and mixing plain `Set`s with transactions on the same field costs no rerun. While a transaction is waiting on an entity, the per-frame sweep's reliable sends of that entity are waited for too. The one case that can still cost a rerun is a plain update the sweep already sent before the transaction was called; that's correct, just one extra round trip.
+- **The first run may happen inside the call**, when nothing is in flight. Reruns run from reply dispatch in `Update()`. The callback is always delivered on a later `Update()`, never inside `Transact`.
+- **Failures.** A body that throws reports `Failed` with the message (its changes are discarded as for a decline, and the next transaction on the entity still runs). Any other rejection — locked by another connection (`ActionBlockedByLock`), entity gone, connection broken — reports `Failed` with that error. If the entity is deleted, unsubscribed or otherwise unregistered while a transaction is queued or awaiting its reply, that transaction and every one behind it report `Failed` and their bodies don't run (again).
+- **Client-authoritative entities.** `Set` applies locally at once and the creator's exclusive updates always pass, so a transaction commits on its first run. A declined body's `Set`s can't be undone, though — they are already local, and dropping the send would leave you disagreeing with the server — so they are still sent by the next flush. On these entities, decide before you set.
+- **No connection.** On an entity with no manager or connection (an offline or editor instance), `Set` applies locally, so the body runs at once and its return value is the outcome (`Committed` or `Declined`; `Failed` if it throws). With no queue to defer through, the callback fires immediately, as other no-connection requests do.
+- **Unguaranteed writes** (`SetUnguaranteed`) sent by the per-frame sweep are not waited for, the same exclusion as `RunExclusive`'s handoff guarantee.
+- Yield/async wrappers: `entity.TransactYield(body)` (coroutine; `Value` is the result) and `entity.TransactAsync(body)` (faults only on `Failed`).
+
+**Which one to use:**
+
+| | Use it when | On contention |
+|---|---|---|
+| `UpdateExclusive` | A one-shot claim where losing means "don't": pick the berry, take the last seat. | You get `ActionStaleData`; nothing applied. |
+| `Transact` | A read-modify-write that should still happen against the newer value: counters, stacks, moving a value. | The body reruns against the winner's values. |
+| `RunExclusive` ([§10](#runexclusive--the-scoped-form)) | The logic can't be run twice (side effects), spans frames (awaits, coroutines), or touches several fields for a long time. | You wait in the server's lock queue; the body runs once. |
+
+`Transact` costs one round trip when uncontended and never blocks anyone; `RunExclusive` costs a lock round trip plus the unlock, and everyone else waits while you hold it.
+
 ### Temporal fields (`DistributedTemporalValue<T,S>`)
 
 A temporal value is a single value that also carries the server timestamp of its last modification — for state where a late joiner cares *how old* the value is.
@@ -867,11 +911,11 @@ public partial class Foo : DistributedObjectBase   // or DistributedChannelBase,
 | `SetUnguaranteed(v)` | yes | only if client-authoritative / offline | best-effort |
 | `SetLocalOnly(v)` | no | always | — |
 
-Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. See [§13](#13-niche-topics).
+Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. For a read-modify-write that should be redone on a conflict, `entity.Transact(body, onComplete)` runs the body against confirmed values and reruns it on staleness (`Committed` / `Declined` / `Conflict` / `Failed`). See [§13](#13-niche-topics).
 
 ### Operations (on `IDistributedEntity`)
 
-`TriggerEvent` · `UpdateExclusive` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+`TriggerEvent` · `UpdateExclusive` · `Transact` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
 
 `Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddReplicatedAction(action)` attaches one to an entity's next update (`UpdateExclusive(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
 

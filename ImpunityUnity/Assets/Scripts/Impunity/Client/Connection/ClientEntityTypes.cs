@@ -328,6 +328,46 @@ namespace Impunity.Connection
 		/// Negative (the default) uses <see cref="ClientEntityManager.DefaultExclusiveTimeoutSeconds"/>; zero fails
 		/// immediately when the lock is held by someone else.</param>
 		void RunExclusive(Action body, ImpunityCallback<RunExclusiveResult>? onComplete, float timeoutSeconds = -1f);
+		/// <summary>
+		/// Runs a read-modify-write on this entity and commits it as an exclusive update (see
+		/// <see cref="UpdateExclusive"/>), running the body again if another client changed the written fields first.
+		/// The optimistic sibling of <see cref="RunExclusive"/>: no lock, so nobody waits, but the body may run more than
+		/// once and must have no side effects outside the entity.
+		/// </summary>
+		/// <remarks>
+		/// <para><paramref name="body"/> reads the entity's values, sets fields, and returns true to commit or false to
+		/// send nothing. It runs on the main thread when none of this connection's writes to the entity are awaiting a
+		/// reply, so <c>Get()</c> returns confirmed values, this connection's own writes included. If nothing is in
+		/// flight, the first run happens inside this call.</para>
+		/// <para>Changes already pending on the entity when a run is due (plain <c>Set</c>s not yet flushed) are sent
+		/// first as an ordinary update, and the body runs once that update's reply arrives. They are never discarded by a
+		/// decline, and never counted as the body's.</para>
+		/// <para>Commit: every field the body set, plus any replicated action it attached (see
+		/// <see cref="AddReplicatedAction"/>), is sent as one exclusive update. If the server rejects it as stale, the
+		/// winner's values are already applied locally; the body runs again against them and the result is sent again,
+		/// up to <paramref name="maxAttempts"/> runs in total. A rejected update skips its replicated actions, so a body
+		/// that attaches one must attach it on every run (it naturally does). A body that sets nothing and attaches
+		/// nothing commits without sending.</para>
+		/// <para>Decline (false), or a body that throws: nothing is sent. The fields the body set are discarded and its
+		/// replicated actions are resolved with <see cref="ImpunityErrorCode.ActionConditionNotMet"/>. Exception: on a
+		/// client-authoritative entity <c>Set</c> has already applied locally and the server must hear about it, so the
+		/// fields are still sent by the next flush. On such entities decide before you set.</para>
+		/// <para>Transactions on the same entity from this connection run one at a time, in call order; each starts after
+		/// the previous one has resolved, so it sees that one's committed values. A plain <see cref="UpdateExclusive"/>
+		/// on the entity still awaiting its reply also holds the next body back. A plain <c>UpdateExclusive</c> issued
+		/// while a transaction is active is sent at once, as usual, and may make that transaction rerun.</para>
+		/// <para>If the entity has no connection, <c>Set</c> applies locally, so the body runs at once and its return
+		/// value is the outcome; <paramref name="onComplete"/> then fires immediately.</para>
+		/// </remarks>
+		/// <param name="body">Reads and sets this entity's fields; returns true to commit, false to send nothing.</param>
+		/// <param name="onComplete">Invoked exactly once with <see cref="TransactResult.Committed"/>,
+		/// <see cref="TransactResult.Declined"/>, <see cref="TransactResult.Conflict"/> (out of attempts), or
+		/// <see cref="TransactResult.Failed"/> with an error (the body threw; the entity was deleted or unsubscribed;
+		/// locked by another connection; connection broken). Delivered on a later <c>Update()</c>, never reentrantly.
+		/// May be null.</param>
+		/// <param name="maxAttempts">Runs of the body before giving up with <see cref="TransactResult.Conflict"/>.
+		/// Negative (the default) uses <see cref="ClientEntityManager.DefaultTransactMaxAttempts"/>; the minimum is 1.</param>
+		void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1);
 
 		// Distributed events server->client
 		/// <summary>Called once the entity has been created locally and its initial property values from the server
@@ -661,6 +701,19 @@ namespace Impunity.Connection
 			}
 
 			Manager.RunExclusive(this, body, onComplete, timeoutSeconds);
+		}
+
+		/// <inheritdoc/>
+		public void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
+		{
+			if (Manager == null)
+			{
+				// Never registered: Set applies locally, so the body's own answer is the outcome.
+				ClientEntityManager.TransactOffline(body, onComplete);
+				return;
+			}
+
+			Manager.Transact(this, body, onComplete, maxAttempts);
 		}
 
 

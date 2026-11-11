@@ -227,6 +227,31 @@ public class YieldWrapperTests : ImpunityTestHarness
 	}
 
 	[UnityTest, Category("YieldWrappers")]
+	public IEnumerator TransactYield_CommitsAndDeclines()
+	{
+		CreateServer();
+		var conn = NewLocalClient();
+		yield return ConnectClient(conn);
+
+		var sub = conn.EntityManager.SubscribeToChannelYield("txchan", new IntegrationTestChannel());
+		yield return WaitForYield(sub, conn);
+
+		var entity = new IntegrationTestEntity();
+		entity.Health.Set(1);
+		yield return WaitForYield(conn.EntityManager.CreateObjectYield(entity, sub.Value, false), conn);
+
+		var commit = entity.TransactYield(() => { entity.Health.Set(entity.Health.Get() + 1); return true; });
+		yield return WaitForYield(commit, conn);
+		Assert.AreEqual(TransactResult.Committed, commit.Value);
+		Assert.AreEqual(2, entity.Health.Get(), "The committed value is confirmed by the time the yield completes");
+
+		var decline = entity.TransactYield(() => { entity.Health.Set(99); return false; });
+		yield return WaitForYield(decline, conn);
+		Assert.AreEqual(TransactResult.Declined, decline.Value);
+		Assert.AreEqual(2, entity.Health.Get());
+	}
+
+	[UnityTest, Category("YieldWrappers")]
 	public IEnumerator DeleteYield_ReplicatesDeletion()
 	{
 		CreateServer();

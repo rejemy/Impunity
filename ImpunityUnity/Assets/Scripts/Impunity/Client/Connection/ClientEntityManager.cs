@@ -1187,6 +1187,7 @@ namespace Impunity.Connection
 		private void UnregisterEntity(IDistributedEntity entity)
 		{
 			DistributedObjects.Remove(entity.DistributedEntityId);
+			FailTransactionsForEntity(entity);
 			FailPendingReplicatedActions(entity);
 
 			if (entity is IDistributedChannel channel)
@@ -1516,7 +1517,11 @@ namespace Impunity.Connection
 			}
 		}
 
-		private void SendEntityUpdates(IDistributedEntity entity)
+		// Sends an entity's pending changes as an ordinary (non-exclusive) update. With forTransaction, or when a
+		// transaction is waiting on the entity and this send is reliable, the update is sent reliably with a reply and
+		// counted as in flight, so the transaction's body waits until the echo of this write has been applied (see
+		// ClientEntityTransact.cs).
+		private void SendEntityUpdates(IDistributedEntity entity, bool forTransaction = false)
 		{
 			if (Connection == null)
 			{
@@ -1538,8 +1543,24 @@ namespace Impunity.Connection
 				updateDatabuffer = new ArraySegment<byte>(Array.Empty<byte>());
 			}
 
+			ImpunityCallback? onReply = null;
+			if (forTransaction || ((guaranteedSend || replicatedAction != null) && HasTransactionPending(entity)))
+			{
+				guaranteedSend = true;
+				onReply = TrackWrite(entity, null);
+
+				// Copy out of the shared encode buffer: a reply is awaited, so this update may outlive the frame whose
+				// sweep would reuse the buffer.
+				byte[] copy = new byte[updateDatabuffer.Count];
+				if (updateDatabuffer.Count > 0)
+				{
+					Array.Copy(updateDatabuffer.Array!, updateDatabuffer.Offset, copy, 0, updateDatabuffer.Count);
+				}
+				updateDatabuffer = new ArraySegment<byte>(copy);
+			}
+
 			entity.SendSeq++;
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, null, replicatedAction);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, replicatedAction);
 
 		}
 
@@ -1548,7 +1569,10 @@ namespace Impunity.Connection
 		/// whole update (nothing applied) with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field changed since this
 		/// client last saw it, or <see cref="ImpunityErrorCode.ActionBlockedByLock"/> if another connection holds the lock.
 		/// On success and on rejection the winning values are already applied locally by the time <paramref name="onComplete"/>
-		/// runs (see the ordering guarantee in docs/guides/DistributedEntities.md). Backs <see cref="IDistributedEntity.UpdateExclusive"/>.</summary>
+		/// runs (see the ordering guarantee in docs/guides/DistributedEntities.md). Backs <see cref="IDistributedEntity.UpdateExclusive"/>.
+		/// The update counts as in flight until its reply arrives: a <c>Transact</c> on the same entity does not run its
+		/// body before then. It is never held back itself, even while a transaction is active on the entity — it is sent
+		/// at once, carrying whatever is dirty, as it always has been.</summary>
 		/// <param name="entity">The entity whose pending dirty fields to flush exclusively.</param>
 		/// <param name="onComplete">Callback invoked with null on success or an error on rejection. Delivered on a later
 		/// <see cref="BaseGameConnection.Update"/>, never reentrantly.</param>
@@ -1579,15 +1603,26 @@ namespace Impunity.Connection
 				AddReplicatedAction(entity, onReplicatedAction);
 			}
 
-			// Snapshot dirty bits before GetPropertyBytes clears them. Nothing dirty is trivially a success — unless a
-			// replicated action is waiting, which is sent on an empty exclusive update so it still gets the lock/staleness
-			// verdict (an empty seq blob checks nothing, but a foreign lock still rejects it).
-			ulong dirtyBits = entity.DirtyBits;
-			if (dirtyBits == 0 && !HasPendingReplicatedAction(entity))
+			// Nothing dirty is trivially a success — unless a replicated action is waiting, which is sent on an empty
+			// exclusive update so it still gets the lock/staleness verdict (an empty seq blob checks nothing, but a
+			// foreign lock still rejects it).
+			if (entity.DirtyBits == 0 && !HasPendingReplicatedAction(entity))
 			{
 				Connection.QueueLocalCallback(onComplete, null);
 				return;
 			}
+
+			// Counted as in flight until its reply arrives, so a Transact on this entity waits for it rather than
+			// racing this connection's own write.
+			SendExclusiveNow(entity, TrackWrite(entity, onComplete));
+		}
+
+		// Builds and sends an exclusive update from the entity's dirty fields and pending replicated actions. Callers
+		// have checked the connection and registration, and that there is something to send.
+		private void SendExclusiveNow(IDistributedEntity entity, ImpunityCallback onComplete)
+		{
+			// Snapshot dirty bits before GetPropertyBytes clears them.
+			ulong dirtyBits = entity.DirtyBits;
 
 			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
 
@@ -1632,7 +1667,7 @@ namespace Impunity.Connection
 			DirtyObjects.Remove(entity);
 
 			entity.SendSeq++;
-			Connection.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, TakeReplicatedAction(entity));
+			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, TakeReplicatedAction(entity));
 		}
 
 		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,

@@ -254,6 +254,19 @@ namespace Impunity.Unity
 			Manager.RunExclusive(this, body, onComplete, timeoutSeconds);
 		}
 
+		/// <inheritdoc/>
+		public void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
+		{
+			if (Manager == null)
+			{
+				// Never registered: Set applies locally, so the body's own answer is the outcome.
+				ClientEntityManager.TransactOffline(body, onComplete);
+				return;
+			}
+
+			Manager.Transact(this, body, onComplete, maxAttempts);
+		}
+
 		/// <summary>Releases the exclusive lock this client holds on the entity. On success all subscribers receive
 		/// <see cref="OnUnlocked"/>, unless the lock was handed straight to a queued waiter.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was released, <c>false</c> if this client did not

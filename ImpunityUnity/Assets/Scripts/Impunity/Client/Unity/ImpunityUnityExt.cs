@@ -421,6 +421,21 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.Transact"/>: yield until the transaction has
+		/// committed, declined, run out of attempts or failed. Check the yield's <see cref="ImpunityYield{T}.Value"/> for
+		/// the outcome; <see cref="ImpunityYield{T}.Error"/> is set only for <see cref="TransactResult.Failed"/>.</summary>
+		/// <param name="entity">The entity to change.</param>
+		/// <param name="body">Reads and sets the entity's fields; returns true to commit, false to send nothing. May run
+		/// more than once, so it must have no side effects outside the entity.</param>
+		/// <param name="maxAttempts">Runs of the body before <see cref="TransactResult.Conflict"/>; negative uses the
+		/// manager's default.</param>
+		public static ImpunityYield<TransactResult> TransactYield(this IDistributedEntity entity, Func<bool> body, int maxAttempts = -1)
+		{
+			var t = new ImpunityYield<TransactResult>();
+			entity.Transact(body, t.OnComplete, maxAttempts);
+			return t;
+		}
+
 		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.RunExclusive"/> with a coroutine body, for work
 		/// that has to span frames. The lock is held for the whole of <paramref name="body"/>, so keep it short —
 		/// other clients sit in the server's waiter queue meanwhile.</summary>
