@@ -102,6 +102,10 @@ namespace Impunity.Connection
 		/// </summary>
 		public MigrationRequest? PendingMigration { get; internal set; }
 
+		/// <summary>Test seam: when set, the handshake sends this instead of <see cref="ImpunityConstants.ImpunityVersion"/>,
+		/// so a test can play a client built against a different protocol.</summary>
+		internal string? ImpunityVersionOverride;
+
 		// Pending WaitForLock callbacks keyed by lock name, fired when a NamedLockUnlocked push arrives. One waiter per
 		// name per connection — a second WaitForLock for the same name replaces the first.
 		private Dictionary<string, ImpunityCallback<LockWaitResult>> LockWaits = new();
@@ -176,7 +180,12 @@ namespace Impunity.Connection
 			}
 
 			string? hashedPassword = ImpunityUtil.HashPassword(password);
-			DoAction(new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onEstablished));
+			EstablishConnectionAction establish = new EstablishConnectionAction(gameId, hashedPassword, format, ConnectionKey, onEstablished);
+			if (ImpunityVersionOverride != null)
+			{
+				establish.ImpunityVersion = ImpunityVersionOverride;
+			}
+			DoAction(establish);
 		}
 
 		// Requests the server clock and stores the offset from local time. NOTE: the offset is computed purely as
@@ -242,7 +251,7 @@ namespace Impunity.Connection
 					}
 					else
 					{
-						action.InvokeOnCompleteCallback();
+						action.CompleteOnClient();
 					}
 
 				}

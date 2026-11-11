@@ -346,8 +346,11 @@ namespace Impunity.Connection
 		/// <see cref="AddReplicatedAction"/>), is sent as one exclusive update. If the server rejects it as stale, the
 		/// winner's values are already applied locally; the body runs again against them and the result is sent again,
 		/// up to <paramref name="maxAttempts"/> runs in total. A rejected update skips its replicated actions, so a body
-		/// that attaches one must attach it on every run (it naturally does). A body that sets nothing and attaches
-		/// nothing commits without sending.</para>
+		/// that attaches one must attach it on every run (it naturally does). A rerun waits until the rejected attempt's
+		/// replicated actions have reported (their callbacks have run), so state the application keeps for them, such
+		/// as a reserved inventory slot, is already released when the body runs again. The same holds for every
+		/// tracked write: the next body never runs between an update's reply and its actions' replies. A body that
+		/// sets nothing and attaches nothing commits without sending.</para>
 		/// <para>Decline (false), or a body that throws: nothing is sent. The fields the body set are discarded and its
 		/// replicated actions are resolved with <see cref="ImpunityErrorCode.ActionConditionNotMet"/>. Exception: on a
 		/// client-authoritative entity <c>Set</c> has already applied locally and the server must hear about it, so the

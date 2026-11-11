@@ -116,7 +116,8 @@ There are factory helpers for each remote transport: `MakeTCPRemoteConnection` (
 ### What the handshake does
 
 1. **Transport connect** (remote only): the socket is opened on a background thread and the writer thread starts.
-2. **Establish** — the client sends an establish-connection action carrying the `gameId`, the **hashed** password (SHA-256; never sent in the clear), and the format data. The server:
+2. **Establish** — the client sends an establish-connection action carrying Impunity's protocol version (`ImpunityConstants.ImpunityVersion`), the `gameId`, the **hashed** password (SHA-256; never sent in the clear), and the format data. The server:
+   - refuses a remote client whose protocol version differs from its own (`ServerProtocolIncompatible`), before looking at anything else. Local connections run in the same build and skip this. The same constant gates UDP discovery and the HTTP finder; bump it whenever the wire protocol or server behaviour changes once a game is live;
    - rejects the connection if it is in a no-new-connections state (`ServerUnavailable`);
    - **validates the format** (version + checksum) against its stored metadata;
    - if they don't match, **upgrades** to the client's format *only if it's safe* — the world is brand new (version 0) or this is the only connection. Otherwise it fails with `ServerVersionIncompatible`. A remote client additionally may not drive an upgrade unless the server opted in with `RemoteUpgradeAllowed`, and a world can never be reverted to an older version.
@@ -376,6 +377,7 @@ Codes you'll actually branch on:
 | `TimeoutError` | No reply within `ActionTimeoutMillis` (remote only). The request may or may not have run |
 | `ClientConnectionBrokenError` | The remote connection is gone: either the request was made on a disposed or lost connection and was never sent, or the connection was lost while it awaited a reply (it may or may not have run). Also the code `OnNetworkError` reports |
 | `ClientMappingError` | A `GameStateDBCollection<T>` find/list got a document it couldn't map to `T` (wrong shape, or a `_type` the mapper doesn't allow) |
+| `ServerProtocolIncompatible` | The client was built against a different Impunity protocol version (`ImpunityConstants.ImpunityVersion`) than the server |
 | `ServerVersionIncompatible` | The client's format doesn't match the server and can't be upgraded |
 | `ServerPasswordIncorrect` | Wrong world password |
 | `ServerUnavailable` | The server is refusing new connections |

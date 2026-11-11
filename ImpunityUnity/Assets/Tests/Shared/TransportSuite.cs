@@ -297,6 +297,61 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>
+		/// Transact over each real transport: a rerun after a stale rejection starts only once the rejected attempt's
+		/// replicated action has reported, so the application state its callback releases (a reserved slot) is free.
+		/// </summary>
+		[Test, Category("Transport"), Category("Transact")]
+		public async Task TransactRerunWaitsForRejectedAttemptsAction()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("tx_rerun");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var a = new IntegrationTestEntity();
+			await Pump(connA.EntityManager.CreateObjectAsync(a, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			IntegrationTestEntity b = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				b = (IntegrationTestEntity)obj;
+			}
+
+			// Make B stale: A's write reaches the server, and only A is pumped until it is confirmed.
+			Assert.AreEqual(TransactResult.Committed, await Pump(a.TransactAsync(() => { a.Health.Set(1); return true; }), connA));
+			Assert.AreEqual(0, b.Health.Get(), "B must still be stale for this test");
+
+			string docId = Name("slot");
+			int reserved = 0;
+			var reservedAtRun = new List<int>();
+			var result = b.TransactAsync(() =>
+			{
+				reservedAtRun.Add(reserved);
+				b.Health.Set(b.Health.Get() + 1);
+				reserved++;
+				b.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = docId }, (err, _) =>
+				{
+					if (err != null)
+					{
+						reserved--;
+					}
+				}));
+				return true;
+			});
+
+			Assert.AreEqual(TransactResult.Committed, await Pump(result, AllConnections()));
+			Assert.GreaterOrEqual(reservedAtRun.Count, 2, "Expected a stale run and a rerun");
+			foreach (int seen in reservedAtRun)
+			{
+				Assert.AreEqual(0, seen, "A run saw an earlier attempt's slot still reserved");
+			}
+			await PumpUntil(() => reserved == 1, TimeSpan.FromSeconds(5), AllConnections());
+		}
+
+		/// <summary>
 		/// Regression: a channel broadcast reaches EVERY listener, including the client that wrote it.
 		/// GameStateChannel.SendToListeners hands the SAME action instance to each listener, so the
 		/// outbound queue must carry the recipient alongside the action rather than stamping it onto

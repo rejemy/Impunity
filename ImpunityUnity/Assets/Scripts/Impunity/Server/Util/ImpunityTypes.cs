@@ -20,6 +20,10 @@ namespace Impunity
 	/// <summary>Protocol constants including version, ports, buffer sizes, and packet headers.</summary>
 	public static class ImpunityConstants
 	{
+		/// <summary>Impunity's wire-protocol version. Checked by UDP discovery, the HTTP finder, and the TCP/WebSocket
+		/// connect handshake, which refuses a client whose version differs with
+		/// <see cref="ImpunityErrorCode.ServerProtocolIncompatible"/>. Bump it whenever the wire protocol or server
+		/// behaviour changes once anything is live.</summary>
 		public const string ImpunityVersion = "1";
 		public const ushort DefaultServerHttpPort = 29653;
 		public const ushort DefaultServerPort = 29654;
@@ -188,6 +192,7 @@ namespace Impunity
 		ServerPasswordIncorrect = 2001, // Attempt to connect to password protected server with the wrong password
 		ServerVersionIncompatible = 2002, // Client is not the same version as the server
 		ServerMigrationInProgress = 2003, // A data migration is being offered or run on this world; other connections are refused
+		ServerProtocolIncompatible = 2004, // The client's ImpunityConstants.ImpunityVersion differs from the server's (different wire protocol)
 
 		ActionInvalidParameter = 3000,
 		ActionBadRequest = 3001,

@@ -1548,6 +1548,7 @@ namespace Impunity.Connection
 			{
 				guaranteedSend = true;
 				onReply = TrackWrite(entity, null);
+				TrackReplicatedAction(entity, replicatedAction);
 
 				// Copy out of the shared encode buffer: a reply is awaited, so this update may outlive the frame whose
 				// sweep would reuse the buffer.
@@ -1666,8 +1667,13 @@ namespace Impunity.Connection
 			// Drop from the per-frame sweep so it doesn't also send a now-empty follow-up update.
 			DirtyObjects.Remove(entity);
 
+			// Every exclusive send is a tracked write (UpdateExclusive or a transaction's own update), so the actions riding
+			// it count as in flight until they have reported too.
+			GameStateActionBase? replicatedAction = TakeReplicatedAction(entity);
+			TrackReplicatedAction(entity, replicatedAction);
+
 			entity.SendSeq++;
-			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, TakeReplicatedAction(entity));
+			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, replicatedAction);
 		}
 
 		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,

@@ -220,6 +220,12 @@ namespace Impunity.GameState
 		[BsonField("k")]
 		public string ConnectionKey = null!;
 
+		/// <summary>The client's <see cref="ImpunityConstants.ImpunityVersion"/>. A remote server refuses the connection
+		/// unless it equals its own; null (a client that predates the field) never matches. Local connections run in
+		/// the same build and are not checked.</summary>
+		[BsonField("iv")]
+		public string? ImpunityVersion;
+
 		public override ushort GetActionType() { return (ushort)ClientActionType.ESTABLISH_CONNECTION; }
 		public override bool IsDBOperation() { return false; }
 
@@ -227,6 +233,7 @@ namespace Impunity.GameState
 
 		public EstablishConnectionAction(string? gameId, string? passwordHash, GameStateFormatData format, string connectionKey, ImpunityCallback<EstablishConnectResult>? onComplete = null)
 		{
+			ImpunityVersion = ImpunityConstants.ImpunityVersion;
 			GameId = gameId;
 			PasswordHash = passwordHash;
 			Format = format;

@@ -2,7 +2,8 @@
 //
 // Covers entity.Transact: commit, decline (nothing sent, the body's Sets and replicated actions dropped), reruns on
 // staleness against the winner's values, the attempt limit, no lost updates between two contending clients, per-entity
-// FIFO on one connection (no self-races), waiting for this connection's in-flight UpdateExclusive, changes pending from
+// FIFO on one connection (no self-races), waiting for this connection's in-flight UpdateExclusive and for the replicated
+// actions of in-flight and rejected attempts, changes pending from
 // before the transaction, client-authoritative entities, failure on delete/unsubscribe and on a throwing body, and the
 // never-reentrant completion.
 //
@@ -465,6 +466,86 @@ namespace Impunity.Tests
 			var doc = await FindDoc(conns[1], "once");
 			Assert.IsNotNull(doc);
 			Assert.AreEqual(2, doc["n"].AsInt32, "The action that ran should be the committed run's");
+		}
+
+		/// <summary>The application keeps state for an attempt's replicated action (here, a reserved inventory slot that
+		/// the action's callback releases if the insert did not run). A rerun after a stale rejection must not start
+		/// until that callback has run: the action's reply arrives after the update's, and a body run in between would
+		/// see the slot still reserved.</summary>
+		[Test, Category("Transact")]
+		public async Task Transact_Rerun_WaitsForRejectedAttemptsAction()
+		{
+			var (conns, entities, _) = await Setup("tx_rerun_waits", 2);
+			var a = entities[0];
+			var b = entities[1];
+
+			var aProbe = new TxProbe();
+			a.Transact(Increment(a), aProbe.OnComplete);
+			await PumpUntil(() => aProbe.Fired, conns[0]);
+			Assert.AreEqual(0, b.Health.Get(), "B must still be stale for this test");
+
+			int reserved = 0;
+			var order = new List<string>();
+			var reservedAtRun = new List<int>();
+			var bProbe = new TxProbe();
+			b.Transact(() =>
+			{
+				int run = reservedAtRun.Count + 1;
+				order.Add("body" + run);
+				reservedAtRun.Add(reserved);
+
+				b.Health.Set(b.Health.Get() + 1);
+				reserved++;
+				b.AddReplicatedAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "slot", ["run"] = run }, (err, _) =>
+				{
+					order.Add("action" + run);
+					if (err != null)
+					{
+						reserved--;
+					}
+				}));
+				return true;
+			}, bProbe.OnComplete);
+
+			await PumpUntil(() => bProbe.Fired && order.Count == 4, AllConnections());
+			Assert.AreEqual(TransactResult.Committed, bProbe.Result);
+			CollectionAssert.AreEqual(new[] { "body1", "action1", "body2", "action2" }, order,
+				"The rerun must start only after the rejected attempt's action has reported");
+			CollectionAssert.AreEqual(new[] { 0, 0 }, reservedAtRun, "The rerun saw the rejected attempt's slot still reserved");
+			Assert.AreEqual(1, reserved, "Only the committed attempt's slot stays reserved");
+		}
+
+		/// <summary>A transaction queued behind this connection's plain UpdateExclusive waits for that update's replicated
+		/// action to report, not just for the update's own reply. A callback-less action is waited for too.</summary>
+		[Test, Category("Transact")]
+		public async Task Transact_WaitsForInFlightUpdateExclusivesAction()
+		{
+			var (conns, entities, _) = await Setup("tx_wait_excl_action", 1);
+			var a = entities[0];
+
+			bool actionDone = false;
+			a.Health.Set(5);
+			a.UpdateExclusive(err => Assert.IsNull(err),
+				new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "excl_action" }, (err, _) => actionDone = true));
+			// Callback-less: Impunity still asks the server for its reply so it knows when the action has resolved.
+			// A different field, so the second exclusive update isn't stale against this client's own first one.
+			a.DisplayName.Set("silent");
+			a.UpdateExclusive(null, new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "excl_action_silent" }, null));
+
+			bool actionDoneWhenBodyRan = false;
+			var probe = new TxProbe();
+			a.Transact(() =>
+			{
+				actionDoneWhenBodyRan = actionDone;
+				a.Health.Set(a.Health.Get() + 1);
+				return true;
+			}, probe.OnComplete, 1);
+
+			await PumpUntil(() => probe.Fired, AllConnections());
+			Assert.AreEqual(TransactResult.Committed, probe.Result);
+			Assert.IsTrue(actionDoneWhenBodyRan, "The body ran before the UpdateExclusive's replicated action reported");
+			Assert.AreEqual(6, a.Health.Get());
+			Assert.IsNotNull(await FindDoc(conns[0], "excl_action_silent"));
 		}
 
 		// ───────── Client-authoritative ─────────

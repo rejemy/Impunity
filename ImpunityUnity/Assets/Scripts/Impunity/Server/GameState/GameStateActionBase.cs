@@ -83,6 +83,29 @@ namespace Impunity.GameState
 		/// </summary>
 		public virtual bool CanRunConditionally() { return false; }
 
+		/// <summary>Client-side continuation run after this action's own callback, on every path that resolves it (a
+		/// reply, a local failure, a broken connection). Impunity-internal: the entity manager uses it to learn when a
+		/// replicated action riding a tracked write has reported (see ClientEntityTransact.cs). Setting it makes
+		/// <see cref="HasCallback"/> true on client actions, so the server sends the reply it needs.</summary>
+		[BsonIgnore]
+		internal Action? AfterCallback;
+
+		/// <summary>Resolves this action on the client: its own callback, then <see cref="AfterCallback"/> (once, even
+		/// if the callback throws). Every client-side completion goes through here.</summary>
+		internal void CompleteOnClient()
+		{
+			try
+			{
+				InvokeOnCompleteCallback();
+			}
+			finally
+			{
+				Action? after = AfterCallback;
+				AfterCallback = null;
+				after?.Invoke();
+			}
+		}
+
 		/// <summary>Copies one result from a <see cref="CompoundDatabaseAction"/> reply into this action, so its own
 		/// callback can be invoked as if it had been sent alone. Client-side; used when several replicated actions ride
 		/// one entity update as a single compound.</summary>
@@ -186,7 +209,7 @@ namespace Impunity.GameState
 		public void FailLocally(ImpunityErrorResponse error)
 		{
 			Error = error;
-			InvokeOnCompleteCallback();
+			CompleteOnClient();
 		}
 
 		/// <summary>
@@ -213,7 +236,7 @@ namespace Impunity.GameState
 
 		public override bool HasCallback()
 		{
-			return OnCompleteCallback != null;
+			return OnCompleteCallback != null || AfterCallback != null;
 		}
 
 		public override ActionResult GetResult()
@@ -253,7 +276,7 @@ namespace Impunity.GameState
 
 		public override bool HasCallback()
 		{
-			return OnCompleteCallback != null;
+			return OnCompleteCallback != null || AfterCallback != null;
 		}
 
 		public override ActionResult GetResult()

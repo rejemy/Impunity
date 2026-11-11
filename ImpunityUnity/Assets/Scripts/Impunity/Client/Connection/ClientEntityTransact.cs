@@ -14,6 +14,10 @@
 //     (always), the flush of changes already pending when a body is about to run, and per-frame sweep sends made while
 //     a transaction is waiting on the entity. Each reply arrives after the echo of the write it answers, so when the
 //     count reaches zero, Get() returns this connection's own writes.
+//   • Replicated actions riding a tracked write. Their reply arrives after the update's own, and application state
+//     often hangs on it (an inventory slot reserved for a pickup is released when the pickup's insert reports it did
+//     not run). So each one also counts as in flight until its own callback has run: a rerun after a stale rejection,
+//     and the next queued transaction, see the application's reaction to the previous attempt's actions.
 //   • Changes pending from before the body. Fields dirtied by plain Sets are flushed as an ordinary update and the
 //     body waits for its reply. The body's dirty bits are then exactly its own, which is what lets a decline drop them
 //     without touching anybody else's changes, and the exclusive update's staleness check is not tripped by them.
@@ -222,6 +226,29 @@ namespace Impunity.Connection
 						state.InFlightWrites--;
 						AdvanceTransactions(state);
 					}
+				}
+			};
+		}
+
+		/// <summary>Counts a replicated action riding a tracked write as in flight until it has resolved: after its own
+		/// callback has run (the skip or result reply, a local failure, or a broken connection), the count is released.
+		/// A transaction body on the entity therefore never runs between an update's reply and its actions' replies.</summary>
+		private void TrackReplicatedAction(IDistributedEntity entity, GameStateActionBase? action)
+		{
+			if (action == null)
+			{
+				return;
+			}
+
+			EntityTransactState state = GetOrCreateTransactState(entity);
+			state.InFlightWrites++;
+
+			action.AfterCallback += () =>
+			{
+				if (IsCurrentTransactState(state))
+				{
+					state.InFlightWrites--;
+					AdvanceTransactions(state);
 				}
 			};
 		}

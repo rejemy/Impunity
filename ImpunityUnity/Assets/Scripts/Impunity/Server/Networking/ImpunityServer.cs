@@ -181,6 +181,17 @@ namespace Impunity.Networking
 				}
 
 				EstablishConnectionAction establish = (EstablishConnectionAction)action;
+				if (establish.ImpunityVersion != ImpunityConstants.ImpunityVersion)
+				{
+					ImpunityLogger.LogInformation("Connection " + context.RemoteAddress + " uses Impunity protocol version " + (establish.ImpunityVersion ?? "(none)")
+						+ ", server uses " + ImpunityConstants.ImpunityVersion);
+					action.CloseConnectionOnComplete = true;
+					action.Error = new ImpunityErrorResponse(ImpunityErrorCode.ServerProtocolIncompatible,
+						"Client uses Impunity protocol version " + (establish.ImpunityVersion ?? "(none)") + ", server uses " + ImpunityConstants.ImpunityVersion);
+					ReportActionResult(action);
+					return;
+				}
+
 				ConnectionKey = establish.ConnectionKey;
 				if (ConnectionKey == null)
 				{
