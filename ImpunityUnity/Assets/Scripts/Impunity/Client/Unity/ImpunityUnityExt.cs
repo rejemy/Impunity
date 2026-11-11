@@ -386,6 +386,13 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		public static ImpunityYield<bool> DeleteExclusiveYield(this IDistributedEntity entity, ulong guardMask, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
+		{
+			var t = new ImpunityYield<bool>();
+			entity.DeleteExclusive(guardMask, deleteData, t.OnComplete, onDeletedAction);
+			return t;
+		}
+
 		public static ImpunityYield<bool> TryLockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<bool>();
@@ -429,7 +436,7 @@ namespace Impunity.Unity
 		/// more than once, so it must have no side effects outside the entity.</param>
 		/// <param name="maxAttempts">Runs of the body before <see cref="TransactResult.Conflict"/>; negative uses the
 		/// manager's default.</param>
-		public static ImpunityYield<TransactResult> TransactYield(this IDistributedEntity entity, Func<bool> body, int maxAttempts = -1)
+		public static ImpunityYield<TransactResult> TransactYield(this IDistributedEntity entity, Func<TransactScope, bool> body, int maxAttempts = -1)
 		{
 			var t = new ImpunityYield<TransactResult>();
 			entity.Transact(body, t.OnComplete, maxAttempts);

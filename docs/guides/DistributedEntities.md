@@ -437,7 +437,7 @@ connection.EntityManager.CreateObject(player, zone, replace: false, (err, create
 ```
 
 - **Initial state.** A create carries the instance's **full** field state, not just its dirty fields: whatever you `Set` on the instance before `CreateObject`/`CreateChannel` (or the `createIfNeeded` instance of `SubscribeToChannel`), plus anything it already held. Fields still at their default (and collections never initialized) are left out, since the receiver's default says the same. This is what makes an instance reusable across a delete: an object deleted from one channel and created again in another (e.g. a character moving between areas) arrives complete, although its first create already flushed its dirty state.
-- **`UniqueName`.** An object may have a `UniqueName` that is unique within its channel (it may not contain `/`). `replace: true` replaces an existing same-named object (the old one's delete reaches every subscriber, the creator included). A **conditional replace** passes `replaceEntityId` (the trailing parameter of `CreateObject`): the create replaces exactly that entity or nothing — `ActionNotFound` when nothing holds the name any more, `ActionUniqueNameExists` when another entity does — and its conditional action is skipped on failure. Of two clients replacing the same entity, only the first succeeds; e.g. a hole becoming the crop planted in it, with the seed spent as the conditional. For persisted objects the unique name doubles as the database key (a GUID is generated if you leave it null).
+- **`UniqueName`.** An object may have a `UniqueName` that is unique within its channel (it may not contain `/`). `replace: true` replaces an existing same-named object (the old one's delete reaches every subscriber, the creator included). A **conditional replace** passes `replaceEntityId` (the trailing parameter of `CreateObject`): the create replaces exactly that entity or nothing — `ActionNotFound` when nothing holds the name any more, `ActionUniqueNameExists` when another entity does — and its conditional action is skipped on failure. Of two clients replacing the same entity, only the first succeeds; e.g. a hole becoming the crop planted in it, with the seed spent as the conditional. A **guarded replace** adds `replaceGuard`, so the replace also fails (`ActionStaleData`) if fields of the replaced entity changed since this client saw them (see [Guarded delete and replace](#guarded-delete-and-replace-deleteexclusive-replaceguard)). For persisted objects the unique name doubles as the database key (a GUID is generated if you leave it null).
 - **Channels can be created pre-populated** by passing `channelObjects` to `CreateChannel`.
 - **The creating client gets the same creation callbacks as everyone else.** When `CreateObject` succeeds, the creator raises `OnDistributedObjectCreated`, the channel's `OnObjectAdded(obj, newlyCreated: true)`, and the object's `OnFullyInitialized` — the same notifications a subscriber receives for a replicated object — *before* your `onComplete` fires. (The server does not echo the create back to its originator; the client raises these locally to close that gap, so the object also lands in the channel's object collection.) Your seeded field values are kept as-is rather than re-applied from the wire, so they are already readable in these callbacks. This means an object you create is delivered through both `onComplete` **and** `OnObjectAdded`/`OnDistributedObjectCreated`; if a handler must not double-process your own creations, use `onComplete` for the creator-specific path and treat the shared callbacks as idempotent.
 
@@ -813,12 +813,31 @@ Details worth knowing:
 - **Reliable delivery.** Exclusive updates are always sent guaranteed (over TCP), even if the fields were set with `SetUnguaranteed`.
 - Yield/async wrappers: `entity.UpdateExclusiveYield()` (coroutine) and `entity.UpdateExclusiveAsync()` (faults on rejection).
 
+### Guarded delete and replace (`DeleteExclusive`, `replaceGuard`)
+
+`UpdateExclusive` guards an update; deletes and replaces need the same thing. Two players hit a creature with one health left, and both delete it: both deletes "succeed" from each player's point of view, and both drop loot. The fix is to delete only if the state the decision was based on is still what you saw:
+
+```csharp
+// Delete only if health is still what this client last saw; drop the loot only if this request deleted it.
+creature.DeleteExclusive(creature.Health.Mask, "killed", (err, deleted) =>
+{
+    // err.ErrorCode == ActionStaleData: someone changed Health first. Nothing happened; re-read and decide again.
+}, lootInsert);
+```
+
+- **Name the fields the decision read.** Every distributed field has a read-only `Mask`, its bit in the entity's field mask; OR them together (`Health.Mask | Owner.Mask`). Guard what you read, not everything: a wandering creature's position changes constantly, and guarding it would make every kill fail. An empty mask, or bits that aren't the entity's fields, throws `ArgumentException` before anything is sent (and leaves the conditional to you). Use plain `Delete` for an unguarded delete.
+- **Stale means nothing happened.** The callback gets `ActionStaleData`, the entity stays, and the conditional action is skipped (`ActionConditionNotMet`), exactly as for any delete that didn't happen. As with `UpdateExclusive`, the winning values are already applied locally when the callback runs.
+- **Locks.** A lock holder bypasses the guard. Another client's lock makes it return `false`, as a plain `Delete` does.
+- **Your own unechoed writes count.** The guard is this client's last-received view, so guarding a field you just wrote (and whose echo hasn't arrived) is stale against yourself. `Transact` queues behind your own writes; a bare `DeleteExclusive` does not. Inside a transaction, use `tx.Delete` (below).
+- **Replace.** `manager.CreateObject(obj, channel, replace, onComplete, onCreatedAction, replaceEntityId, replaceGuard)` guards the entity being replaced the same way: `ActionStaleData`, nothing replaced, conditional skipped, if a guarded field changed. It needs `replaceEntityId`, and that entity must be one this client has registered (the guard is its view of it); otherwise it throws `ArgumentException`.
+- Yield/async wrappers: `entity.DeleteExclusiveYield(mask, data)` and `entity.DeleteExclusiveAsync(mask, data)` (faults on a stale guard); `CreateObjectAsync` takes `replaceGuard` too.
+
 ### Transactions (`Transact`)
 
 `UpdateExclusive` tells you that you lost; it doesn't try again. For a read-modify-write (add to a counter, take one item from a stack, move a value between two fields), losing usually means "read the new value and do it again", and doing that by hand has two traps: the retry has to wait for the winner's value to arrive, and your *own* writes race each other, because on an entity that is not client-authoritative a `Set` isn't readable until the server echoes it and a second exclusive update sent before the first one's reply is rejected as stale. `Transact` handles both:
 
 ```csharp
-counter.Transact(() =>
+counter.Transact(tx =>
 {
     // Runs against confirmed values, with none of this connection's writes to the counter in flight.
     if (counter.Value.Get() >= counter.Max.Get())
@@ -846,6 +865,30 @@ What it does:
 - **No connection.** On an entity with no manager or connection (an offline or editor instance), `Set` applies locally, so the body runs at once and its return value is the outcome (`Committed` or `Declined`; `Failed` if it throws). With no queue to defer through, the callback fires immediately, as other no-connection requests do.
 - **Unguaranteed writes** (`SetUnguaranteed`) sent by the per-frame sweep are not waited for, the same exclusion as `RunExclusive`'s handoff guarantee.
 - Yield/async wrappers: `entity.TransactYield(body)` (coroutine; `Value` is the result) and `entity.TransactAsync(body)` (faults only on `Failed`).
+
+#### Deleting, replacing, and read-only dependencies (`TransactScope`)
+
+The body gets a `TransactScope` (`tx` above; write `_ =>` if you don't need it). Besides setting fields, it can make the transaction's write a guarded delete or replace, and name fields the body read but doesn't write:
+
+```csharp
+tree.Transact(tx =>
+{
+    int damage = tree.Damage.Get() + hit;
+    if (damage >= tree.Health.Get())
+        tx.Delete(tree.Damage.Mask, cause, giveLogs);    // or tx.ReplaceWith(tree.Damage.Mask, stump, giveLogs)
+    else
+        tree.Damage.Set(damage);
+    return true;
+}, onComplete);
+```
+
+- **`tx.Delete(guardMask, deleteData, onDeletedAction)`** sends a guarded delete ([above](#guarded-delete-and-replace-deleteexclusive-replaceguard)) instead of an update. **`tx.ReplaceWith(guardMask, newObject, onCreatedAction)`** sends a guarded replace: `newObject` is created in the entity's channel under its unique name (given to `newObject` if it has none; a different name fails), replacing exactly this entity, and is registered by the time the transaction reports `Committed`. Only an object with a unique name can be replaced.
+- **The guard is required.** A delete or replace writes no fields, so nothing is guarded automatically; an empty mask throws inside the body and the transaction reports `Failed`. There is no unguarded delete through a transaction.
+- **Same queue, same rerun rule.** A stale guard reruns the body against the winner's values, after the rejected attempt's conditional has reported its skip. A delete queued behind an update on the same connection sees that update's result. A transaction queued behind a successful delete or replace reports `Failed` (`ActionNotFound`) without running: the entity is gone. A foreign lock reports `Failed` with `ActionBlockedByLock`.
+- **Delete or replace is the whole write.** A body that also sets fields or attaches replicated actions fails, and those changes are discarded as for a decline. Put the database work in the delete's or replace's own conditional argument. Create that action inside the body, since a rerun needs a fresh one; once handed to the scope, the transaction resolves it: skipped (`ActionConditionNotMet`) if the body declines or throws afterwards, or if the write is rejected.
+- **`tx.DependsOn(mask)`** adds fields the body only read to the guard, for any of the three writes. "Set the price from the stock level" depends on the stock level; without `DependsOn` a change to it doesn't rerun the body, because only written fields are guarded. A body with dependencies that sets nothing and attaches nothing still commits without sending, so a dependency on its own checks nothing; with a replicated action attached, it guards that action ("buy, if the price is still what I read").
+- `tx.Attempt` is the run number (1 for the first). The scope is only usable while its body runs.
+- No connection: a delete or replace reports `Failed`, and its conditional is failed too.
 
 **Which one to use:**
 

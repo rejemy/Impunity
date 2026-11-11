@@ -288,6 +288,36 @@ namespace Impunity.Connection
 		/// this request deleted the entity — e.g. adding a picked-up item to the player's inventory. Its own callback
 		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null);
+		/// <summary>Deletes this entity only if the fields the delete depends on are unchanged since this client last
+		/// received them: the optimistic, guarded form of <see cref="Delete"/>, as <see cref="UpdateExclusive"/> is of an
+		/// update. Kill a creature only if its health is still what you saw; take a stack only if its count hasn't moved.
+		/// </summary>
+		/// <remarks>
+		/// <para>Name the guarded fields with their <c>Mask</c> values, OR-ed together (<c>Health.Mask | Owner.Mask</c>).
+		/// Guard what the decision read, not every field: a wandering creature's position changes constantly, and guarding
+		/// it would make the delete fail for no reason. An empty mask throws; use <see cref="Delete"/> for an unguarded
+		/// delete.</para>
+		/// <para>If a guarded field changed first, nothing happens: <paramref name="onComplete"/> gets
+		/// <see cref="ImpunityErrorCode.ActionStaleData"/> and <paramref name="onDeletedAction"/> is skipped
+		/// (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>), exactly as for any delete that didn't happen. When it
+		/// fires, the winner's values are already applied locally. A lock holder bypasses the guard.</para>
+		/// <para>The guard is this client's last-received view, so this connection's own writes still awaiting their
+		/// echo count as changes it hasn't seen: guard a field you just wrote and the delete is stale against yourself.
+		/// <c>Transact</c> queues behind your own writes; a bare <c>DeleteExclusive</c> does not.</para>
+		/// </remarks>
+		/// <param name="guardMask">The fields the delete depends on: OR of their <c>Mask</c> values. Must be non-empty and
+		/// name only this entity's distributed fields.</param>
+		/// <param name="deleteData">Optional BSON payload relayed to subscribers via <see cref="OnDeleted"/>.</param>
+		/// <param name="onComplete">Receives <c>true</c> if the entity was deleted, <c>false</c> if another client's lock
+		/// blocked it, or an error (<see cref="ImpunityErrorCode.ActionStaleData"/>, <see cref="ImpunityErrorCode.ActionNotFound"/>).
+		/// May be null.</param>
+		/// <param name="onDeletedAction">Optional database action run by the server only if this request deleted the
+		/// entity; its callback fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.
+		/// If the entity has no connection, both callbacks fire immediately, in that order, with
+		/// <see cref="ImpunityErrorCode.ActionBadRequest"/>.</param>
+		/// <exception cref="System.ArgumentException">The mask is empty or names bits that are not this entity's fields.
+		/// Nothing was sent, and <paramref name="onDeletedAction"/> is still the caller's to resolve.</exception>
+		void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null);
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
 		/// updates and deletes are rejected by the server. Release with <see cref="Unlock"/>.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
@@ -359,10 +389,19 @@ namespace Impunity.Connection
 		/// the previous one has resolved, so it sees that one's committed values. A plain <see cref="UpdateExclusive"/>
 		/// on the entity still awaiting its reply also holds the next body back. A plain <c>UpdateExclusive</c> issued
 		/// while a transaction is active is sent at once, as usual, and may make that transaction rerun.</para>
+		/// <para>The body's <see cref="TransactScope"/> widens what a transaction can write. <c>tx.DependsOn(mask)</c>
+		/// adds fields the body only read to the guard, so a change to them also makes the write stale.
+		/// <c>tx.Delete(guardMask, ...)</c> and <c>tx.ReplaceWith(guardMask, newObject, ...)</c> make the write a guarded
+		/// delete or replace of this entity (see <see cref="DeleteExclusive"/>) instead of an update: the mask is
+		/// required, rejection reruns the body the same way, and transactions queued behind a successful one fail
+		/// because the entity is gone. Such a body must not also set fields or attach replicated actions (the
+		/// transaction fails); a database action goes in the delete's or replace's own conditional argument, which the
+		/// transaction resolves as skipped if the write is never sent.</para>
 		/// <para>If the entity has no connection, <c>Set</c> applies locally, so the body runs at once and its return
-		/// value is the outcome; <paramref name="onComplete"/> then fires immediately.</para>
+		/// value is the outcome; <paramref name="onComplete"/> then fires immediately. A delete or replace fails there.</para>
 		/// </remarks>
-		/// <param name="body">Reads and sets this entity's fields; returns true to commit, false to send nothing.</param>
+		/// <param name="body">Reads and sets this entity's fields, or deletes or replaces it through the scope; returns
+		/// true to commit, false to send nothing.</param>
 		/// <param name="onComplete">Invoked exactly once with <see cref="TransactResult.Committed"/>,
 		/// <see cref="TransactResult.Declined"/>, <see cref="TransactResult.Conflict"/> (out of attempts), or
 		/// <see cref="TransactResult.Failed"/> with an error (the body threw; the entity was deleted or unsubscribed;
@@ -370,7 +409,7 @@ namespace Impunity.Connection
 		/// May be null.</param>
 		/// <param name="maxAttempts">Runs of the body before giving up with <see cref="TransactResult.Conflict"/>.
 		/// Negative (the default) uses <see cref="ClientEntityManager.DefaultTransactMaxAttempts"/>; the minimum is 1.</param>
-		void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1);
+		void Transact(Func<TransactScope, bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1);
 
 		// Distributed events server->client
 		/// <summary>Called once the entity has been created locally and its initial property values from the server
@@ -640,6 +679,21 @@ namespace Impunity.Connection
 			connection.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
+		/// <summary>Deletes this entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
+		/// last received them. See <see cref="IDistributedEntity.DeleteExclusive"/>.</summary>
+		public void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
+		{
+			ClientEntityManager? manager = Manager;
+			if (manager == null || manager.Connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), false);
+				onDeletedAction?.FailLocally(NotRegisteredError());
+				return;
+			}
+
+			manager.DeleteEntityExclusive(this, guardMask, deleteData, onComplete, onDeletedAction);
+		}
+
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
 		/// updates and deletes are rejected by the server. Release with <see cref="Unlock"/>.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
@@ -707,12 +761,12 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
+		public void Transact(Func<TransactScope, bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
 		{
 			if (Manager == null)
 			{
 				// Never registered: Set applies locally, so the body's own answer is the outcome.
-				ClientEntityManager.TransactOffline(body, onComplete);
+				ClientEntityManager.TransactOffline(this, body, onComplete);
 				return;
 			}
 

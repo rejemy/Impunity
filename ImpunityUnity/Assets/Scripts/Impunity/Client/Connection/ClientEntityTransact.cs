@@ -24,6 +24,14 @@
 //
 // Unguaranteed writes (SetUnguaranteed) sent by the sweep are not tracked: they may never be answered, and they sit
 // outside every ordering guarantee anyway.
+//
+// The body gets a TransactScope. Besides setting fields it can make the transaction's write a guarded delete or a
+// guarded replace (tx.Delete / tx.ReplaceWith, sent as DeleteEntityAction / CreateObjectAction with the known-seq blob),
+// and name fields it only read (tx.DependsOn), which are added to whatever the write guards. A delete or replace goes
+// through the same queue and rerun rule as an update: a stale rejection reruns the body, and a transaction queued
+// behind a successful delete fails because the entity is gone. Its conditional action counts as in flight like a
+// replicated action. When the delete (or the replaced entity's delete) push unregisters the entity, the transaction
+// that caused it is left for its own reply, which reports Committed.
 
 using System;
 using System.Collections.Generic;
@@ -31,8 +39,168 @@ using System.IO;
 
 using Impunity.GameState;
 
+using UltraLiteDB;
+
 namespace Impunity.Connection
 {
+
+	/// <summary>
+	/// What a <c>Transact</c> body can do besides setting fields: name fields it only read, or make the transaction's
+	/// write a guarded delete or replace of the entity. A fresh scope is passed to every run of the body and is only
+	/// usable while that run is executing.
+	/// </summary>
+	public sealed class TransactScope
+	{
+		internal enum WriteKind { Update, Delete, Replace }
+
+		private readonly ClientEntityManager? Manager;
+		private bool Open = true;
+
+		internal WriteKind Write = WriteKind.Update;
+		internal ulong DependsMask;
+		internal ulong GuardMask;
+		internal BsonValue? DeleteData;
+		internal GameStateActionBase? ConditionalAction;
+		/// <summary>Sends the replace: (guard mask, reply). Built by <see cref="ReplaceWith{T}"/>, so the object's type is kept.</summary>
+		internal Action<ulong, ImpunityCallback>? SendReplace;
+
+		internal TransactScope(IDistributedEntity entity, ClientEntityManager? manager, int attempt)
+		{
+			Entity = entity;
+			Manager = manager;
+			Attempt = attempt;
+		}
+
+		/// <summary>The entity the transaction is on.</summary>
+		public IDistributedEntity Entity { get; }
+
+		/// <summary>Which run of the body this is: 1 for the first, 2 for the first rerun, and so on.</summary>
+		public int Attempt { get; }
+
+		/// <summary>
+		/// Adds fields the body read but does not write to the transaction's guard: the write is rejected as stale, and
+		/// the body rerun, if any of them changed since this client last received them. Fields the body sets are guarded
+		/// already. Applies to all three kinds of write; a body that sets nothing and attaches no replicated action still
+		/// commits without sending, so a dependency alone checks nothing. Can be called several times; the masks add up.
+		/// </summary>
+		/// <param name="mask">OR of the fields' <c>Mask</c> values. Zero does nothing.</param>
+		/// <exception cref="ArgumentException">The mask names bits that are not the entity's distributed fields.</exception>
+		public void DependsOn(ulong mask)
+		{
+			CheckOpen();
+			Manager?.ValidateFieldMask(Entity, mask, nameof(mask));
+			DependsMask |= mask;
+		}
+
+		/// <summary>
+		/// Makes this transaction's write a guarded delete of the entity (see <see cref="IDistributedEntity.DeleteExclusive"/>)
+		/// instead of an update. It is sent when the body returns true; a stale guard reruns the body, as for an update.
+		/// The body must not also set fields or attach replicated actions: the transaction then fails. Pass a database
+		/// action that should run with the delete as <paramref name="onDeletedAction"/>.
+		/// </summary>
+		/// <param name="guardMask">The fields the delete depends on: OR of their <c>Mask</c> values; required. Any
+		/// <see cref="DependsOn"/> fields are added to it.</param>
+		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification.</param>
+		/// <param name="onDeletedAction">Optional conditional database action, run only if the delete goes through. Create
+		/// it inside the body: a rerun needs a new one. Once passed here it is the transaction's to resolve: it is skipped
+		/// (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>) when the body declines, throws, or is rejected.</param>
+		/// <exception cref="ArgumentException">The mask is empty or names bits outside the entity's fields. The action is
+		/// not taken.</exception>
+		/// <exception cref="InvalidOperationException">The body already called <c>Delete</c> or <c>ReplaceWith</c>.</exception>
+		public void Delete(ulong guardMask, BsonValue? deleteData = null, GameStateActionBase? onDeletedAction = null)
+		{
+			CheckOpen();
+			CheckGuard(guardMask, nameof(guardMask));
+			CheckNoWriteYet();
+
+			Write = WriteKind.Delete;
+			GuardMask = guardMask;
+			DeleteData = deleteData;
+			ConditionalAction = onDeletedAction;
+		}
+
+		/// <summary>
+		/// Makes this transaction's write a guarded replace: <paramref name="newObject"/> is created in the entity's
+		/// channel under the entity's unique name, replacing exactly this entity, only if the guarded fields are
+		/// unchanged (see the <c>replaceGuard</c> argument of <see cref="ClientEntityManager.CreateObject{T}"/>). It is
+		/// sent when the body returns true; a stale guard reruns the body. The body must not also set fields of the
+		/// replaced entity or attach replicated actions to it. Once committed, <paramref name="newObject"/> is registered.
+		/// </summary>
+		/// <param name="guardMask">The fields of this entity the replace depends on; required. Any <see cref="DependsOn"/>
+		/// fields are added to it.</param>
+		/// <param name="newObject">The replacement. Its unique name is set to this entity's if it has none; a different
+		/// name is an error.</param>
+		/// <param name="onCreatedAction">Optional conditional database action, run only if the replace goes through.
+		/// Resolved by the transaction as for <see cref="Delete"/>.</param>
+		/// <exception cref="ArgumentException">The mask is empty or foreign, or <paramref name="newObject"/> names a
+		/// different unique name.</exception>
+		/// <exception cref="InvalidOperationException">The entity is not an object with a unique name and a channel, or
+		/// the body already called <c>Delete</c> or <c>ReplaceWith</c>.</exception>
+		public void ReplaceWith<T>(ulong guardMask, T newObject, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			CheckOpen();
+			if (newObject == null)
+			{
+				throw new ArgumentNullException(nameof(newObject));
+			}
+			CheckGuard(guardMask, nameof(guardMask));
+			CheckNoWriteYet();
+
+			if (!(Entity is IDistributedObject replaced) || replaced.UniqueName == null || replaced.Channel == null)
+			{
+				throw new InvalidOperationException("Only an object with a unique name, in a channel, can be replaced");
+			}
+
+			if (newObject.UniqueName == null)
+			{
+				newObject.UniqueName = replaced.UniqueName;
+			}
+			else if (newObject.UniqueName != replaced.UniqueName)
+			{
+				throw new ArgumentException("The replacement's unique name (" + newObject.UniqueName + ") differs from the replaced entity's ("
+					+ replaced.UniqueName + ")", nameof(newObject));
+			}
+
+			IDistributedChannel channel = replaced.Channel;
+			uint replacedId = replaced.DistributedEntityId;
+			ClientEntityManager? manager = Manager;
+
+			Write = WriteKind.Replace;
+			GuardMask = guardMask;
+			ConditionalAction = onCreatedAction;
+			SendReplace = (guard, reply) => manager!.CreateObject(newObject, channel, true, (err, _) => reply(err), onCreatedAction, replacedId, guard);
+		}
+
+		internal void Close()
+		{
+			Open = false;
+		}
+
+		private void CheckOpen()
+		{
+			if (!Open)
+			{
+				throw new InvalidOperationException("A TransactScope can only be used while its body is running");
+			}
+		}
+
+		private void CheckGuard(ulong guardMask, string paramName)
+		{
+			if (guardMask == 0)
+			{
+				throw new ArgumentException("A transaction's delete or replace must name its guard (OR together the fields' Mask values)", paramName);
+			}
+			Manager?.ValidateFieldMask(Entity, guardMask, paramName);
+		}
+
+		private void CheckNoWriteYet()
+		{
+			if (Write != WriteKind.Update)
+			{
+				throw new InvalidOperationException("The body already chose to " + (Write == WriteKind.Delete ? "delete" : "replace") + " the entity");
+			}
+		}
+	}
 
 	/// <summary>Outcome of a <c>Transact</c> call.</summary>
 	public enum TransactResult
@@ -59,13 +227,16 @@ namespace Impunity.Connection
 		/// <summary>One queued or running transaction.</summary>
 		private class Transaction
 		{
-			public Func<bool> Body = default!;
+			public Func<TransactScope, bool> Body = default!;
 			public ImpunityCallback<TransactResult>? OnComplete;
 			public int MaxAttempts;
 			/// <summary>Runs of the body so far.</summary>
 			public int Attempts;
-			/// <summary>True while this transaction's exclusive update is on the wire.</summary>
+			/// <summary>True while this transaction's write (exclusive update, delete or replace) is on the wire.</summary>
 			public bool AwaitingReply;
+			/// <summary>True while that write is a delete or replace: its success unregisters the entity, and the
+			/// transaction is then reported by its reply rather than failed with the entity.</summary>
+			public bool RemovesEntity;
 			/// <summary>True once the outcome has been reported, so a late reply cannot report it twice.</summary>
 			public bool Finished;
 		}
@@ -100,7 +271,7 @@ namespace Impunity.Connection
 		/// connection.</param>
 		/// <param name="maxAttempts">Runs of the body before <see cref="TransactResult.Conflict"/>. Negative uses
 		/// <see cref="DefaultTransactMaxAttempts"/>; values below 1 are raised to 1.</param>
-		internal void Transact(IDistributedEntity entity, Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts)
+		internal void Transact(IDistributedEntity entity, Func<TransactScope, bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts)
 		{
 			if (body == null)
 			{
@@ -109,7 +280,7 @@ namespace Impunity.Connection
 
 			if (Connection == null)
 			{
-				TransactOffline(body, onComplete);
+				TransactOffline(entity, body, onComplete);
 				return;
 			}
 
@@ -144,31 +315,46 @@ namespace Impunity.Connection
 
 		/// <summary>Runs a transaction body for an entity that has no connection to send through. <c>Set</c> already
 		/// applies locally there, so the body's own return value is the outcome; nothing can be undone on a decline.
-		/// There is no queue to defer through, so <paramref name="onComplete"/> fires immediately, as every other
-		/// no-connection request does.</summary>
+		/// A delete or replace has nothing to go through, so a body that asks for one fails. There is no queue to defer
+		/// through, so <paramref name="onComplete"/> fires immediately, as every other no-connection request does.</summary>
+		/// <param name="entity">The entity the body is about.</param>
 		/// <param name="body">The transaction body.</param>
 		/// <param name="onComplete">Receives <see cref="TransactResult.Committed"/>, <see cref="TransactResult.Declined"/>,
-		/// or <see cref="TransactResult.Failed"/> if the body threw.</param>
-		internal static void TransactOffline(Func<bool> body, ImpunityCallback<TransactResult>? onComplete)
+		/// or <see cref="TransactResult.Failed"/> if the body threw or asked for a delete or replace.</param>
+		internal static void TransactOffline(IDistributedEntity entity, Func<TransactScope, bool> body, ImpunityCallback<TransactResult>? onComplete)
 		{
 			if (body == null)
 			{
 				throw new ArgumentNullException(nameof(body));
 			}
 
+			TransactScope scope = new TransactScope(entity, null, 1);
 			bool commit;
 			try
 			{
-				commit = body();
+				commit = body(scope);
 			}
 			catch (Exception e)
 			{
+				scope.Close();
 				ImpunityLogger.LogError("Exception in Transact body", e);
 				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Exception in Transact body: " + e.Message), TransactResult.Failed);
+				scope.ConditionalAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionConditionNotMet, "Not sent: the Transact body threw"));
+				return;
+			}
+			scope.Close();
+
+			if (commit && scope.Write != TransactScope.WriteKind.Update)
+			{
+				ImpunityErrorResponse noConnection = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest,
+					"Entity has no connection to " + (scope.Write == TransactScope.WriteKind.Delete ? "delete" : "replace") + " it through");
+				onComplete?.Invoke(noConnection, TransactResult.Failed);
+				scope.ConditionalAction?.FailLocally(noConnection);
 				return;
 			}
 
 			onComplete?.Invoke(null, commit ? TransactResult.Committed : TransactResult.Declined);
+			scope.ConditionalAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionConditionNotMet, "Not sent: the Transact body declined"));
 		}
 
 		private EntityTransactState GetOrCreateTransactState(IDistributedEntity entity)
@@ -315,14 +501,17 @@ namespace Impunity.Connection
 			IDistributedEntity entity = state.Entity;
 			tx.Attempts++;
 
+			TransactScope scope = new TransactScope(entity, this, tx.Attempts);
 			bool commit;
 			try
 			{
-				commit = tx.Body();
+				commit = tx.Body(scope);
 			}
 			catch (Exception e)
 			{
+				scope.Close();
 				ImpunityLogger.LogError("Exception in Transact body", e);
+				DropScopeWrite(scope, "the Transact body threw");
 				if (!tx.Finished)
 				{
 					DiscardTransactionChanges(entity, "the Transact body threw");
@@ -331,17 +520,26 @@ namespace Impunity.Connection
 				}
 				return;
 			}
+			scope.Close();
 
 			if (tx.Finished)
 			{
 				// The body unsubscribed or otherwise unregistered the entity, which already reported this transaction.
+				DropScopeWrite(scope, "the entity was removed while the Transact body ran");
 				return;
 			}
 
 			if (!commit)
 			{
+				DropScopeWrite(scope, "the Transact body declined");
 				DiscardTransactionChanges(entity, "the Transact body declined");
 				FinishTransaction(state, tx, TransactResult.Declined, null);
+				return;
+			}
+
+			if (scope.Write != TransactScope.WriteKind.Update)
+			{
+				SendTransactionRemoval(state, tx, scope);
 				return;
 			}
 
@@ -352,7 +550,103 @@ namespace Impunity.Connection
 			}
 
 			tx.AwaitingReply = true;
-			SendExclusiveNow(entity, err => OnTransactionReply(state, tx, err));
+			SendExclusiveNow(entity, err => OnTransactionReply(state, tx, err), scope.DependsMask);
+		}
+
+		/// <summary>Resolves the conditional action a delete or replace was given, when that write is not going to be
+		/// sent, as never sent.</summary>
+		private void DropScopeWrite(TransactScope scope, string reason)
+		{
+			GameStateActionBase? action = scope.ConditionalAction;
+			if (action != null)
+			{
+				scope.ConditionalAction = null;
+				Connection?.QueueLocalFailure(action, new ImpunityErrorResponse(ImpunityErrorCode.ActionConditionNotMet, "Not sent: " + reason));
+			}
+		}
+
+		/// <summary>Sends a committed body's delete or replace. Its conditional action counts as in flight like a
+		/// replicated action, so a rerun after a stale rejection waits for its skip to be reported.</summary>
+		private void SendTransactionRemoval(EntityTransactState state, Transaction tx, TransactScope scope)
+		{
+			IDistributedEntity entity = state.Entity;
+			string verb = scope.Write == TransactScope.WriteKind.Delete ? "deletes" : "replaces";
+
+			if (entity.DirtyBits != 0 || HasPendingReplicatedAction(entity))
+			{
+				string reason = "the Transact body " + verb + " the entity and also set its fields or attached replicated actions";
+				DropScopeWrite(scope, reason);
+				DiscardTransactionChanges(entity, reason);
+				FinishTransaction(state, tx, TransactResult.Failed, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest,
+					"A Transact body that " + verb + " the entity must not also set its fields or attach replicated actions; "
+					+ "pass the database action to Delete or ReplaceWith"));
+				return;
+			}
+
+			ulong guard = scope.GuardMask | scope.DependsMask;
+			GameStateActionBase? conditional = scope.ConditionalAction;
+
+			tx.AwaitingReply = true;
+			tx.RemovesEntity = true;
+			TrackReplicatedAction(entity, conditional);
+			try
+			{
+				if (scope.Write == TransactScope.WriteKind.Delete)
+				{
+					byte[] guardBlob = BuildGuardBlob(entity, guard, "guardMask");
+					Connection!.DoAction(new DeleteEntityAction(entity.DistributedEntityId, scope.DeleteData!, (err, deleted) =>
+						OnTransactionRemovalReply(state, tx, err ?? (deleted ? null
+							: new ImpunityErrorResponse(ImpunityErrorCode.ActionBlockedByLock, "Entity " + entity.DistributedEntityId + " is locked by another connection"))),
+						conditional)
+					{
+						KnownFieldSeqs = new ArraySegment<byte>(guardBlob),
+					});
+				}
+				else
+				{
+					scope.SendReplace!(guard, err => OnTransactionRemovalReply(state, tx, err));
+				}
+			}
+			catch (Exception e)
+			{
+				// Nothing was sent (CreateObject validates before sending), so the conditional is still ours.
+				ImpunityLogger.LogError("Transact could not send its " + (scope.Write == TransactScope.WriteKind.Delete ? "delete" : "replace"), e);
+				tx.AwaitingReply = false;
+				tx.RemovesEntity = false;
+				ImpunityErrorResponse error = new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Transact could not send its write: " + e.Message);
+				if (conditional != null)
+				{
+					Connection!.QueueLocalFailure(conditional, error);
+				}
+				FinishTransaction(state, tx, TransactResult.Failed, error);
+			}
+		}
+
+		/// <summary>The reply to a transaction's delete or replace. On success the entity is already unregistered (its
+		/// delete push arrives first), which left this transaction for here.</summary>
+		private void OnTransactionRemovalReply(EntityTransactState state, Transaction tx, ImpunityErrorResponse? err)
+		{
+			tx.AwaitingReply = false;
+			tx.RemovesEntity = false;
+			if (tx.Finished)
+			{
+				return;
+			}
+
+			if (err == null)
+			{
+				FinishTransaction(state, tx, TransactResult.Committed, null);
+				return;
+			}
+
+			if (!IsCurrentTransactState(state))
+			{
+				// Rejected, but the entity has gone away meanwhile: nothing left to rerun against.
+				FinishTransaction(state, tx, TransactResult.Failed, err);
+				return;
+			}
+
+			OnTransactionReply(state, tx, err);
 		}
 
 		private void OnTransactionReply(EntityTransactState state, Transaction tx, ImpunityErrorResponse? err)
@@ -468,11 +762,18 @@ namespace Impunity.Connection
 				"Entity " + entity.DistributedEntityId + " was removed (deleted or unsubscribed) before its transaction completed");
 
 			Transaction? active = state.Active;
-			state.Active = null;
-			if (active != null && !active.Finished)
+			if (active != null && active.RemovesEntity && active.AwaitingReply)
 			{
-				active.Finished = true;
-				ReportTransaction(active, TransactResult.Failed, error);
+				// Most likely this transaction's own delete or replace going through: its reply reports the outcome.
+			}
+			else
+			{
+				state.Active = null;
+				if (active != null && !active.Finished)
+				{
+					active.Finished = true;
+					ReportTransaction(active, TransactResult.Failed, error);
+				}
 			}
 
 			if (state.Queued != null)

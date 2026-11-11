@@ -188,6 +188,21 @@ namespace Impunity.Unity
 			connection.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
+		/// <summary>Deletes this entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
+		/// last received them. See <see cref="IDistributedEntity.DeleteExclusive"/>.</summary>
+		public void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
+		{
+			ClientEntityManager? manager = Manager;
+			if (manager == null || manager.Connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), false);
+				onDeletedAction?.FailLocally(NotRegisteredError());
+				return;
+			}
+
+			manager.DeleteEntityExclusive(this, guardMask, deleteData, onComplete, onDeletedAction);
+		}
+
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
 		/// updates and deletes are rejected by the server. Release with <see cref="Unlock"/>.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
@@ -255,12 +270,12 @@ namespace Impunity.Unity
 		}
 
 		/// <inheritdoc/>
-		public void Transact(Func<bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
+		public void Transact(Func<TransactScope, bool> body, ImpunityCallback<TransactResult>? onComplete, int maxAttempts = -1)
 		{
 			if (Manager == null)
 			{
 				// Never registered: Set applies locally, so the body's own answer is the outcome.
-				ClientEntityManager.TransactOffline(body, onComplete);
+				ClientEntityManager.TransactOffline(this, body, onComplete);
 				return;
 			}
 

@@ -240,12 +240,12 @@ public class YieldWrapperTests : ImpunityTestHarness
 		entity.Health.Set(1);
 		yield return WaitForYield(conn.EntityManager.CreateObjectYield(entity, sub.Value, false), conn);
 
-		var commit = entity.TransactYield(() => { entity.Health.Set(entity.Health.Get() + 1); return true; });
+		var commit = entity.TransactYield(_ => { entity.Health.Set(entity.Health.Get() + 1); return true; });
 		yield return WaitForYield(commit, conn);
 		Assert.AreEqual(TransactResult.Committed, commit.Value);
 		Assert.AreEqual(2, entity.Health.Get(), "The committed value is confirmed by the time the yield completes");
 
-		var decline = entity.TransactYield(() => { entity.Health.Set(99); return false; });
+		var decline = entity.TransactYield(_ => { entity.Health.Set(99); return false; });
 		yield return WaitForYield(decline, conn);
 		Assert.AreEqual(TransactResult.Declined, decline.Value);
 		Assert.AreEqual(2, entity.Health.Get());

@@ -1127,6 +1127,13 @@ namespace Impunity.GameState
 		[BsonField("re")]
 		public uint ReplaceEntityId;
 
+		/// <summary>When non-null, a guarded replace: the client's known per-field seqs for the entity being replaced
+		/// (<see cref="ReplaceEntityId"/>, required), in the exclusive-update blob format. The create fails with
+		/// <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing, if any listed field changed since the client
+		/// saw it. A lock holder bypasses the check. Absent ⇒ unguarded.</summary>
+		[BsonField("rxs")]
+		public ArraySegment<byte> ReplaceKnownFieldSeqs;
+
 		/// <summary>Database action to run on the database thread if, and only if, the object is created. Null for none.</summary>
 		[BsonField("ca")]
 		public GameStateActionBase? OnCreatedAction;
@@ -1162,7 +1169,7 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false, ReplaceEntityId);
+				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false, ReplaceEntityId, ReplaceKnownFieldSeqs);
 				created = true;
 			}
 			finally
@@ -1256,6 +1263,13 @@ namespace Impunity.GameState
 		[BsonField("dd")]
 		public BsonValue DeleteData = null!;
 
+		/// <summary>When non-null, a guarded delete: the client's known per-field seqs for the fields the delete depends
+		/// on, in the exclusive-update blob format. The delete fails with <see cref="ImpunityErrorCode.ActionStaleData"/>,
+		/// changing nothing and skipping the conditional, if any listed field changed since the client saw it. A lock
+		/// holder bypasses the check. Absent ⇒ unguarded.</summary>
+		[BsonField("xs")]
+		public ArraySegment<byte> KnownFieldSeqs;
+
 		/// <summary>Database action to run on the database thread if, and only if, this request deleted the entity — not
 		/// when it was already gone (<see cref="ImpunityErrorCode.ActionNotFound"/>) or locked by another connection
 		/// (<c>false</c>). Null for none.</summary>
@@ -1288,7 +1302,7 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData);
+				Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData, KnownFieldSeqs);
 				deleted = Result;
 			}
 			finally

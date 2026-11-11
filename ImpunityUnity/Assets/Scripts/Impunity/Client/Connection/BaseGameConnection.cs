@@ -104,7 +104,7 @@ namespace Impunity.Connection
 
 		/// <summary>Test seam: when set, the handshake sends this instead of <see cref="ImpunityConstants.ImpunityVersion"/>,
 		/// so a test can play a client built against a different protocol.</summary>
-		internal string? ImpunityVersionOverride;
+		internal string? ImpunityVersionOverride = null;
 
 		// Pending WaitForLock callbacks keyed by lock name, fired when a NamedLockUnlocked push arrives. One waiter per
 		// name per connection — a second WaitForLock for the same name replaces the first.

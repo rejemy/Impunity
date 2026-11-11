@@ -276,7 +276,13 @@ namespace Impunity.Connection
 		/// <param name="replaceEntityId">Non-zero: replace exactly this entity, which must hold the object's unique name,
 		/// or fail without changing anything (see <see cref="BaseGameConnection.CreateObject"/>). Implies
 		/// <paramref name="replace"/>.</param>
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0) where T : class, IDistributedObject
+		/// <param name="replaceGuard">Non-zero: a guarded replace. The fields of the entity being replaced that the
+		/// replace depends on (OR of their <c>Mask</c> values); the create fails with
+		/// <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing and skipping the conditional, if any of them
+		/// changed since this client last received them. Needs <paramref name="replaceEntityId"/>, and that entity must be
+		/// registered with this manager (subscribed), since the guard is this client's view of it. A lock holder on the
+		/// replaced entity bypasses the check.</param>
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, ulong replaceGuard = 0) where T : class, IDistributedObject
 		{
 			if (Connection == null)
 			{
@@ -331,7 +337,23 @@ namespace Impunity.Connection
 				throw new Exception("A conditional replace needs the object's unique name");
 			}
 
-			Connection.CreateObject(entityTypeId, instanceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName, replace, (ImpunityErrorResponse? err, uint objectId) =>
+			byte[]? replaceGuardBlob = null;
+			if (replaceGuard != 0)
+			{
+				if (replaceEntityId == 0)
+				{
+					throw new ArgumentException("A guarded replace needs replaceEntityId", nameof(replaceGuard));
+				}
+
+				if (!DistributedObjects.TryGetValue(replaceEntityId, out IDistributedEntity? replaced))
+				{
+					throw new ArgumentException("Entity " + replaceEntityId + " is not registered with this manager, so there is no view of it to guard", nameof(replaceGuard));
+				}
+
+				replaceGuardBlob = BuildGuardBlob(replaced, replaceGuard, nameof(replaceGuard));
+			}
+
+			ImpunityCallback<uint> onCreated = (ImpunityErrorResponse? err, uint objectId) =>
 			{
 				if (err != null)
 				{
@@ -371,7 +393,13 @@ namespace Impunity.Connection
 				}
 
 				onComplete?.Invoke(err, distObj);
-			}, onCreatedAction, replaceEntityId);
+			};
+
+			Connection.DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channel.DistributedEntityId, propertyBytes, distObj.UniqueName,
+				replace || replaceEntityId != 0, onCreated, onCreatedAction, replaceEntityId)
+			{
+				ReplaceKnownFieldSeqs = replaceGuardBlob != null ? new ArraySegment<byte>(replaceGuardBlob) : default,
+			});
 		}
 
 		private ObjectCreateData MakeObjectCreateData(IDistributedObject distObj, IDistributedChannel channel)
@@ -1620,39 +1648,12 @@ namespace Impunity.Connection
 
 		// Builds and sends an exclusive update from the entity's dirty fields and pending replicated actions. Callers
 		// have checked the connection and registration, and that there is something to send.
-		private void SendExclusiveNow(IDistributedEntity entity, ImpunityCallback onComplete)
+		// extraGuard: fields the write does not change but depends on (a transaction's DependsOn), added to the blob.
+		private void SendExclusiveNow(IDistributedEntity entity, ImpunityCallback onComplete, ulong extraGuard = 0)
 		{
-			// Snapshot dirty bits before GetPropertyBytes clears them.
-			ulong dirtyBits = entity.DirtyBits;
-
-			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
-
-			// Build the known-seqs blob [fieldId][seq lo][seq hi]...[0] for exactly the dirty fields, using this
-			// client's last-received seq per field (0 if never received). Must be gathered before dirty state is cleared.
-			int dirtyCount = 0;
-			foreach (var fieldInfo in typeInfo.DistributedFields)
-			{
-				if (fieldInfo != null && (dirtyBits & fieldInfo.FieldBitmask) != 0)
-				{
-					dirtyCount++;
-				}
-			}
-
-			byte[] seqBlob = new byte[dirtyCount * 3 + 1];
-			int pos = 0;
-			foreach (var fieldInfo in typeInfo.DistributedFields)
-			{
-				if (fieldInfo == null || (dirtyBits & fieldInfo.FieldBitmask) == 0)
-				{
-					continue;
-				}
-
-				ushort known = entity.FieldRecvSeq != null ? entity.FieldRecvSeq[fieldInfo.FieldId] : (ushort)0;
-				seqBlob[pos++] = fieldInfo.FieldId;
-				seqBlob[pos++] = (byte)(known & 0xFF);
-				seqBlob[pos++] = (byte)((known >> 8) & 0xFF);
-			}
-			seqBlob[pos] = 0;
+			// The known-seqs blob covers the dirty fields plus any extra guard. Must be gathered before GetPropertyBytes
+			// clears the dirty bits.
+			byte[] seqBlob = BuildKnownSeqBlob(entity, entity.DirtyBits | extraGuard);
 
 			// Serialize the field deltas, then copy out of the shared reused encode buffer: this update must not alias
 			// that buffer, since the local in-process connection shares it by reference and the remote writer thread
@@ -1674,6 +1675,115 @@ namespace Impunity.Connection
 
 			entity.SendSeq++;
 			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, replicatedAction);
+		}
+
+		/// <summary>Builds the known-field-seq blob an exclusive update or a guarded delete/replace carries:
+		/// <c>[fieldId][seq lo][seq hi]...[0]</c> for each field in <paramref name="mask"/>, using this client's
+		/// last-received seq per field (0 if never received). The server rejects the operation as stale if any listed
+		/// field changed since.</summary>
+		private byte[] BuildKnownSeqBlob(IDistributedEntity entity, ulong mask)
+		{
+			DistributedTypeInfo typeInfo = GetRegisteredTypeInfo(entity);
+
+			int count = 0;
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo != null && (mask & fieldInfo.FieldBitmask) != 0)
+				{
+					count++;
+				}
+			}
+
+			byte[] seqBlob = new byte[count * 3 + 1];
+			int pos = 0;
+			foreach (var fieldInfo in typeInfo.DistributedFields)
+			{
+				if (fieldInfo == null || (mask & fieldInfo.FieldBitmask) == 0)
+				{
+					continue;
+				}
+
+				ushort known = entity.FieldRecvSeq != null ? entity.FieldRecvSeq[fieldInfo.FieldId] : (ushort)0;
+				seqBlob[pos++] = fieldInfo.FieldId;
+				seqBlob[pos++] = (byte)(known & 0xFF);
+				seqBlob[pos++] = (byte)((known >> 8) & 0xFF);
+			}
+			seqBlob[pos] = 0;
+			return seqBlob;
+		}
+
+		/// <summary>Builds the guard blob for a guarded delete or replace. Throws <see cref="ArgumentException"/> when the
+		/// mask is empty (an unguarded delete must be asked for with <c>Delete</c>, never by accident) or names a bit
+		/// that is not one of the entity type's distributed fields.</summary>
+		private byte[] BuildGuardBlob(IDistributedEntity entity, ulong guardMask, string paramName)
+		{
+			if (guardMask == 0)
+			{
+				throw new ArgumentException("A guard must name at least one field (OR together the fields' Mask values); use Delete for an unguarded delete", paramName);
+			}
+
+			ValidateFieldMask(entity, guardMask, paramName);
+			return BuildKnownSeqBlob(entity, guardMask);
+		}
+
+		/// <summary>Throws <see cref="ArgumentException"/> when <paramref name="mask"/> names a bit that is not one of the
+		/// entity type's distributed fields. Zero passes.</summary>
+		internal void ValidateFieldMask(IDistributedEntity entity, ulong mask, string paramName)
+		{
+			ulong typeMask = 0;
+			foreach (var fieldInfo in GetRegisteredTypeInfo(entity).DistributedFields)
+			{
+				if (fieldInfo != null)
+				{
+					typeMask |= fieldInfo.FieldBitmask;
+				}
+			}
+
+			if ((mask & ~typeMask) != 0)
+			{
+				throw new ArgumentException("The mask names bits that are not distributed fields of " + entity.GetType().Name, paramName);
+			}
+		}
+
+		/// <summary>Deletes an entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
+		/// last received them. Backs <see cref="IDistributedEntity.DeleteExclusive"/>; see there for the contract.</summary>
+		/// <param name="entity">The registered entity to delete.</param>
+		/// <param name="guardMask">The fields the delete depends on: OR of their <c>Mask</c> values. Must be non-empty.</param>
+		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification.</param>
+		/// <param name="onComplete">True if deleted, false if another connection's lock blocked it, or an error
+		/// (<see cref="ImpunityErrorCode.ActionStaleData"/> when a guarded field changed).</param>
+		/// <param name="onDeletedAction">Optional conditional database action, run only if this request deleted it.</param>
+		/// <exception cref="ArgumentException">The mask is empty or names bits outside the entity's fields. Nothing is sent
+		/// and <paramref name="onDeletedAction"/> is left to the caller.</exception>
+		public void DeleteEntityExclusive(IDistributedEntity entity, ulong guardMask, BsonValue deleteData, ImpunityCallback<bool>? onComplete, GameStateActionBase? onDeletedAction = null)
+		{
+			if (Connection == null)
+			{
+				// No connection to queue through, so both callbacks fire now, in the usual order.
+				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"), false);
+				onDeletedAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				return;
+			}
+
+			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
+			{
+				ImpunityCallback<bool>? notRegistered = onComplete;
+				if (notRegistered != null)
+				{
+					Connection.QueueLocalCallback(err => notRegistered(err, false), new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				}
+				if (onDeletedAction != null)
+				{
+					Connection.QueueLocalFailure(onDeletedAction, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				}
+				return;
+			}
+
+			byte[] guard = BuildGuardBlob(entity, guardMask, nameof(guardMask));
+			Connection.DoAction(new DeleteEntityAction(entity.DistributedEntityId, deleteData, onComplete, onDeletedAction)
+			{
+				KnownFieldSeqs = new ArraySegment<byte>(guard),
+			});
 		}
 
 		/// <summary>Resolves the registered type metadata for an entity by its <see cref="IDistributedEntity.DistributedEntityType"/>,

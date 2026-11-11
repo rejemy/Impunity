@@ -421,10 +421,10 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0) where T : class, IDistributedObject
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, ulong replaceGuard = 0) where T : class, IDistributedObject
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId, replaceGuard);
 			return t.Task;
 		}
 
@@ -477,6 +477,16 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.DeleteExclusive"/>. The returned task faults with an
+		/// <see cref="ImpunityErrorResponseException"/> on a stale guard (<see cref="ImpunityErrorCode.ActionStaleData"/>),
+		/// and returns false when another client's lock blocked the delete.</summary>
+		public static Task<bool> DeleteExclusiveAsync(this IDistributedEntity entity, ulong guardMask, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
+		{
+			var t = new ImpunityTaskCompletionSource<bool>();
+			entity.DeleteExclusive(guardMask, deleteData, t.OnComplete, onDeletedAction);
+			return t.Task;
+		}
+
 		public static Task<bool> TryLockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -522,7 +532,7 @@ namespace Impunity.Connection
 		/// <returns>A task for the outcome: <see cref="TransactResult.Committed"/>, <see cref="TransactResult.Declined"/> or
 		/// <see cref="TransactResult.Conflict"/>. It faults with <see cref="ImpunityErrorResponseException"/> when the
 		/// outcome is <see cref="TransactResult.Failed"/> (the body threw, the entity went away, or the update failed).</returns>
-		public static Task<TransactResult> TransactAsync(this IDistributedEntity entity, Func<bool> body, int maxAttempts = -1)
+		public static Task<TransactResult> TransactAsync(this IDistributedEntity entity, Func<TransactScope, bool> body, int maxAttempts = -1)
 		{
 			var t = new ImpunityTaskCompletionSource<TransactResult>();
 			entity.Transact(body, t.OnComplete, maxAttempts);

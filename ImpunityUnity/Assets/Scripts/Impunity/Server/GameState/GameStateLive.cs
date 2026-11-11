@@ -1669,7 +1669,10 @@ namespace Impunity.GameState
 
 		// replaceEntityId non-zero: replace exactly this entity, which must hold uniqueName — fails with ActionNotFound
 		// when nothing holds the name, and with ActionUniqueNameExists when another entity does. Implies replace.
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force, uint replaceEntityId = 0)
+		// replaceGuardSeqs: a known-field-seq blob (as an exclusive update carries) checked against the entity being
+		// replaced before it is removed — ActionStaleData if a guarded field changed since the client saw it. Needs
+		// replaceEntityId, since the blob only means something for the entity the client read. A lock holder bypasses it.
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force, uint replaceEntityId = 0, ArraySegment<byte> replaceGuardSeqs = default)
 		{
 			ValidateInstanceFlags(instanceFlags);
 
@@ -1679,6 +1682,11 @@ namespace Impunity.GameState
 			if (channel == null || channel.InLoadingState)
 			{
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No channel with ID " + channelId);
+			}
+
+			if (replaceGuardSeqs.Array != null && replaceEntityId == 0)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "A guarded replace needs the id of the entity being replaced");
 			}
 
 			if (replaceEntityId != 0)
@@ -1712,6 +1720,13 @@ namespace Impunity.GameState
 				// Remove the existing object, then fall through to create the new one under the now-free name.
 				// Destroying it drops the name from the channel's UniqueNames and from NamedEntities.
 				GameStateObject existing = channel.GetNamedObject(uniqueName)!;
+
+				// Guarded replace: checked before anything is removed, so a stale replace changes nothing. A foreign lock
+				// is left to DeleteEntity below (ActionBlockedByLock), and a lock holder bypasses the check, as for updates.
+				if (replaceGuardSeqs.Array != null && existing.IsAccessibleBy(origin.ConnectionKey) && !existing.IsLockedBy(origin.ConnectionKey))
+				{
+					existing.ValidateExclusiveSeqs(replaceGuardSeqs);
+				}
 
 				if (force)
 				{
@@ -1829,7 +1844,11 @@ namespace Impunity.GameState
 			entity.SendEvent(eventType, eventData, sentServerMs, except);
 		}
 
-		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData)
+		/// <summary>Deletes a live entity for <paramref name="origin"/>. Returns false, changing nothing, when another
+		/// connection holds its lock. With <paramref name="guardSeqs"/> (a known-field-seq blob, as an exclusive update
+		/// carries) it is a guarded delete: throws <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing, if a
+		/// guarded field changed since the client last saw it. A lock holder bypasses the guard.</summary>
+		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData, ArraySegment<byte> guardSeqs = default)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1841,6 +1860,11 @@ namespace Impunity.GameState
 			{
 				// Can't delete locked entity
 				return false;
+			}
+
+			if (guardSeqs.Array != null && !entity.IsLockedBy(origin.ConnectionKey))
+			{
+				entity.ValidateExclusiveSeqs(guardSeqs);
 			}
 
 			DestroyEntity(entity, deleteData);

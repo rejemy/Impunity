@@ -116,9 +116,9 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>A transaction body that adds one to Health, counting its runs.</summary>
-		static Func<bool> Increment(IntegrationTestEntity entity, Action onRun = null)
+		static Func<TransactScope, bool> Increment(IntegrationTestEntity entity, Action onRun = null)
 		{
-			return () =>
+			return _ =>
 			{
 				onRun?.Invoke();
 				entity.Health.Set(entity.Health.Get() + 1);
@@ -137,7 +137,7 @@ namespace Impunity.Tests
 
 			var probe = new TxProbe();
 			int runs = 0;
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				runs++;
 				a.Health.Set(a.Health.Get() + 5);
@@ -161,7 +161,7 @@ namespace Impunity.Tests
 			ushort seqBefore = a.SendSeq;
 
 			var probe = new TxProbe();
-			a.Transact(() => true, probe.OnComplete);
+			a.Transact(_ => true, probe.OnComplete);
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Committed, probe.Result);
@@ -182,7 +182,7 @@ namespace Impunity.Tests
 
 			var actionProbe = new CallbackProbe<BsonValue>();
 			var probe = new TxProbe();
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				a.Health.Set(99);
 				a.AddReplicatedAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "declined" }, actionProbe.OnComplete));
@@ -223,7 +223,7 @@ namespace Impunity.Tests
 			string seenName = null;
 			int seenHealth = -1;
 			var probe = new TxProbe();
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				seenName = a.DisplayName.Get();
 				seenHealth = a.Health.Get();
@@ -311,7 +311,7 @@ namespace Impunity.Tests
 				int index = i;
 				var p = new TxProbe();
 				probes.Add(p);
-				a.Transact(() =>
+				a.Transact(_ =>
 				{
 					runs++;
 					order.Add(index);
@@ -353,7 +353,7 @@ namespace Impunity.Tests
 			int runs = 0;
 			int seen = -1;
 			var probe = new TxProbe();
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				runs++;
 				exclusiveDoneWhenBodyRan = exclusiveDone;
@@ -387,7 +387,7 @@ namespace Impunity.Tests
 
 			var seen = new List<int>();
 			var bProbe = new TxProbe();
-			b.Transact(() =>
+			b.Transact(_ =>
 			{
 				seen.Add(b.Health.Get());
 				b.Health.Set(b.Health.Get() + 1);
@@ -409,13 +409,13 @@ namespace Impunity.Tests
 			var b = entities[1];
 
 			var aProbe = new TxProbe();
-			a.Transact(() => { a.Health.Set(7); return true; }, aProbe.OnComplete);
+			a.Transact(_ => { a.Health.Set(7); return true; }, aProbe.OnComplete);
 			await PumpUntil(() => aProbe.Fired, conns[0]);
 			Assert.AreEqual(0, b.Health.Get(), "B must still be stale for this test");
 
 			int runs = 0;
 			var bProbe = new TxProbe();
-			b.Transact(() =>
+			b.Transact(_ =>
 			{
 				runs++;
 				b.Health.Set(100);
@@ -446,7 +446,7 @@ namespace Impunity.Tests
 
 			var actionProbes = new List<CallbackProbe<BsonValue>>();
 			var bProbe = new TxProbe();
-			b.Transact(() =>
+			b.Transact(_ =>
 			{
 				int next = b.Health.Get() + 1;
 				b.Health.Set(next);
@@ -488,7 +488,7 @@ namespace Impunity.Tests
 			var order = new List<string>();
 			var reservedAtRun = new List<int>();
 			var bProbe = new TxProbe();
-			b.Transact(() =>
+			b.Transact(_ =>
 			{
 				int run = reservedAtRun.Count + 1;
 				order.Add("body" + run);
@@ -534,7 +534,7 @@ namespace Impunity.Tests
 
 			bool actionDoneWhenBodyRan = false;
 			var probe = new TxProbe();
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				actionDoneWhenBodyRan = actionDone;
 				a.Health.Set(a.Health.Get() + 1);
@@ -567,7 +567,7 @@ namespace Impunity.Tests
 			await PumpUntil(() => b.Health.Get() == 1, AllConnections());
 
 			var declined = new TxProbe();
-			a.Transact(() => { a.Health.Set(50); return false; }, declined.OnComplete);
+			a.Transact(_ => { a.Health.Set(50); return false; }, declined.OnComplete);
 			await PumpUntil(() => declined.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Declined, declined.Result);
 			Assert.AreEqual(50, a.Health.Get(), "Set applies locally on a client-authoritative entity");
@@ -659,7 +659,7 @@ namespace Impunity.Tests
 
 			var throwing = new TxProbe();
 			var next = new TxProbe();
-			a.Transact(() =>
+			a.Transact(_ =>
 			{
 				a.Health.Set(666);
 				throw new InvalidOperationException("boom");
@@ -684,7 +684,7 @@ namespace Impunity.Tests
 
 			bool ran = false;
 			var probe = new TxProbe();
-			loose.Transact(() => { ran = true; return true; }, probe.OnComplete);
+			loose.Transact(_ => { ran = true; return true; }, probe.OnComplete);
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Failed, probe.Result);
@@ -700,17 +700,17 @@ namespace Impunity.Tests
 			var offline = new IntegrationTestEntity();
 
 			var probe = new TxProbe();
-			offline.Transact(() => { offline.Health.Set(offline.Health.Get() + 2); return true; }, probe.OnComplete);
+			offline.Transact(_ => { offline.Health.Set(offline.Health.Get() + 2); return true; }, probe.OnComplete);
 			Assert.IsTrue(probe.Fired);
 			Assert.AreEqual(TransactResult.Committed, probe.Result);
 			Assert.AreEqual(2, offline.Health.Get());
 
 			var declined = new TxProbe();
-			offline.Transact(() => false, declined.OnComplete);
+			offline.Transact(_ => false, declined.OnComplete);
 			Assert.AreEqual(TransactResult.Declined, declined.Result);
 
 			var failed = new TxProbe();
-			offline.Transact(() => throw new InvalidOperationException("offline boom"), failed.OnComplete);
+			offline.Transact(_ => throw new InvalidOperationException("offline boom"), failed.OnComplete);
 			Assert.AreEqual(TransactResult.Failed, failed.Result);
 		}
 
@@ -734,8 +734,8 @@ namespace Impunity.Tests
 
 			bool bodyRan = false;
 			insideCall = true;
-			a.Transact(() => { bodyRan = true; return false; }, record);
-			a.Transact(() => true, record);
+			a.Transact(_ => { bodyRan = true; return false; }, record);
+			a.Transact(_ => true, record);
 			insideCall = false;
 
 			Assert.IsTrue(bodyRan, "With nothing in flight the first body runs inside the call");
@@ -757,9 +757,9 @@ namespace Impunity.Tests
 
 			Assert.AreEqual(TransactResult.Committed, await Pump(a.TransactAsync(Increment(a)), AllConnections()));
 			Assert.AreEqual(1, a.Health.Get());
-			Assert.AreEqual(TransactResult.Declined, await Pump(a.TransactAsync(() => false), AllConnections()));
+			Assert.AreEqual(TransactResult.Declined, await Pump(a.TransactAsync(_ => false), AllConnections()));
 
-			var error = await PumpExpectingError(a.TransactAsync(() => throw new InvalidOperationException("async boom")), AllConnections());
+			var error = await PumpExpectingError(a.TransactAsync(_ => throw new InvalidOperationException("async boom")), AllConnections());
 			Assert.IsNotNull(error, "A Failed transaction should fault the task");
 
 			await PumpUntil(() => b.Health.Get() == 1, AllConnections());

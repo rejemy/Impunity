@@ -284,8 +284,8 @@ namespace Impunity.Tests
 			var results = new List<Task<TransactResult>>();
 			for (int i = 0; i < N; i++)
 			{
-				results.Add(a.TransactAsync(() => { a.Health.Set(a.Health.Get() + 1); return true; }, 4 * N));
-				results.Add(b.TransactAsync(() => { b.Health.Set(b.Health.Get() + 1); return true; }, 4 * N));
+				results.Add(a.TransactAsync(_ => { a.Health.Set(a.Health.Get() + 1); return true; }, 4 * N));
+				results.Add(b.TransactAsync(_ => { b.Health.Set(b.Health.Get() + 1); return true; }, 4 * N));
 			}
 
 			foreach (var result in results)
@@ -321,13 +321,13 @@ namespace Impunity.Tests
 			}
 
 			// Make B stale: A's write reaches the server, and only A is pumped until it is confirmed.
-			Assert.AreEqual(TransactResult.Committed, await Pump(a.TransactAsync(() => { a.Health.Set(1); return true; }), connA));
+			Assert.AreEqual(TransactResult.Committed, await Pump(a.TransactAsync(_ => { a.Health.Set(1); return true; }), connA));
 			Assert.AreEqual(0, b.Health.Get(), "B must still be stale for this test");
 
 			string docId = Name("slot");
 			int reserved = 0;
 			var reservedAtRun = new List<int>();
-			var result = b.TransactAsync(() =>
+			var result = b.TransactAsync(_ =>
 			{
 				reservedAtRun.Add(reserved);
 				b.Health.Set(b.Health.Get() + 1);
@@ -349,6 +349,96 @@ namespace Impunity.Tests
 				Assert.AreEqual(0, seen, "A run saw an earlier attempt's slot still reserved");
 			}
 			await PumpUntil(() => reserved == 1, TimeSpan.FromSeconds(5), AllConnections());
+		}
+
+		/// <summary>
+		/// Guarded delete and replace over each real transport: once another client changes a guarded field, B's
+		/// guarded replace and guarded delete are stale (nothing changes); after B catches up, the guarded delete goes
+		/// through. Exercises the "xs" field on a delete and "rxs" on a create through every serializer path.
+		/// </summary>
+		[Test, Category("Transport"), Category("GuardedDelete")]
+		public async Task GuardedDeleteAndReplaceAreStaleAfterAChange()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("guard");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var a = new IntegrationTestEntity { UniqueName = "tile" };
+			a.Health.Set(1);
+			await Pump(connA.EntityManager.CreateObjectAsync(a, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			IntegrationTestEntity b = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				b = (IntegrationTestEntity)obj;
+			}
+
+			// Make B stale on Health: A's write reaches the server, and only A is pumped until it is confirmed.
+			a.Health.Set(2);
+			await Pump(a.UpdateExclusiveAsync(), connA);
+			Assert.AreEqual(1, b.Health.Get(), "B must still be stale for this test");
+
+			var crop = new IntegrationTestEntity { UniqueName = "tile" };
+			var replaceError = await PumpExpectingError(connB.EntityManager.CreateObjectAsync(crop, bChannel, false, null, b.DistributedEntityId, b.Health.Mask), AllConnections());
+			Assert.IsNotNull(replaceError, "The stale guarded replace went through");
+			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, replaceError.ErrorId);
+
+			// The stale replace's reply came after the echo, so B has caught up — but a fresh write by A makes it stale again.
+			a.Health.Set(3);
+			await Pump(a.UpdateExclusiveAsync(), connA);
+			var deleteError = await PumpExpectingError(b.DeleteExclusiveAsync(b.Health.Mask, null), connB);
+			Assert.IsNotNull(deleteError, "The stale guarded delete went through");
+			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, deleteError.ErrorId);
+			Assert.AreEqual(3, b.Health.Get());
+
+			Assert.IsTrue(await Pump(b.DeleteExclusiveAsync(b.Health.Mask, null), AllConnections()));
+			await PumpUntil(() => aChannel.DistributedObjects.Count == 0, TimeSpan.FromSeconds(5), AllConnections());
+		}
+
+		/// <summary>
+		/// A transaction's delete whose guarded field changed first is rejected and reruns against the winner's value,
+		/// then goes through; a transaction queued behind it fails because the entity is gone. Over every transport, since
+		/// the commit depends on the delete push arriving before the delete's reply.
+		/// </summary>
+		[Test, Category("Transport"), Category("Transact")]
+		public async Task TransactDeleteRerunsOnStaleGuard()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("txdel");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var a = new IntegrationTestEntity { UniqueName = "tree" };
+			a.Health.Set(1);
+			await Pump(connA.EntityManager.CreateObjectAsync(a, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			IntegrationTestEntity b = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				b = (IntegrationTestEntity)obj;
+			}
+
+			a.Health.Set(2);
+			await Pump(a.UpdateExclusiveAsync(), connA);
+			Assert.AreEqual(1, b.Health.Get(), "B must still be stale for this test");
+
+			var seen = new List<int>();
+			var deleted = b.TransactAsync(tx => { seen.Add(b.Health.Get()); tx.Delete(b.Health.Mask, "felled"); return true; });
+			var behind = b.TransactAsync(_ => { b.Health.Set(0); return true; });
+
+			Assert.AreEqual(TransactResult.Committed, await Pump(deleted, AllConnections()));
+			CollectionAssert.AreEqual(new[] { 1, 2 }, seen);
+			var behindError = await PumpExpectingError(behind, AllConnections());
+			Assert.IsNotNull(behindError, "The transaction queued behind the delete committed");
+			Assert.AreEqual(ImpunityErrorCode.ActionNotFound, behindError.ErrorId);
+			await PumpUntil(() => aChannel.DistributedObjects.Count == 0, TimeSpan.FromSeconds(5), AllConnections());
 		}
 
 		/// <summary>

@@ -33,6 +33,10 @@ namespace Impunity.Connection
 		/// <summary>Reads and discards field data from the stream, advancing the reader position without applying changes. Used to skip stale out-of-order updates.</summary>
 		void SkipFrom(BinaryReader r);
 
+		/// <summary>This field's bit in its entity's field mask, <c>1UL &lt;&lt; (fieldId - 1)</c>. Used to name fields in a
+		/// guard (see <see cref="IDistributedEntity.DeleteExclusive"/>). 0 until the entity has initialized its fields.</summary>
+		ulong Mask { get; }
+
 		/// <summary>The wire-protocol category of this field (value, array, queue, dictionary).</summary>
 		GameStateEntityFieldType FieldType { get; }
 		/// <summary>The serialized element value type for this field.</summary>
@@ -104,6 +108,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		T CurrentValue;
 		T? PendingValue;
@@ -310,6 +319,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		T CurrentValue;
 		T? PendingValue;
@@ -544,6 +558,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		/// <summary>The length of the array, or 0 if it has not been initialized.</summary>
 		public readonly int Length => CurrentValue?.Length ?? 0;
@@ -905,6 +924,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		/// <summary>The number of elements currently in the queue, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
@@ -1285,6 +1309,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		/// <summary>The number of values currently on the stack.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
@@ -1809,6 +1838,11 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
+
 		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
 		/// <summary>The keys in the last server-confirmed dictionary.</summary>
@@ -2159,6 +2193,11 @@ namespace Impunity.Connection
 
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
+
+		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
+		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
+		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
+		public readonly ulong Mask => FieldBitmask;
 
 		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
