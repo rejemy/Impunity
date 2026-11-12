@@ -41,6 +41,24 @@ namespace Impunity.GameState
 			w.Write(value);
 		}
 
+		/// <summary>A custom slot's persisted value: the binary, or a default (null-backed) segment for BSON null, which
+		/// is how <see cref="BsonValue"/> stores a default segment. Anything else is a corrupt row.</summary>
+		/// <exception cref="InvalidCastException">The value is neither binary nor null.</exception>
+		public static ArraySegment<byte> FromBson(BsonValue value)
+		{
+			if (value == null || value.IsNull)
+			{
+				return default;
+			}
+
+			if (!value.IsBinary)
+			{
+				throw new InvalidCastException("a custom value must be stored as binary or null, not " + value.Type);
+			}
+
+			return value.AsBinary;
+		}
+
 		/// <summary>Reads a payload written by <see cref="Write"/>. Returns a default (null-backed) segment
 		/// only for a nullable slot whose null indicator was <c>false</c>.</summary>
 		public static ArraySegment<byte> Read(BinaryReader r, bool small, bool nullable)
@@ -92,7 +110,9 @@ namespace Impunity.GameState
 		public bool Equals(DSmallCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
-		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
+		// A default (null-backed) segment is persisted as BSON null (BsonValue's ArraySegment constructor), so null reads
+		// back as default: null for a nullable slot, the uninitialized sentinel for a non-nullable one, as on the wire.
+		public void FromBsonValue(BsonValue value) { Value = ServerCustomFramingSerializer.FromBson(value); }
 	}
 
 	/// <summary>Nullable distributed custom binary value (max 255 bytes). Distinguishes null from empty via a boolean prefix on the wire.</summary>
@@ -119,7 +139,9 @@ namespace Impunity.GameState
 		public bool Equals(DSmallNullableCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
-		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
+		// A default (null-backed) segment is persisted as BSON null (BsonValue's ArraySegment constructor), so null reads
+		// back as default: null for a nullable slot, the uninitialized sentinel for a non-nullable one, as on the wire.
+		public void FromBsonValue(BsonValue value) { Value = ServerCustomFramingSerializer.FromBson(value); }
 	}
 
 	/// <summary>Distributed custom binary value (max 65535 bytes). Uses a ushort length prefix. Null backing array represents uninitialized default.</summary>
@@ -146,7 +168,9 @@ namespace Impunity.GameState
 		public bool Equals(DCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
-		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
+		// A default (null-backed) segment is persisted as BSON null (BsonValue's ArraySegment constructor), so null reads
+		// back as default: null for a nullable slot, the uninitialized sentinel for a non-nullable one, as on the wire.
+		public void FromBsonValue(BsonValue value) { Value = ServerCustomFramingSerializer.FromBson(value); }
 	}
 
 	/// <summary>Nullable distributed custom binary value (max 65535 bytes). Distinguishes null from empty via a boolean prefix on the wire.</summary>
@@ -173,7 +197,9 @@ namespace Impunity.GameState
 		public bool Equals(DNullableCustom v) => ImpunityUtil.CompareArraySegments(Value, v.Value) == 0;
 
 		public BsonValue AsBsonValue() { return Value; }
-		public void FromBsonValue(BsonValue value) { Value = value.AsBinary; }
+		// A default (null-backed) segment is persisted as BSON null (BsonValue's ArraySegment constructor), so null reads
+		// back as default: null for a nullable slot, the uninitialized sentinel for a non-nullable one, as on the wire.
+		public void FromBsonValue(BsonValue value) { Value = ServerCustomFramingSerializer.FromBson(value); }
 	}
 
 	/// <summary>Server-side distributed fixed-size array. Supports full-set and per-index delta updates on the wire.</summary>

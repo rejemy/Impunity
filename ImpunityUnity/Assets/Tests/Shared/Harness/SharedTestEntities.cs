@@ -340,6 +340,22 @@ namespace Impunity.Tests
 		public DistributedValue<int, Int32Serializer> Runtime;
 	}
 
+	public static class PersistedCustomTestIds
+	{
+		public const int ENTITY = 70;
+	}
+
+	/// <summary>One persisted field of each nullable / small custom kind, for the persist-and-reload suite
+	/// (<c>PersistedCustomValueTests</c>): the server stores these as raw binary, and a null one as BSON null.</summary>
+	[DistributedEntity(PersistedCustomTestIds.ENTITY, PersistAs = "pcustom")]
+	public partial class PersistedCustomEntity : DistributedObjectBase
+	{
+		[PersistAs("box")] public DistributedValue<TestBox, TestBoxNullableSerializer> Box;
+		[PersistAs("sbox")] public DistributedValue<TestBox, TestBoxSmallNullableSerializer> SmallBox;
+		[PersistAs("blob")] public DistributedValue<ArraySegment<byte>, BlobSerializer> Blob;
+		[PersistAs("pos")] public DistributedValue<TestVec3, TestVec3Serializer> Position;
+	}
+
 	public static class MutableValueTestIds
 	{
 		public const int ENTITY = 60;

@@ -136,6 +136,14 @@ namespace Impunity.GameState
 			}
 			catch (ImpunityServerException e)
 			{
+				// Expected refusals (not found, locked, stale…) are the client's to handle and aren't logged. An
+				// internal error is a server bug or a corrupt row: log it here too, so the host's own log has it
+				// whatever the client does with the reply.
+				if (e.ErrorCode == ImpunityErrorCode.InternalServerError)
+				{
+					ImpunityLogger.LogError("Internal error running " + GetType().Name, e);
+				}
+
 				Error = new ImpunityErrorResponse(e);
 				if (e is ImpunityServerFatalException)
 				{
@@ -158,6 +166,14 @@ namespace Impunity.GameState
 			}
 			catch (ImpunityServerException e)
 			{
+				// Expected refusals (not found, locked, stale…) are the client's to handle and aren't logged. An
+				// internal error is a server bug or a corrupt row: log it here too, so the host's own log has it
+				// whatever the client does with the reply.
+				if (e.ErrorCode == ImpunityErrorCode.InternalServerError)
+				{
+					ImpunityLogger.LogError("Internal error running " + GetType().Name, e);
+				}
+
 				Error = new ImpunityErrorResponse(e);
 				if (e is ImpunityServerFatalException)
 				{

@@ -583,8 +583,45 @@ namespace Impunity.GameState
 					continue;
 				}
 				var propertyInstance = Properties[propInfo.Index];
-				propertyInstance.FromBsonValue(propData.PropertyValue);
+				try
+				{
+					propertyInstance.FromBsonValue(propData.PropertyValue);
+				}
+				catch (Exception e)
+				{
+					// Name what failed: without this a corrupt or unexpected row surfaces as a bare cast or null
+					// error from deep in a channel load, with no way to tell which entity or field it was.
+					throw new ImpunityServerException(ImpunityErrorCode.InternalServerError,
+						"Couldn't load persisted property '" + propData.PropertyName + "' of " + DescribeForErrors()
+						+ ": stored as " + (propData.PropertyValue?.Type.ToString() ?? "nothing")
+						+ ", expected " + propertyInstance.ValueType + " (" + e.GetType().Name + ": " + e.Message + ")", e);
+				}
 			}
+		}
+
+		/// <summary>This entity as an error message names it: its type, id, unique name and channel, whichever are
+		/// known (during a load some aren't yet).</summary>
+		public string DescribeForErrors()
+		{
+			// No id yet while it is being loaded
+			string description = TypeInfo?.Name ?? GetType().Name;
+			if (Id != 0)
+			{
+				description += " " + Id;
+			}
+
+			if (Name != null)
+			{
+				description += " '" + Name + "'";
+			}
+
+			string? channel = ChannelName;
+			if (channel != null && channel != Name)
+			{
+				description += " in channel '" + channel + "'";
+			}
+
+			return description;
 		}
 
 		public ArraySegment<byte> GetPropBytes()
@@ -1069,7 +1106,9 @@ namespace Impunity.GameState
 			}
 			catch (Exception e)
 			{
-				// error creating channel
+				// Error creating the channel: every listener gets it as its reply, but it's logged here as well, since
+				// a failed load is a server-side problem (a corrupt row, an unregistered type) the host needs to see
+				ImpunityLogger.LogError("Couldn't " + (channelData != null ? "load" : "create") + " channel '" + ChannelName + "'", e);
 				createError = new ImpunityErrorResponse(e);
 			}
 
@@ -1620,14 +1659,23 @@ namespace Impunity.GameState
 			}
 
 			GameStateChannel channel = new GameStateChannel(this, typeInfo, channelData.InstanceFlags, channelData.EntityId);
-			channel.SetPersistedProps(channelData.Properties);
-
-			if (channelData.ChannelObjects != null)
+			try
 			{
-				foreach (var objData in channelData.ChannelObjects)
+				channel.SetPersistedProps(channelData.Properties);
+
+				if (channelData.ChannelObjects != null)
 				{
-					CreateObject(objData, channel);
+					foreach (var objData in channelData.ChannelObjects)
+					{
+						CreateObject(objData, channel);
+					}
 				}
+			}
+			catch (Exception e)
+			{
+				// Objects are read before they join the channel, so their own errors can't say which channel it was
+				throw new ImpunityServerException(e is ImpunityServerException ise ? ise.ErrorCode : ImpunityErrorCode.InternalServerError,
+					"Loading channel '" + proxy.ChannelName + "': " + e.Message, e);
 			}
 
 			SwapOutEntity(proxy, channel);

@@ -268,6 +268,12 @@ namespace Impunity
 		{
 			ErrorCode = errorCode;
 		}
+
+		/// <summary>An error that wraps the exception behind it; its stack travels with the error response.</summary>
+		public ImpunityServerException(ImpunityErrorCode errorCode, string message, Exception inner) : base(message, inner)
+		{
+			ErrorCode = errorCode;
+		}
 	}
 
 	/// <summary>A fatal server exception that should terminate the connection.</summary>
@@ -303,6 +309,19 @@ namespace Impunity
 
 		public ImpunityErrorResponse() { }
 
+		/// <summary>An exception's stack for <see cref="Stacktrace"/>, with each inner exception's message and stack after
+		/// it: a wrapping exception (one that names what failed) must not hide where the original was thrown.</summary>
+		public static string? StackOf(Exception e)
+		{
+			string? stack = e.StackTrace;
+			for (Exception? inner = e.InnerException; inner != null; inner = inner.InnerException)
+			{
+				stack += "\n---> " + inner.GetType().Name + ": " + inner.Message + "\n" + inner.StackTrace;
+			}
+
+			return stack;
+		}
+
 		/// <summary>Creates an error response from an exception. Uses <see cref="ImpunityErrorCode.InternalServerError"/> unless the exception is an <see cref="ImpunityServerException"/>.</summary>
 		public ImpunityErrorResponse(Exception e)
 		{
@@ -315,28 +334,28 @@ namespace Impunity
 				ErrorCode = ImpunityErrorCode.InternalServerError;
 			}
 			Message = e.Message;
-			Stacktrace = e.StackTrace;
+			Stacktrace = StackOf(e);
 		}
 
 		public ImpunityErrorResponse(ImpunityServerException e)
 		{
 			ErrorCode = e.ErrorCode;
 			Message = e.Message;
-			Stacktrace = e.StackTrace;
+			Stacktrace = StackOf(e);
 		}
 
 		public ImpunityErrorResponse(ImpunityErrorCode code, Exception e)
 		{
 			ErrorCode = code;
 			Message = e.Message;
-			Stacktrace = e.StackTrace;
+			Stacktrace = StackOf(e);
 		}
 
 		public ImpunityErrorResponse(ImpunityErrorCode code, string message, Exception e)
 		{
 			ErrorCode = code;
 			Message = message;
-			Stacktrace = e.StackTrace;
+			Stacktrace = StackOf(e);
 		}
 
 		public ImpunityErrorResponse(ImpunityErrorCode code, string message)
@@ -364,6 +383,24 @@ namespace Impunity
 		public override string ToString()
 		{
 			return "Error " + ErrorId + ": " + Message + "\n" + ServerStacktrace;
+		}
+
+		/// <summary>The server's stack first, when the reply carried one, then where this client raised it. Loggers print
+		/// an exception's <c>Message</c> and <c>StackTrace</c> rather than <see cref="ToString"/> (Unity's
+		/// <c>Debug.LogException</c> does, and so does an <c>AggregateException</c>'s inner list), so without this the
+		/// server's half of the story never shows.</summary>
+		public override string? StackTrace
+		{
+			get
+			{
+				string? local = base.StackTrace;
+				if (string.IsNullOrEmpty(ServerStacktrace))
+				{
+					return local;
+				}
+
+				return "[server, " + ErrorId + "]\n" + ServerStacktrace + "\n[client]\n" + local;
+			}
 		}
 	}
 
