@@ -400,6 +400,55 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>
+		/// An update note reaches the other client with its update (current while the field changes) and the writer on its
+		/// echo marked as its own; a note with no field change travels alone on an empty update. Over every transport,
+		/// since the writer's copy is encoded separately from the shared one.
+		/// </summary>
+		[Test, Category("Transport"), Category("UpdateNote")]
+		public async Task UpdateNoteReachesEveryoneWithItsUpdate()
+		{
+			await EnsureServerAsync();
+			var connA = await OpenConnectionAsync();
+			var connB = await OpenConnectionAsync();
+
+			var channelName = Name("note");
+			var aChannel = await Pump(connA.EntityManager.SubscribeToChannelAsync(channelName, new IntegrationTestChannel()), AllConnections());
+			var bChannel = await Pump(connB.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>(channelName, null), AllConnections());
+
+			var a = new IntegrationTestEntity();
+			a.Health.Set(1);
+			await Pump(connA.EntityManager.CreateObjectAsync(a, aChannel, false), AllConnections());
+			await PumpUntil(() => bChannel.DistributedObjects.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			IntegrationTestEntity b = null;
+			foreach (var obj in bChannel.DistributedObjects.Values)
+			{
+				b = (IntegrationTestEntity)obj;
+			}
+
+			var bChanges = new List<UpdateNote?>();
+			var aNotes = new List<UpdateNote>();
+			var bNotes = new List<UpdateNote>();
+			b.Health.OnChanged += (_, __) => bChanges.Add(b.CurrentUpdateNote);
+			a.OnUpdateNoteEvent += aNotes.Add;
+			b.OnUpdateNoteEvent += bNotes.Add;
+
+			a.Health.Set(4);
+			a.SetUpdateNote(new BsonDocument { ["hit"] = "left" });
+			await PumpUntil(() => aNotes.Count == 1 && bNotes.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
+			Assert.AreEqual(1, bChanges.Count);
+			Assert.IsTrue(bChanges[0].HasValue, "The note was not current while B's field changed");
+			Assert.AreEqual("left", bChanges[0].Value.Data["hit"].AsString);
+			Assert.IsFalse(bNotes[0].IsOwn);
+			Assert.IsTrue(aNotes[0].IsOwn, "The writer's echo was not marked as its own");
+			Assert.AreNotEqual(0L, bNotes[0].SentServerMs);
+
+			a.SetUpdateNote(new BsonDocument { ["hit"] = "miss" });
+			await PumpUntil(() => aNotes.Count == 2 && bNotes.Count == 2, TimeSpan.FromSeconds(5), AllConnections());
+			Assert.AreEqual("miss", bNotes[1].Data["hit"].AsString);
+			Assert.AreEqual(1, bChanges.Count, "A note-only update changed a field");
+		}
+
+		/// <summary>
 		/// A transaction's delete whose guarded field changed first is rejected and reruns against the winner's value,
 		/// then goes through; a transaction queued behind it fails because the entity is gone. Over every transport, since
 		/// the commit depends on the delete push arriving before the delete's reply.

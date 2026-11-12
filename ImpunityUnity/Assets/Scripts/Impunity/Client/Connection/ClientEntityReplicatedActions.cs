@@ -65,11 +65,6 @@ namespace Impunity.Connection
 			DirtyObjects.Add(entity);
 		}
 
-		private bool HasPendingReplicatedAction(IDistributedEntity entity)
-		{
-			return PendingReplicatedActions.ContainsKey(entity);
-		}
-
 		// Removes and returns what should ride the update being built for this entity: nothing, the one pending action,
 		// or several combined into a single compound.
 		private GameStateActionBase? TakeReplicatedAction(IDistributedEntity entity)

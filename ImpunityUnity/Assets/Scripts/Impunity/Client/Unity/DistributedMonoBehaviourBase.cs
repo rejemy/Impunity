@@ -164,6 +164,15 @@ namespace Impunity.Unity
 			Manager.AddReplicatedAction(this, action);
 		}
 
+		/// <inheritdoc/>
+		public void SetUpdateNote(BsonValue? note)
+		{
+			Manager?.SetUpdateNote(this, note);
+		}
+
+		/// <inheritdoc/>
+		public UpdateNote? CurrentUpdateNote => Manager?.GetCurrentUpdateNote(this);
+
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
@@ -343,6 +352,14 @@ namespace Impunity.Unity
 		}
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
 		public event Action<EntityEvent>? OnEventTriggeredEvent;
+
+		/// <inheritdoc/>
+		public virtual void OnUpdateNote(UpdateNote note)
+		{
+			OnUpdateNoteEvent?.Invoke(note);
+		}
+		/// <inheritdoc/>
+		public event Action<UpdateNote>? OnUpdateNoteEvent;
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
 		/// <param name="deleteData">Optional BSON payload supplied to <see cref="Delete"/> by the deleter, or null.</param>

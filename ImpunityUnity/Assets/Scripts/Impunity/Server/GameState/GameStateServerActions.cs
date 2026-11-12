@@ -181,12 +181,26 @@ namespace Impunity.GameState
 		[BsonField("sq")]
 		public ushort Seq;
 
+		/// <summary>The sender's note on this update: why it happened. Relayed with the update, never stored. Null (or BSON
+		/// null) for none.</summary>
+		[BsonField("nt")]
+		public BsonValue? Note;
+
+		/// <summary>The sender's server-time stamp (Unix ms) for <see cref="Note"/>, or the server's clock at the relay
+		/// when the sender didn't stamp it. 0 when there is no note.</summary>
+		[BsonField("st")]
+		public long NoteSentServerMs;
+
+		/// <summary>True on the copy sent to the connection that wrote the update. Only set when there is a note.</summary>
+		[BsonField("mn")]
+		public bool NoteFromRecipient;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleEntityUpdate(EntityId, UpdateBytes, Seq);
+			handler.HandleEntityUpdate(EntityId, UpdateBytes, Seq, Note != null && !Note.IsNull ? Note : null, NoteSentServerMs, NoteFromRecipient);
 		}
 	}
 

@@ -302,9 +302,9 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq, BsonValue? note, long noteSentMs, bool noteIsOwn)
 		{
-			EntityManager.HandleEntityUpdate(entityId, updateData, seq);
+			EntityManager.HandleEntityUpdate(entityId, updateData, seq, note, noteSentMs, noteIsOwn);
 		}
 
 		/// <inheritdoc/>
@@ -729,13 +729,26 @@ namespace Impunity.Connection
 		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the server
 		/// applies the update. Forces the update to be sent reliably. Application code normally attaches these through
 		/// <see cref="IDistributedEntity.AddReplicatedAction"/> rather than calling this directly.</param>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
+		/// <param name="note">Optional note relayed with the update (see <see cref="IDistributedEntity.SetUpdateNote"/>),
+		/// stamped with <see cref="GetServerTime"/>. Forces the update to be sent reliably.</param>
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null,
+			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
 			action.OnReplicatedAction = onReplicatedAction;
+			StampNote(action, note);
 			// The action must not travel over a lossy transport: a dropped datagram would lose both halves.
-			action.SetGuaranteed(guaranteed || onReplicatedAction != null);
+			action.SetGuaranteed(guaranteed || onReplicatedAction != null || action.Note != null);
 			DoAction(action);
+		}
+
+		private void StampNote(UpdateEntityAction action, BsonValue? note)
+		{
+			if (note != null && !note.IsNull)
+			{
+				action.Note = note;
+				action.NoteSentServerMs = GetServerTime();
+			}
 		}
 
 		/// <summary>Sends an exclusive (optimistic-concurrency) property delta for a live entity. The server applies and
@@ -751,10 +764,14 @@ namespace Impunity.Connection
 		/// <param name="onComplete">Completion callback; receives an error on rejection (stale data or lock held by another).</param>
 		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the update is
 		/// accepted; on rejection it is skipped (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>).</param>
-		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
+		/// <param name="note">Optional note relayed with the update if it is accepted (see
+		/// <see cref="IDistributedEntity.SetUpdateNote"/>).</param>
+		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null,
+			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, knownFieldSeqs, onComplete);
 			action.OnReplicatedAction = onReplicatedAction;
+			StampNote(action, note);
 			action.SetGuaranteed(true);
 			DoAction(action);
 		}

@@ -1211,6 +1211,17 @@ namespace Impunity.GameState
 		[BsonField("cm")]
 		public ushort ConditionalMessageId;
 
+		/// <summary>Why this update happened, for the receivers: relayed with the update to every listener (the writer
+		/// included, marked as its own) and never stored or persisted. Null (or BSON null) for none. An update carrying a
+		/// note is relayed even when it changes no field.</summary>
+		[BsonField("nt")]
+		public BsonValue? Note;
+
+		/// <summary>The sender's estimate of server time when it sent <see cref="Note"/>. 0 means unstamped: the server
+		/// stamps the relay with its own clock.</summary>
+		[BsonField("st")]
+		public long NoteSentServerMs;
+
 		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnReplicatedAction;
 		ushort IHasConditionalAction.ConditionalMessageId { get => ConditionalMessageId; set => ConditionalMessageId = value; }
 
@@ -1242,7 +1253,9 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				applied = game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq, KnownFieldSeqs);
+				BsonValue? note = Note != null && !Note.IsNull ? Note : null;
+				long noteSentMs = note == null ? 0 : NoteSentServerMs != 0 ? NoteSentServerMs : GameStateServer.GetServerTime();
+				applied = game.Live.UpdateEntity(Origin.ConnectionReplicant, EntityId, UpdateBytes, this.Guaranteed, Seq, KnownFieldSeqs, note, noteSentMs);
 			}
 			finally
 			{

@@ -14,7 +14,10 @@ namespace Impunity.GameState
 		/// broadcast seq at snapshot time, used to seed per-field received-seqs for optimistic exclusive updates.</summary>
 		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq);
 		/// <summary>Called when an entity's properties are updated (dirty fields only).</summary>
-		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq);
+		/// <summary>An entity's properties were updated. <paramref name="note"/> is the writer's note on the update (null
+		/// for none), stamped <paramref name="noteSentMs"/>; <paramref name="noteIsOwn"/> is true when this connection
+		/// wrote the update.</summary>
+		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq, BsonValue? note, long noteSentMs, bool noteIsOwn);
 		/// <summary>Called when a custom event is fired on an entity. <paramref name="sentServerMs"/> is the server time
 		/// the sender fired it at.</summary>
 		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs);

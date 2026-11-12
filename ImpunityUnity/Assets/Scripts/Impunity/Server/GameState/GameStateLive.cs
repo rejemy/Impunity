@@ -492,9 +492,12 @@ namespace Impunity.GameState
 		/// value that will stamp the relayed broadcast of this update; each carried field records it in
 		/// <see cref="LastModSeq"/> for optimistic-concurrency (exclusive-update) staleness checks. Pass 0 when this
 		/// update is not being broadcast (e.g. create-time property seeding on an object not yet in a channel).
+		/// <c>note</c> is the sender's note for this update (see <see cref="UpdateEntityAction.Note"/>), stamped
+		/// <c>noteSentMs</c>: relayed with it, never stored, null for none. Only the relaying overrides use it.
 		/// </summary>
 		public virtual void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0,
+						BsonValue? note = null, long noteSentMs = 0)
 		{
 			if (propData.Array == null || propData.Count == 0 || TypeInfo == null)
 			{
@@ -755,22 +758,15 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
+						bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0,
+						BsonValue? note = null, long noteSentMs = 0)
 		{
 			// Bump the broadcast seq before applying, so each carried field's LastModSeq is stamped with the
 			// same OutSeq the relayed message will carry.
 			OutSeq++;
 			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq, OutSeq);
 
-			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
-			updateMessage.SetGuaranteed(guaranteed);
-			updateMessage.EntityId = Id;
-			updateMessage.UpdateBytes = propData;
-			updateMessage.Seq = OutSeq;
-
-			GameStateReplicant? except = IsClientAuthoritative() ? updatedBy : null;
-
-			SendToListeners(updateMessage, except);
+			SendUpdateToListeners(Id, propData, OutSeq, guaranteed, updatedBy, IsClientAuthoritative(), note, noteSentMs);
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
@@ -836,6 +832,54 @@ namespace Impunity.GameState
 
 			Members.Clear();
 			Listeners.Clear();
+		}
+
+		/// <summary>Relays an applied update of entity <paramref name="entityId"/> (this channel or one of its objects) to
+		/// the channel's listeners. A client-authoritative entity's writer is left out (it applied the change already).
+		/// Without a note every listener gets the same message, encoded once. With one, the writer gets its own copy
+		/// marked as sent by it, which is how a receiver knows a note is its own; everyone else still shares one.</summary>
+		public void SendUpdateToListeners(uint entityId, ArraySegment<byte> propData, ushort seq, bool guaranteed, GameStateReplicant updatedBy,
+			bool clientAuthoritative, BsonValue? note, long noteSentMs)
+		{
+			EntityUpdateMessageAction shared = new EntityUpdateMessageAction
+			{
+				EntityId = entityId,
+				UpdateBytes = propData,
+				Seq = seq,
+			};
+			shared.SetGuaranteed(guaranteed);
+
+			if (note == null)
+			{
+				SendToListeners(shared, clientAuthoritative ? updatedBy : null);
+				return;
+			}
+
+			shared.Note = note;
+			shared.NoteSentServerMs = noteSentMs;
+
+			EntityUpdateMessageAction? own = null;
+			foreach (GameStateReplicant replicant in Listeners.Values)
+			{
+				if (replicant.Id != updatedBy.Id)
+				{
+					replicant.SendMessageViaConnection(shared);
+				}
+				else if (!clientAuthoritative)
+				{
+					own ??= new EntityUpdateMessageAction
+					{
+						EntityId = entityId,
+						UpdateBytes = propData,
+						Seq = seq,
+						Note = note,
+						NoteSentServerMs = noteSentMs,
+						NoteFromRecipient = true,
+					};
+					own.SetGuaranteed(guaranteed);
+					replicant.SendMessageViaConnection(own);
+				}
+			}
 		}
 
 		public void SendToListeners(ServerActionBase message, GameStateReplicant? except)
@@ -1027,7 +1071,8 @@ namespace Impunity.GameState
 		}
 
 		public override void UpdateProps(BinaryReader propReader, ArraySegment<byte> propData, GameStateReplicant updatedBy,
-					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0)
+					bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0, ushort broadcastSeq = 0,
+					BsonValue? note = null, long noteSentMs = 0)
 		{
 			// A fresh object still being created has no channel yet: apply the seeded props but do not broadcast or
 			// advance OutSeq, so the creator's zero-valued FieldRecvSeq stays consistent with LastModSeq (0 >= 0 passes).
@@ -1041,15 +1086,7 @@ namespace Impunity.GameState
 			OutSeq++;
 			base.UpdateProps(propReader, propData, updatedBy, guaranteed, out persistedProps, seq, OutSeq);
 
-			EntityUpdateMessageAction updateMessage = new EntityUpdateMessageAction();
-			updateMessage.SetGuaranteed(guaranteed);
-			updateMessage.EntityId = Id;
-			updateMessage.UpdateBytes = propData;
-			updateMessage.Seq = OutSeq;
-
-			GameStateReplicant? except = IsClientAuthoritative() ? updatedBy : null;
-
-			Channel.SendToListeners(updateMessage, except);
+			Channel.SendUpdateToListeners(Id, propData, OutSeq, guaranteed, updatedBy, IsClientAuthoritative(), note, noteSentMs);
 		}
 
 		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
@@ -1483,12 +1520,18 @@ namespace Impunity.GameState
 		}
 
 		private void UpdateEntityProps(GameStateEntity entity, ArraySegment<byte> propBytes, GameStateReplicant updatedBy,
-							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0)
+							bool guaranteed, out List<LiveEntityPersistedPropertyData>? persistedProps, ushort seq = 0,
+							BsonValue? note = null, long noteSentMs = 0)
 		{
-			if (propBytes.Array == null || propBytes.Count == 0)
+			// An empty update changes nothing and is not relayed, unless it carries a note: then the note is the update.
+			if (note == null && (propBytes.Array == null || propBytes.Count == 0))
 			{
 				persistedProps = null;
 				return;
+			}
+			if (propBytes.Array == null)
+			{
+				propBytes = new ArraySegment<byte>(Array.Empty<byte>());
 			}
 
 			// Put prop data into a read buffer
@@ -1496,7 +1539,7 @@ namespace Impunity.GameState
 			TempBufferReader.BaseStream.Write(propBytes);
 			TempBufferReader.BaseStream.Position = 0;
 
-			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps, seq);
+			entity.UpdateProps(TempBufferReader, propBytes, updatedBy, guaranteed, out persistedProps, seq, 0, note, noteSentMs);
 		}
 
 		// ----- Public API below
@@ -1788,7 +1831,8 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0, ArraySegment<byte> exclusiveSeqs = default)
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0, ArraySegment<byte> exclusiveSeqs = default,
+			BsonValue? note = null, long noteSentMs = 0)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1818,7 +1862,7 @@ namespace Impunity.GameState
 			}
 
 			List<LiveEntityPersistedPropertyData>? persistedProps;
-			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq);
+			UpdateEntityProps(entity, propData, origin, guaranteed, out persistedProps, seq, note, noteSentMs);
 
 			if (entity.IsPersisted() && persistedProps != null)
 			{

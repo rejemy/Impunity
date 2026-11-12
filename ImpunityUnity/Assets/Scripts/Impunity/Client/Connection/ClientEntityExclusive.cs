@@ -507,7 +507,7 @@ namespace Impunity.Connection
 		/// <inheritdoc cref="FlushEntityNow(uint)"/>
 		internal void FlushEntityNow(IDistributedEntity entity)
 		{
-			if (Connection == null || (entity.DirtyBits == 0 && !HasPendingReplicatedAction(entity)))
+			if (Connection == null || (entity.DirtyBits == 0 && !HasPendingUpdateExtras(entity)))
 			{
 				return;
 			}

@@ -21,7 +21,7 @@ This document covers the essentials. It assumes you already have a working `Game
 9. [Persistent objects](#9-persistent-objects)
 10. [Locks](#10-locks)
 11. [Conditional actions](#11-conditional-actions) — moving items between the world (create, delete, update) and the database without duplicates
-12. [Events](#12-events)
+12. [Events](#12-events) — one-shot signals, and notes that say why an update happened
 13. [Niche topics](#13-niche-topics) — exclusive updates, transactions, temporal fields, local-only setters, unguaranteed sends
 14. [Quick reference](#14-quick-reference)
 15. [Known caveats](#15-known-caveats)
@@ -781,6 +781,38 @@ public override void OnEventTriggered(EntityEvent e)
 
 Use events for transient signals — a hit, a sound cue, a one-off notification — anything that shouldn't live in a field.
 
+### Update notes: why a change happened
+
+When an action changes state, the state change should be the message. An event sent next to an update arrives separately from it (often first), so a receiver ends up guessing which change an event explains, or the sender has to predict the outcome. A note travels *on* the update instead: receivers get the old value, the new value and the cause together.
+
+```csharp
+// send: rides the entity's next update (the per-frame sweep, UpdateExclusive, a transaction, the flush before Unlock)
+tree.Damage.Set(tree.Damage.Get() + hit);
+tree.SetUpdateNote(new BsonDocument { ["hit"] = hit, ["side"] = "left" });
+
+// inside a transaction
+tree.Transact(tx => { tree.Damage.Set(tree.Damage.Get() + hit); tx.Note(cause); return true; }, onComplete);
+
+// receive: from a field handler while the update is applied...
+tree.Damage.OnChanged += (from, to) =>
+{
+    UpdateNote? note = tree.CurrentUpdateNote;   // null for un-noted updates and local Sets
+    if (note is UpdateNote n && !n.IsOwn)
+        PlayHit(from, to, n.Data["side"].AsString);
+};
+// ...or once it has been applied (override OnUpdateNote, or subscribe to OnUpdateNoteEvent)
+public override void OnUpdateNote(UpdateNote note) { /* note.Data, note.SentServerMs, note.IsOwn */ }
+```
+
+- **Who gets it.** Every subscriber, with the update. The writer gets it too, on the echo of its own write, with `IsOwn` set, which is usually the cue to skip presentation it already played. On a client-authoritative entity the writer gets no echo and never sees its own note; it presents locally, as for any of its `Set`s.
+- **When it's readable.** `CurrentUpdateNote` is set only while a noted update is being applied (every field's `OnChanged`) and during `OnUpdateNote`, which runs after the fields. A note on an update that changed no field (a miss) still arrives, on an empty update, and is seen in `OnUpdateNote` only.
+- **One note per update.** Setting another before the send replaces it; null clears a pending one. If one frame's update has several causes, put them in one document.
+- **Never stored.** Not persisted, not replayed: a later subscriber sees the state, not the note. A rejected or dropped update (stale `UpdateExclusive`, entity locked by another client) takes its note with it; in a transaction only the committed attempt's note goes out, and a declined body's note is dropped.
+- **`SentServerMs`** is the writer's server-time stamp at the send, as for events.
+- **Who sent it** is reported only as "this connection or not". If presentation needs to know which player, put that in the note. It is the sender's own claim, which is fine for presentation.
+- A note forces a reliable send. It costs one extra encode on the server (the writer's copy is marked as its own; everyone else shares one).
+- **Not for deletes.** A transaction that deletes or replaces can't also set a note (it fails); a delete carries its cause as `deleteData`.
+
 ---
 
 ## 13. Niche topics
@@ -887,6 +919,7 @@ tree.Transact(tx =>
 - **Same queue, same rerun rule.** A stale guard reruns the body against the winner's values, after the rejected attempt's conditional has reported its skip. A delete queued behind an update on the same connection sees that update's result. A transaction queued behind a successful delete or replace reports `Failed` (`ActionNotFound`) without running: the entity is gone. A foreign lock reports `Failed` with `ActionBlockedByLock`.
 - **Delete or replace is the whole write.** A body that also sets fields or attaches replicated actions fails, and those changes are discarded as for a decline. Put the database work in the delete's or replace's own conditional argument. Create that action inside the body, since a rerun needs a fresh one; once handed to the scope, the transaction resolves it: skipped (`ActionConditionNotMet`) if the body declines or throws afterwards, or if the write is rejected.
 - **`tx.DependsOn(mask)`** adds fields the body only read to the guard, for any of the three writes. "Set the price from the stock level" depends on the stock level; without `DependsOn` a change to it doesn't rerun the body, because only written fields are guarded. A body with dependencies that sets nothing and attaches nothing still commits without sending, so a dependency on its own checks nothing; with a replicated action attached, it guards that action ("buy, if the price is still what I read").
+- **`tx.Note(bson)`** attaches a note to the transaction's update ([§12](#update-notes-why-a-change-happened)); only the committed attempt's note goes out.
 - `tx.Attempt` is the run number (1 for the first). The scope is only usable while its body runs.
 - No connection: a delete or replace reports `Failed`, and its conditional is failed too.
 
@@ -958,7 +991,7 @@ Flush a set of writes immediately with an optimistic-concurrency guard via `enti
 
 ### Operations (on `IDistributedEntity`)
 
-`TriggerEvent` · `UpdateExclusive` · `Transact` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+`TriggerEvent` · `SetUpdateNote` · `UpdateExclusive` · `Transact` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
 
 `Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddReplicatedAction(action)` attaches one to an entity's next update (`UpdateExclusive(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
 

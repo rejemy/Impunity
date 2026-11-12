@@ -171,6 +171,19 @@ namespace Impunity.Connection
 			SendReplace = (guard, reply) => manager!.CreateObject(newObject, channel, true, (err, _) => reply(err), onCreatedAction, replacedId, guard);
 		}
 
+		/// <summary>
+		/// Attaches a note to this transaction's update: why it happened, relayed to every listener with the update if it
+		/// is accepted (see <see cref="IDistributedEntity.SetUpdateNote"/>). Set it on every run, as the body naturally
+		/// does: a rejected attempt's note goes nowhere. A declined body's note is dropped. Not for a delete or replace,
+		/// which carries its cause as <c>deleteData</c>: such a body fails.
+		/// </summary>
+		/// <param name="note">The note; null removes one set earlier in this run.</param>
+		public void Note(BsonValue? note)
+		{
+			CheckOpen();
+			Entity.SetUpdateNote(note);
+		}
+
 		internal void Close()
 		{
 			Open = false;
@@ -472,7 +485,7 @@ namespace Impunity.Connection
 
 					// Changes pending from outside this transaction go first, as an ordinary update whose reply we wait
 					// for. Afterwards everything dirty on the entity belongs to the body.
-					if (state.Entity.DirtyBits != 0 || HasPendingReplicatedAction(state.Entity))
+					if (state.Entity.DirtyBits != 0 || HasPendingUpdateExtras(state.Entity))
 					{
 						DirtyObjects.Remove(state.Entity);
 						SendEntityUpdates(state.Entity, forTransaction: true);
@@ -543,7 +556,7 @@ namespace Impunity.Connection
 				return;
 			}
 
-			if (entity.DirtyBits == 0 && !HasPendingReplicatedAction(entity))
+			if (entity.DirtyBits == 0 && !HasPendingUpdateExtras(entity))
 			{
 				FinishTransaction(state, tx, TransactResult.Committed, null);
 				return;
@@ -572,14 +585,14 @@ namespace Impunity.Connection
 			IDistributedEntity entity = state.Entity;
 			string verb = scope.Write == TransactScope.WriteKind.Delete ? "deletes" : "replaces";
 
-			if (entity.DirtyBits != 0 || HasPendingReplicatedAction(entity))
+			if (entity.DirtyBits != 0 || HasPendingUpdateExtras(entity))
 			{
-				string reason = "the Transact body " + verb + " the entity and also set its fields or attached replicated actions";
+				string reason = "the Transact body " + verb + " the entity and also set its fields, attached replicated actions or set a note";
 				DropScopeWrite(scope, reason);
 				DiscardTransactionChanges(entity, reason);
 				FinishTransaction(state, tx, TransactResult.Failed, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest,
-					"A Transact body that " + verb + " the entity must not also set its fields or attach replicated actions; "
-					+ "pass the database action to Delete or ReplaceWith"));
+					"A Transact body that " + verb + " the entity must not also set its fields, attach replicated actions or set a note; "
+					+ "pass the database action to Delete or ReplaceWith (and the cause as deleteData)"));
 				return;
 			}
 
@@ -735,6 +748,8 @@ namespace Impunity.Connection
 				stream.Position = position;
 				DirtyObjects.Remove(entity);
 			}
+
+			PendingUpdateNotes.Remove(entity);
 
 			if (PendingReplicatedActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
 			{

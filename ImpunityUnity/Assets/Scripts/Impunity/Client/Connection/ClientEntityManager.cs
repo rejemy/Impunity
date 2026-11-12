@@ -1217,6 +1217,7 @@ namespace Impunity.Connection
 			DistributedObjects.Remove(entity.DistributedEntityId);
 			FailTransactionsForEntity(entity);
 			FailPendingReplicatedActions(entity);
+			PendingUpdateNotes.Remove(entity);
 
 			if (entity is IDistributedChannel channel)
 			{
@@ -1231,7 +1232,10 @@ namespace Impunity.Connection
 		/// <param name="entityId">The entity id the update applies to.</param>
 		/// <param name="updateData">The serialized delta of changed property values.</param>
 		/// <param name="seq">The server's outgoing sequence number for this update, used for stale-update detection.</param>
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq)
+		/// <param name="note">The writer's note on the update, or null (see <see cref="IDistributedEntity.SetUpdateNote"/>).</param>
+		/// <param name="noteSentMs">The writer's server-time stamp for <paramref name="note"/>.</param>
+		/// <param name="noteIsOwn">True when this connection wrote the update.</param>
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq, BsonValue? note = null, long noteSentMs = 0, bool noteIsOwn = false)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
@@ -1239,6 +1243,12 @@ namespace Impunity.Connection
 			if (entity == null)
 			{
 				ImpunityLogger.LogWarning("Got property update for entity we don't know about: " + entityId);
+				return;
+			}
+
+			if (note != null)
+			{
+				ApplyNotedUpdate(entity, updateData, seq, new UpdateNote(note, noteSentMs, noteIsOwn));
 				return;
 			}
 
@@ -1558,21 +1568,22 @@ namespace Impunity.Connection
 
 			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out bool guaranteedSend);
 			GameStateActionBase? replicatedAction = TakeReplicatedAction(entity);
+			BsonValue? note = TakeUpdateNote(entity);
 
 			if (updateDatabuffer.Array == null)
 			{
-				if (replicatedAction == null)
+				if (replicatedAction == null && note == null)
 				{
 					// Nothing changed and nothing to carry; don't burn a seq on an empty update.
 					return;
 				}
 
-				// Only here to carry a replicated action (e.g. a Set that turned out to be a no-op).
+				// Only here to carry a replicated action or a note (e.g. a Set that turned out to be a no-op).
 				updateDatabuffer = new ArraySegment<byte>(Array.Empty<byte>());
 			}
 
 			ImpunityCallback? onReply = null;
-			if (forTransaction || ((guaranteedSend || replicatedAction != null) && HasTransactionPending(entity)))
+			if (forTransaction || ((guaranteedSend || replicatedAction != null || note != null) && HasTransactionPending(entity)))
 			{
 				guaranteedSend = true;
 				onReply = TrackWrite(entity, null);
@@ -1589,7 +1600,7 @@ namespace Impunity.Connection
 			}
 
 			entity.SendSeq++;
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, replicatedAction);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, replicatedAction, note);
 
 		}
 
@@ -1635,7 +1646,7 @@ namespace Impunity.Connection
 			// Nothing dirty is trivially a success — unless a replicated action is waiting, which is sent on an empty
 			// exclusive update so it still gets the lock/staleness verdict (an empty seq blob checks nothing, but a
 			// foreign lock still rejects it).
-			if (entity.DirtyBits == 0 && !HasPendingReplicatedAction(entity))
+			if (entity.DirtyBits == 0 && !HasPendingUpdateExtras(entity))
 			{
 				Connection.QueueLocalCallback(onComplete, null);
 				return;
@@ -1674,7 +1685,7 @@ namespace Impunity.Connection
 			TrackReplicatedAction(entity, replicatedAction);
 
 			entity.SendSeq++;
-			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, replicatedAction);
+			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, replicatedAction, TakeUpdateNote(entity));
 		}
 
 		/// <summary>Builds the known-field-seq blob an exclusive update or a guarded delete/replace carries:

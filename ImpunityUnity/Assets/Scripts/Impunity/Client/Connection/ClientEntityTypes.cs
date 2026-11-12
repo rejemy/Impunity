@@ -278,6 +278,30 @@ namespace Impunity.Connection
 		/// <param name="action">A document action (insert, update, upsert, merge, delete, find, list) or a
 		/// <see cref="CompoundDatabaseAction"/>. Anything else throws <see cref="System.ArgumentException"/>.</param>
 		void AddReplicatedAction(GameStateActionBase action);
+		/// <summary>
+		/// Attaches a note to this entity's next update: why it changed (who hit it, from which side, with what). The
+		/// note is relayed with that update to every subscriber, this client included on the echo, and is never stored;
+		/// a later subscriber sees the state, not the note. Receivers read it as <see cref="CurrentUpdateNote"/> from field
+		/// <c>OnChanged</c> handlers while the update is applied, and in <see cref="OnUpdateNote"/> afterwards.
+		/// </summary>
+		/// <remarks>
+		/// <para>"Next update" is whichever send happens first, as for <see cref="AddReplicatedAction"/>: the per-frame
+		/// sweep, an <see cref="UpdateExclusive"/>, a transaction's update, or the flush before an <see cref="Unlock"/>.
+		/// Field changes made before that send travel with it; with none, an empty update is sent just to carry the note.
+		/// An update carrying a note is always sent reliably.</para>
+		/// <para>One note per update: setting another before the send replaces it. Put several causes in one document if
+		/// you need them. A rejected or dropped update (stale exclusive update, locked by another client) takes its note
+		/// with it.</para>
+		/// <para>On a client-authoritative entity the writer gets no echo, so it never sees its own note: present the
+		/// change locally, as for any client-authoritative <c>Set</c>.</para>
+		/// <para>Does nothing on an entity that is not registered with a connection.</para>
+		/// </remarks>
+		/// <param name="note">The note; null (or BSON null) removes a pending one.</param>
+		void SetUpdateNote(BsonValue? note);
+		/// <summary>The note on the update being applied to this entity right now, or null: set only while a noted update
+		/// is applied (its fields' <c>OnChanged</c> handlers) and during <see cref="OnUpdateNote"/>. Never set for local
+		/// <c>Set</c>s, including on a client-authoritative entity.</summary>
+		UpdateNote? CurrentUpdateNote { get; }
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
@@ -425,6 +449,14 @@ namespace Impunity.Connection
 		void OnEventTriggered(EntityEvent e);
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
 		event Action<EntityEvent>? OnEventTriggeredEvent;
+
+		/// <summary>Called after an update carrying a note (see <see cref="SetUpdateNote"/>) has been applied to this
+		/// entity, its fields' <c>OnChanged</c> handlers included. Also called for a note on an update that changed no
+		/// field. <see cref="CurrentUpdateNote"/> is still set.</summary>
+		/// <param name="note">The note, its send time, and whether this connection sent it.</param>
+		void OnUpdateNote(UpdateNote note);
+		/// <summary>Raised by <see cref="OnUpdateNote"/>.</summary>
+		event Action<UpdateNote>? OnUpdateNoteEvent;
 
 		// When an object is specifically deleted
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
@@ -655,6 +687,15 @@ namespace Impunity.Connection
 			Manager.AddReplicatedAction(this, action);
 		}
 
+		/// <inheritdoc/>
+		public void SetUpdateNote(BsonValue? note)
+		{
+			Manager?.SetUpdateNote(this, note);
+		}
+
+		/// <inheritdoc/>
+		public UpdateNote? CurrentUpdateNote => Manager?.GetCurrentUpdateNote(this);
+
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
@@ -836,6 +877,14 @@ namespace Impunity.Connection
 		}
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
 		public event Action<EntityEvent>? OnEventTriggeredEvent;
+
+		/// <inheritdoc/>
+		public virtual void OnUpdateNote(UpdateNote note)
+		{
+			OnUpdateNoteEvent?.Invoke(note);
+		}
+		/// <inheritdoc/>
+		public event Action<UpdateNote>? OnUpdateNoteEvent;
 
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
