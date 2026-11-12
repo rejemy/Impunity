@@ -139,7 +139,7 @@ namespace Impunity.Tests
 			bool deletedAtCommit = false;
 			w.B.Transact(tx =>
 			{
-				tx.Delete(w.B.Health.Mask, "felled", Loot("txs_loot", lootProbe));
+				tx.Delete(w.B.Health.Guard, "felled", Loot("txs_loot", lootProbe));
 				return true;
 			}, (err, result) => { deletedAtCommit = w.B.WasDeleted; probe.OnComplete(err, result); });
 
@@ -168,7 +168,7 @@ namespace Impunity.Tests
 			{
 				int attempt = tx.Attempt;
 				order.Add("body" + attempt + ":" + w.B.Health.Get());
-				tx.Delete(w.B.Health.Mask, null, Loot("txs_stale_loot" + attempt, (err, _) =>
+				tx.Delete(w.B.Health.Guard, null, Loot("txs_stale_loot" + attempt, (err, _) =>
 				{
 					order.Add("loot" + attempt);
 					codes.Add(err?.ErrorCode);
@@ -195,7 +195,7 @@ namespace Impunity.Tests
 			await ChangeOnAOnly(w, () => w.A.Health.Set(5), () => w.A.Health.Get() == 5);
 
 			var probe = new TxProbe();
-			w.B.Transact(tx => { tx.Delete(w.B.Health.Mask); return true; }, probe.OnComplete, 1);
+			w.B.Transact(tx => { tx.Delete(w.B.Health.Guard); return true; }, probe.OnComplete, 1);
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Conflict, probe.Result);
@@ -212,7 +212,7 @@ namespace Impunity.Tests
 			var first = new TxProbe();
 			var second = new TxProbe();
 			bool secondRan = false;
-			w.B.Transact(tx => { tx.Delete(w.B.Health.Mask); return true; }, first.OnComplete);
+			w.B.Transact(tx => { tx.Delete(w.B.Health.Guard); return true; }, first.OnComplete);
 			w.B.Transact(tx => { secondRan = true; w.B.Health.Set(w.B.Health.Get() + 1); return true; }, second.OnComplete);
 
 			await PumpUntil(() => first.Fired && second.Fired, AllConnections());
@@ -233,7 +233,7 @@ namespace Impunity.Tests
 			var second = new TxProbe();
 			var seen = new List<int>();
 			w.B.Transact(_ => { w.B.Health.Set(w.B.Health.Get() + 1); return true; }, first.OnComplete);
-			w.B.Transact(tx => { seen.Add(w.B.Health.Get()); tx.Delete(w.B.Health.Mask); return true; }, second.OnComplete);
+			w.B.Transact(tx => { seen.Add(w.B.Health.Get()); tx.Delete(w.B.Health.Guard); return true; }, second.OnComplete);
 
 			await PumpUntil(() => first.Fired && second.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Committed, first.Result, first.Error?.Message);
@@ -252,7 +252,7 @@ namespace Impunity.Tests
 
 			var probe = new TxProbe();
 			var lootProbe = new CallbackProbe<BsonValue>();
-			w.B.Transact(tx => { tx.Delete(w.B.Health.Mask, null, Loot("txs_lock_loot", lootProbe)); return true; }, probe.OnComplete);
+			w.B.Transact(tx => { tx.Delete(w.B.Health.Guard, null, Loot("txs_lock_loot", lootProbe)); return true; }, probe.OnComplete);
 
 			await PumpUntil(() => probe.Fired && lootProbe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Failed, probe.Result);
@@ -263,14 +263,14 @@ namespace Impunity.Tests
 
 		/// <summary>An empty guard throws inside the body, so the transaction fails and nothing is sent.</summary>
 		[Test, Category("Transact")]
-		public async Task Delete_EmptyOrForeignMask_FailsWithoutSending()
+		public async Task Delete_EmptyOrForeignGuard_FailsWithoutSending()
 		{
-			var w = await Setup("txs_empty_mask");
+			var w = await Setup("txs_empty_guard");
 
 			var empty = new TxProbe();
 			var foreign = new TxProbe();
-			w.B.Transact(tx => { tx.Delete(0); return true; }, empty.OnComplete);
-			w.B.Transact(tx => { tx.Delete(1ul << 40); return true; }, foreign.OnComplete);
+			w.B.Transact(tx => { tx.Delete(default); return true; }, empty.OnComplete);
+			w.B.Transact(tx => { tx.Delete(w.A.Health.Guard); return true; }, foreign.OnComplete);
 
 			await PumpUntil(() => empty.Fired && foreign.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Failed, empty.Result);
@@ -292,7 +292,7 @@ namespace Impunity.Tests
 			w.B.Transact(tx =>
 			{
 				w.B.Health.Set(99);
-				tx.Delete(w.B.Health.Mask, null, Loot("txs_mixed_loot", lootProbe));
+				tx.Delete(w.B.Health.Guard, null, Loot("txs_mixed_loot", lootProbe));
 				return true;
 			}, probe.OnComplete);
 
@@ -314,7 +314,7 @@ namespace Impunity.Tests
 
 			var probe = new TxProbe();
 			var lootProbe = new CallbackProbe<BsonValue>();
-			w.B.Transact(tx => { tx.Delete(w.B.Health.Mask, null, Loot("txs_decline_loot", lootProbe)); return false; }, probe.OnComplete);
+			w.B.Transact(tx => { tx.Delete(w.B.Health.Guard, null, Loot("txs_decline_loot", lootProbe)); return false; }, probe.OnComplete);
 
 			await PumpUntil(() => probe.Fired && lootProbe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Declined, probe.Result);
@@ -333,11 +333,11 @@ namespace Impunity.Tests
 			var probe = new TxProbe();
 			var twice = new TxProbe();
 			w.B.Transact(tx => { kept = tx; return false; }, probe.OnComplete);
-			w.B.Transact(tx => { tx.Delete(w.B.Health.Mask); tx.Delete(w.B.Health.Mask); return true; }, twice.OnComplete);
+			w.B.Transact(tx => { tx.Delete(w.B.Health.Guard); tx.Delete(w.B.Health.Guard); return true; }, twice.OnComplete);
 			await PumpUntil(() => probe.Fired && twice.Fired, AllConnections());
 
-			Assert.Throws<InvalidOperationException>(() => kept.Delete(w.B.Health.Mask));
-			Assert.Throws<InvalidOperationException>(() => kept.DependsOn(w.B.Health.Mask));
+			Assert.Throws<InvalidOperationException>(() => kept.Delete(w.B.Health.Guard));
+			Assert.Throws<InvalidOperationException>(() => kept.DependsOn(w.B.Health.Guard));
 			Assert.AreEqual(TransactResult.Failed, twice.Result);
 			Assert.IsFalse(w.A.WasDeleted);
 		}
@@ -350,12 +350,40 @@ namespace Impunity.Tests
 			var offline = new IntegrationTestEntity();
 			var probe = new TxProbe();
 			var lootProbe = new CallbackProbe<BsonValue>();
-			offline.Transact(tx => { tx.Delete(offline.Health.Mask, null, Loot("txs_offline", lootProbe)); return true; }, probe.OnComplete);
+			offline.Transact(tx => { tx.Delete(offline.Health.Guard, null, Loot("txs_offline", lootProbe)); return true; }, probe.OnComplete);
 
 			Assert.IsTrue(probe.Fired);
 			Assert.AreEqual(TransactResult.Failed, probe.Result);
 			Assert.IsTrue(lootProbe.Fired);
 			Assert.IsNotNull(lootProbe.Error);
+		}
+
+		/// <summary>Writing to the entity directly from inside its own body (instead of through the scope) throws, so
+		/// the transaction fails and nothing is sent: the entity is still there and unchanged.</summary>
+		[Test, Category("Transact")]
+		public async Task DirectWriteInsideBody_ThrowsAndFails()
+		{
+			var w = await Setup("txs_direct");
+
+			var deleteProbe = new TxProbe();
+			w.B.Transact(tx => { w.B.Delete(null, null); return true; }, deleteProbe.OnComplete);
+			var guardedDeleteProbe = new TxProbe();
+			w.B.Transact(tx => { w.B.DeleteIfUnchanged(w.B.Health.Guard, null, null); return true; }, guardedDeleteProbe.OnComplete);
+			var updateProbe = new TxProbe();
+			w.B.Transact(tx => { w.B.Health.Set(9); w.B.UpdateIfUnchanged(null); return true; }, updateProbe.OnComplete);
+
+			await PumpUntil(() => deleteProbe.Fired && guardedDeleteProbe.Fired && updateProbe.Fired, AllConnections());
+			Assert.AreEqual(TransactResult.Failed, deleteProbe.Result);
+			Assert.AreEqual(TransactResult.Failed, guardedDeleteProbe.Result);
+			Assert.AreEqual(TransactResult.Failed, updateProbe.Result);
+			StringAssert.Contains("tx.Delete", deleteProbe.Error.Message);
+
+			await PumpFor(TimeSpan.FromSeconds(0.1), AllConnections());
+			Assert.IsFalse(w.A.WasDeleted, "A direct delete from inside the body went out");
+			Assert.AreEqual(1, w.A.Health.Get(), "A direct update from inside the body went out");
+
+			// Outside a body the same calls still work.
+			Assert.AreEqual(GuardedResult.Applied, await Pump(w.B.DeleteIfUnchangedAsync(w.B.Health.Guard, null), AllConnections()));
 		}
 
 		// ───────── Replace ─────────
@@ -375,7 +403,7 @@ namespace Impunity.Tests
 			{
 				crop = new IntegrationTestEntity();
 				crop.DisplayName.Set("crop");
-				tx.ReplaceWith(w.B.DisplayName.Mask, crop, Loot("txs_seed", seedProbe));
+				tx.ReplaceWith(w.B.DisplayName.Guard, crop, "planted", Loot("txs_seed", seedProbe));
 				return true;
 			}, (err, result) => { registeredAtCommit = crop.DistributedEntityId != 0; probe.OnComplete(err, result); });
 
@@ -385,6 +413,14 @@ namespace Impunity.Tests
 			Assert.IsTrue(registeredAtCommit, "Committed was reported before the replacement was registered");
 			Assert.AreEqual("tile", crop.UniqueName);
 			Assert.IsNull(seedProbe.Error, seedProbe.Error?.Message);
+
+			// The replaced entity's delete carries the replace's cause, and only the replacer sees it as its own.
+			Assert.AreEqual("planted", w.A.LastDeletion.Data?.AsString);
+			Assert.IsFalse(w.A.LastDeletion.IsOwn);
+			Assert.IsTrue(w.B.WasDeleted);
+			Assert.AreEqual("planted", w.B.LastDeletion.Data?.AsString);
+			Assert.IsTrue(w.B.LastDeletion.IsOwn);
+			Assert.AreEqual(w.A.LastDeletion.SentServerMs, w.B.LastDeletion.SentServerMs);
 		}
 
 		/// <summary>The replaced entity's guarded field changed first: the replace is stale and the body reruns against
@@ -403,7 +439,7 @@ namespace Impunity.Tests
 				seen.Add(w.B.DisplayName.Get());
 				var crop = new IntegrationTestEntity();
 				crop.DisplayName.Set("crop after " + w.B.DisplayName.Get());
-				tx.ReplaceWith(w.B.DisplayName.Mask, crop);
+				tx.ReplaceWith(w.B.DisplayName.Guard, crop);
 				return true;
 			}, probe.OnComplete);
 
@@ -421,7 +457,7 @@ namespace Impunity.Tests
 			var w = await Setup("txs_replace_name");
 
 			var probe = new TxProbe();
-			w.B.Transact(tx => { tx.ReplaceWith(w.B.Health.Mask, new IntegrationTestEntity { UniqueName = "elsewhere" }); return true; }, probe.OnComplete);
+			w.B.Transact(tx => { tx.ReplaceWith(w.B.Health.Guard, new IntegrationTestEntity { UniqueName = "elsewhere" }); return true; }, probe.OnComplete);
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Failed, probe.Result);
@@ -461,7 +497,7 @@ namespace Impunity.Tests
 			var probe = new TxProbe();
 			w.B.Transact(tx =>
 			{
-				tx.DependsOn(w.B.DisplayName.Mask);
+				tx.DependsOn(w.B.DisplayName.Guard);
 				seen.Add(w.B.DisplayName.Get());
 				w.B.Health.Set(w.B.DisplayName.Get().Length);
 				return true;
@@ -473,7 +509,7 @@ namespace Impunity.Tests
 			await PumpUntil(() => w.A.Health.Get() == "watered".Length, AllConnections());
 		}
 
-		/// <summary>A dependency with no field writes but a replicated action still sends, so the action runs only if
+		/// <summary>A dependency with no field writes but a conditional action still sends, so the action runs only if
 		/// the read field is unchanged: stale here, so the first attempt's action is skipped and the rerun's runs.</summary>
 		[Test, Category("Transact")]
 		public async Task DependsOn_ActionOnly_IsGuarded()
@@ -485,8 +521,8 @@ namespace Impunity.Tests
 			var probe = new TxProbe();
 			w.B.Transact(tx =>
 			{
-				tx.DependsOn(w.B.DisplayName.Mask);
-				w.B.AddReplicatedAction(Loot("txs_buy" + tx.Attempt, (err, _) => codes.Add(err?.ErrorCode)));
+				tx.DependsOn(w.B.DisplayName.Guard);
+				tx.AddAction(Loot("txs_buy" + tx.Attempt, (err, _) => codes.Add(err?.ErrorCode)));
 				return true;
 			}, probe.OnComplete);
 
@@ -511,8 +547,8 @@ namespace Impunity.Tests
 			w.B.Transact(tx =>
 			{
 				seen.Add(w.B.DisplayName.Get());
-				tx.DependsOn(w.B.DisplayName.Mask);
-				tx.Delete(w.B.Health.Mask);
+				tx.DependsOn(w.B.DisplayName.Guard);
+				tx.Delete(w.B.Health.Guard);
 				return true;
 			}, probe.OnComplete);
 

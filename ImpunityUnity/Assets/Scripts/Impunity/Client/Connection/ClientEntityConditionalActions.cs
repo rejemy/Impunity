@@ -1,4 +1,4 @@
-// ───────── Replicated actions ─────────
+// ───────── Conditional actions on updates ─────────
 //
 // A database action attached to an entity rides that entity's next update to the server, in the same message, and
 // the server runs it only if it applied the update — e.g. "the potion's effect lands on my player entity, and only
@@ -7,7 +7,7 @@
 // docs/guides/DistributedEntities.md, "Conditional actions").
 //
 // Pending actions wait here, per entity, until whichever send path builds that entity's next update takes them: the
-// per-frame sweep (SendUpdates), UpdateExclusive, or the flush before an unlock. Attaching one queues the entity for
+// per-frame sweep (SendUpdates), UpdateIfUnchanged, or the flush before an unlock. Attaching one queues the entity for
 // the sweep even when no field is dirty, so an action is never stranded waiting for an unrelated change — it rides
 // an empty update instead. Several actions attached before one flush travel as a single CompoundDatabaseAction whose
 // reply is fanned back out, so each action's own callback still fires with its own result.
@@ -21,15 +21,15 @@ namespace Impunity.Connection
 {
 	public partial class ClientEntityManager
 	{
-		private readonly Dictionary<IDistributedEntity, List<GameStateActionBase>> PendingReplicatedActions = new Dictionary<IDistributedEntity, List<GameStateActionBase>>();
+		private readonly Dictionary<IDistributedEntity, List<GameStateActionBase>> PendingConditionalActions = new Dictionary<IDistributedEntity, List<GameStateActionBase>>();
 
 		/// <summary>Attaches a database action to ride this entity's next update. Backs
-		/// <see cref="IDistributedEntity.AddReplicatedAction"/>; see there for the semantics.</summary>
+		/// <see cref="IDistributedEntity.AddConditionalAction"/>; see there for the semantics.</summary>
 		/// <param name="entity">The registered entity whose next update carries the action.</param>
 		/// <param name="action">A document action or <see cref="CompoundDatabaseAction"/>, with its own callback.</param>
 		/// <exception cref="ArgumentException">The action is not one that may ride an update.</exception>
 		/// <exception cref="InvalidOperationException">The manager has no connection.</exception>
-		public void AddReplicatedAction(IDistributedEntity entity, GameStateActionBase action)
+		public void AddConditionalAction(IDistributedEntity entity, GameStateActionBase action)
 		{
 			if (action == null)
 			{
@@ -54,10 +54,10 @@ namespace Impunity.Connection
 				return;
 			}
 
-			if (!PendingReplicatedActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
+			if (!PendingConditionalActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
 			{
 				pending = new List<GameStateActionBase>();
-				PendingReplicatedActions[entity] = pending;
+				PendingConditionalActions[entity] = pending;
 			}
 			pending.Add(action);
 
@@ -67,21 +67,21 @@ namespace Impunity.Connection
 
 		// Removes and returns what should ride the update being built for this entity: nothing, the one pending action,
 		// or several combined into a single compound.
-		private GameStateActionBase? TakeReplicatedAction(IDistributedEntity entity)
+		private GameStateActionBase? TakeConditionalAction(IDistributedEntity entity)
 		{
-			if (!PendingReplicatedActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
+			if (!PendingConditionalActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
 			{
 				return null;
 			}
 
-			PendingReplicatedActions.Remove(entity);
-			return pending.Count == 1 ? pending[0] : CombineReplicatedActions(pending);
+			PendingConditionalActions.Remove(entity);
+			return pending.Count == 1 ? pending[0] : CombineConditionalActions(pending);
 		}
 
 		// Wraps several pending actions in one CompoundDatabaseAction, so they share the update's single conditional
 		// slot, and fans the compound's reply back out to each action's own callback. The compound runs every
 		// sub-action even if one fails, so each gets its own result; if it was skipped, each gets the skip error.
-		private static CompoundDatabaseAction CombineReplicatedActions(List<GameStateActionBase> actions)
+		private static CompoundDatabaseAction CombineConditionalActions(List<GameStateActionBase> actions)
 		{
 			bool anyCallback = false;
 			foreach (GameStateActionBase action in actions)
@@ -112,7 +112,7 @@ namespace Impunity.Connection
 						}
 						else
 						{
-							action.Error = err ?? new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, "No result for combined replicated action");
+							action.Error = err ?? new ImpunityErrorResponse(ImpunityErrorCode.InternalServerError, "No result for combined conditional action");
 						}
 
 						// Isolated so one throwing callback can't starve the rest.
@@ -122,7 +122,7 @@ namespace Impunity.Connection
 						}
 						catch (Exception e)
 						{
-							ImpunityLogger.LogError("Exception in replicated action callback", e);
+							ImpunityLogger.LogError("Exception in conditional action callback", e);
 						}
 					}
 				};
@@ -133,14 +133,14 @@ namespace Impunity.Connection
 
 		// Resolves every pending action of an entity that is going away, so no callback waits forever. The update they
 		// were waiting for will never be sent, so they are reported as not run.
-		private void FailPendingReplicatedActions(IDistributedEntity entity)
+		private void FailPendingConditionalActions(IDistributedEntity entity)
 		{
-			if (!PendingReplicatedActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
+			if (!PendingConditionalActions.TryGetValue(entity, out List<GameStateActionBase>? pending))
 			{
 				return;
 			}
 
-			PendingReplicatedActions.Remove(entity);
+			PendingConditionalActions.Remove(entity);
 
 			if (Connection == null)
 			{

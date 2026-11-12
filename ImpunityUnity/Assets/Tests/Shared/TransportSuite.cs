@@ -298,7 +298,7 @@ namespace Impunity.Tests
 
 		/// <summary>
 		/// Transact over each real transport: a rerun after a stale rejection starts only once the rejected attempt's
-		/// replicated action has reported, so the application state its callback releases (a reserved slot) is free.
+		/// conditional action has reported, so the application state its callback releases (a reserved slot) is free.
 		/// </summary>
 		[Test, Category("Transport"), Category("Transact")]
 		public async Task TransactRerunWaitsForRejectedAttemptsAction()
@@ -332,7 +332,7 @@ namespace Impunity.Tests
 				reservedAtRun.Add(reserved);
 				b.Health.Set(b.Health.Get() + 1);
 				reserved++;
-				b.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = docId }, (err, _) =>
+				b.AddConditionalAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = docId }, (err, _) =>
 				{
 					if (err != null)
 					{
@@ -379,23 +379,21 @@ namespace Impunity.Tests
 
 			// Make B stale on Health: A's write reaches the server, and only A is pumped until it is confirmed.
 			a.Health.Set(2);
-			await Pump(a.UpdateExclusiveAsync(), connA);
+			await Pump(a.UpdateIfUnchangedAsync(), connA);
 			Assert.AreEqual(1, b.Health.Get(), "B must still be stale for this test");
 
 			var crop = new IntegrationTestEntity { UniqueName = "tile" };
-			var replaceError = await PumpExpectingError(connB.EntityManager.CreateObjectAsync(crop, bChannel, false, null, b.DistributedEntityId, b.Health.Mask), AllConnections());
+			var replaceError = await PumpExpectingError(connB.EntityManager.CreateObjectAsync(crop, bChannel, false, null, b.DistributedEntityId, b.Health.Guard), AllConnections());
 			Assert.IsNotNull(replaceError, "The stale guarded replace went through");
 			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, replaceError.ErrorId);
 
 			// The stale replace's reply came after the echo, so B has caught up — but a fresh write by A makes it stale again.
 			a.Health.Set(3);
-			await Pump(a.UpdateExclusiveAsync(), connA);
-			var deleteError = await PumpExpectingError(b.DeleteExclusiveAsync(b.Health.Mask, null), connB);
-			Assert.IsNotNull(deleteError, "The stale guarded delete went through");
-			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, deleteError.ErrorId);
+			await Pump(a.UpdateIfUnchangedAsync(), connA);
+			Assert.AreEqual(GuardedResult.Stale, await Pump(b.DeleteIfUnchangedAsync(b.Health.Guard, null), connB), "The stale guarded delete went through");
 			Assert.AreEqual(3, b.Health.Get());
 
-			Assert.IsTrue(await Pump(b.DeleteExclusiveAsync(b.Health.Mask, null), AllConnections()));
+			Assert.AreEqual(GuardedResult.Applied, await Pump(b.DeleteIfUnchangedAsync(b.Health.Guard, null), AllConnections()));
 			await PumpUntil(() => aChannel.DistributedObjects.Count == 0, TimeSpan.FromSeconds(5), AllConnections());
 		}
 
@@ -428,12 +426,12 @@ namespace Impunity.Tests
 			var bChanges = new List<UpdateNote?>();
 			var aNotes = new List<UpdateNote>();
 			var bNotes = new List<UpdateNote>();
-			b.Health.OnChanged += (_, __) => bChanges.Add(b.CurrentUpdateNote);
+			b.Health.OnChanged += (_, __) => bChanges.Add(b.CurrentUpdateNotes.Count > 0 ? b.CurrentUpdateNotes[0] : (UpdateNote?)null);
 			a.OnUpdateNoteEvent += aNotes.Add;
 			b.OnUpdateNoteEvent += bNotes.Add;
 
 			a.Health.Set(4);
-			a.SetUpdateNote(new BsonDocument { ["hit"] = "left" });
+			a.AddUpdateNote(new BsonDocument { ["hit"] = "left" });
 			await PumpUntil(() => aNotes.Count == 1 && bNotes.Count == 1, TimeSpan.FromSeconds(5), AllConnections());
 			Assert.AreEqual(1, bChanges.Count);
 			Assert.IsTrue(bChanges[0].HasValue, "The note was not current while B's field changed");
@@ -442,7 +440,7 @@ namespace Impunity.Tests
 			Assert.IsTrue(aNotes[0].IsOwn, "The writer's echo was not marked as its own");
 			Assert.AreNotEqual(0L, bNotes[0].SentServerMs);
 
-			a.SetUpdateNote(new BsonDocument { ["hit"] = "miss" });
+			a.AddUpdateNote(new BsonDocument { ["hit"] = "miss" });
 			await PumpUntil(() => aNotes.Count == 2 && bNotes.Count == 2, TimeSpan.FromSeconds(5), AllConnections());
 			Assert.AreEqual("miss", bNotes[1].Data["hit"].AsString);
 			Assert.AreEqual(1, bChanges.Count, "A note-only update changed a field");
@@ -475,11 +473,11 @@ namespace Impunity.Tests
 			}
 
 			a.Health.Set(2);
-			await Pump(a.UpdateExclusiveAsync(), connA);
+			await Pump(a.UpdateIfUnchangedAsync(), connA);
 			Assert.AreEqual(1, b.Health.Get(), "B must still be stale for this test");
 
 			var seen = new List<int>();
-			var deleted = b.TransactAsync(tx => { seen.Add(b.Health.Get()); tx.Delete(b.Health.Mask, "felled"); return true; });
+			var deleted = b.TransactAsync(tx => { seen.Add(b.Health.Get()); tx.Delete(b.Health.Guard, "felled"); return true; });
 			var behind = b.TransactAsync(_ => { b.Health.Set(0); return true; });
 
 			Assert.AreEqual(TransactResult.Committed, await Pump(deleted, AllConnections()));
@@ -668,10 +666,10 @@ namespace Impunity.Tests
 			Assert.AreEqual(0, compoundProbe.Value.Count);
 		}
 
-		/// <summary>Two replicated actions on one exclusive update travel as a single compound. Over a remote leg each
+		/// <summary>Two conditional actions on one guarded update travel as a single compound. Over a remote leg each
 		/// action's typed result must survive the compound round trip and reach its own callback.</summary>
 		[Test, Category("Transport"), Category("Conditional")]
-		public async Task ReplicatedActions_CombinedOnExclusiveUpdate()
+		public async Task UpdateActions_CombinedOnGuardedUpdate()
 		{
 			await EnsureServerAsync();
 			var conn = await OpenConnectionAsync();
@@ -683,16 +681,16 @@ namespace Impunity.Tests
 			var ids = new[] { Name("r1"), Name("r2") };
 			var probes = new[] { new CallbackProbe<BsonValue>(), new CallbackProbe<BsonValue>() };
 
-			chest.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
+			chest.AddConditionalAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
 			chest.DisplayName.Set("gem");
 			bool updateDone = false;
 			ImpunityErrorResponse updateErr = null;
-			chest.UpdateExclusive(err => { updateDone = true; updateErr = err; },
+			chest.UpdateIfUnchanged((err, result) => { updateDone = true; updateErr = err; },
 				new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[1] }, probes[1].OnComplete));
 
 			await PumpUntil(() => updateDone && probes[0].Fired && probes[1].Fired, TimeSpan.FromSeconds(5), conn);
 
-			Assert.IsNull(updateErr, "Exclusive update failed: " + updateErr?.Message);
+			Assert.IsNull(updateErr, "Guarded update failed: " + updateErr?.Message);
 			for (int i = 0; i < 2; i++)
 			{
 				Assert.IsNull(probes[i].Error, "Action " + i + " failed: " + probes[i].Error?.Message);
@@ -700,10 +698,10 @@ namespace Impunity.Tests
 			}
 		}
 
-		/// <summary>An exclusive update rejected by another client's lock skips its combined actions; over a remote leg
+		/// <summary>A guarded update rejected by another client's lock skips its combined actions; over a remote leg
 		/// the skip must still fan out to every action's callback.</summary>
 		[Test, Category("Transport"), Category("Conditional")]
-		public async Task ReplicatedActions_RejectedUpdateSkipsAll()
+		public async Task UpdateActions_RejectedUpdateSkipsAll()
 		{
 			await EnsureServerAsync();
 			var connA = await OpenConnectionAsync();
@@ -725,11 +723,11 @@ namespace Impunity.Tests
 
 			var ids = new[] { Name("s1"), Name("s2") };
 			var probes = new[] { new CallbackProbe<BsonValue>(), new CallbackProbe<BsonValue>() };
-			chest.AddReplicatedAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
+			chest.AddConditionalAction(new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[0] }, probes[0].OnComplete));
 			chest.DisplayName.Set("gem");
 			bool updateDone = false;
 			ImpunityErrorResponse updateErr = null;
-			chest.UpdateExclusive(err => { updateDone = true; updateErr = err; },
+			chest.UpdateIfUnchanged((err, result) => { updateDone = true; updateErr = err; },
 				new InsertDocumentAction(IntegrationTestCollections.ITEMS, new BsonDocument { ["_id"] = ids[1] }, probes[1].OnComplete));
 
 			await PumpUntil(() => updateDone && probes[0].Fired && probes[1].Fired, TimeSpan.FromSeconds(5), AllConnections());

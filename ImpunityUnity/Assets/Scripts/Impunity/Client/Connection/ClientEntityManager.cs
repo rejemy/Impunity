@@ -84,9 +84,9 @@ namespace Impunity.Connection
 		/// <summary>Optional factory delegate (from <c>[DistributedEntity(FactoryMethod=…)]</c>) used to construct
 		/// instances instead of <c>Activator.CreateInstance</c>; null to use the default constructor.</summary>
 		public Func<IDistributedEntity>? Factory;
-		/// <summary>Per-field metadata indexed by field id (slot 0 and any gaps are null), or null if the type has no
-		/// distributed fields.</summary>
-		public DistributedTypeFieldInfo[] DistributedFields = null!;
+		/// <summary>Per-field metadata indexed by field id (slot 0 and any gaps are null). Never null: a type with no
+		/// distributed fields keeps an empty array, so every walk over the fields is a no-op for it.</summary>
+		public DistributedTypeFieldInfo[] DistributedFields = Array.Empty<DistributedTypeFieldInfo>();
 
 		/// <summary>Creates type metadata for a registered distributed entity type. <see cref="Factory"/>,
 		/// <see cref="IsChannel"/>, and <see cref="DistributedFields"/> are populated separately during registration.</summary>
@@ -277,12 +277,16 @@ namespace Impunity.Connection
 		/// or fail without changing anything (see <see cref="BaseGameConnection.CreateObject"/>). Implies
 		/// <paramref name="replace"/>.</param>
 		/// <param name="replaceGuard">Non-zero: a guarded replace. The fields of the entity being replaced that the
-		/// replace depends on (OR of their <c>Mask</c> values); the create fails with
+		/// replace depends on (their <c>Guard</c>s combined with <c>|</c>); the create fails with
 		/// <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing and skipping the conditional, if any of them
 		/// changed since this client last received them. Needs <paramref name="replaceEntityId"/>, and that entity must be
 		/// registered with this manager (subscribed), since the guard is this client's view of it. A lock holder on the
 		/// replaced entity bypasses the check.</param>
-		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, ulong replaceGuard = 0) where T : class, IDistributedObject
+		/// <param name="replaceData">Why the existing object is being replaced: relayed to every subscriber in the replaced
+		/// entity's <see cref="IDistributedEntity.OnDeleted"/> (<see cref="EntityDeletion.Data"/>), as <c>deleteData</c>
+		/// is for a delete. Null for none; unused when nothing is replaced.</param>
+		public void CreateObject<T>(T distObj, IDistributedChannel channel, bool replace, ImpunityCallback<T> onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, FieldGuard replaceGuard = default,
+			BsonValue? replaceData = null) where T : class, IDistributedObject
 		{
 			if (Connection == null)
 			{
@@ -332,25 +336,34 @@ namespace Impunity.Connection
 				instanceFlags |= (byte)ImpunityInstanceFlags.Persisted;
 			}
 
+			if (!replaceGuard.IsEmpty)
+			{
+				// The guard knows which entity it is about, so the id need not be passed as well.
+				uint guardedId = replaceGuard.Entity!.DistributedEntityId;
+				if (replaceEntityId == 0)
+				{
+					replaceEntityId = guardedId;
+				}
+				else if (replaceEntityId != guardedId)
+				{
+					throw new ArgumentException("The guard names fields of entity " + guardedId + ", not of replaceEntityId " + replaceEntityId, nameof(replaceGuard));
+				}
+			}
+
 			if (replaceEntityId != 0 && distObj.UniqueName == null)
 			{
 				throw new Exception("A conditional replace needs the object's unique name");
 			}
 
 			byte[]? replaceGuardBlob = null;
-			if (replaceGuard != 0)
+			if (!replaceGuard.IsEmpty)
 			{
-				if (replaceEntityId == 0)
-				{
-					throw new ArgumentException("A guarded replace needs replaceEntityId", nameof(replaceGuard));
-				}
-
-				if (!DistributedObjects.TryGetValue(replaceEntityId, out IDistributedEntity? replaced))
+				if (replaceEntityId == 0 || !DistributedObjects.TryGetValue(replaceEntityId, out IDistributedEntity? replaced))
 				{
 					throw new ArgumentException("Entity " + replaceEntityId + " is not registered with this manager, so there is no view of it to guard", nameof(replaceGuard));
 				}
 
-				replaceGuardBlob = BuildGuardBlob(replaced, replaceGuard, nameof(replaceGuard));
+				replaceGuardBlob = BuildGuardBlob(replaced, replaceGuard.MaskFor(replaced, nameof(replaceGuard), true), nameof(replaceGuard));
 			}
 
 			ImpunityCallback<uint> onCreated = (ImpunityErrorResponse? err, uint objectId) =>
@@ -399,6 +412,8 @@ namespace Impunity.Connection
 				replace || replaceEntityId != 0, onCreated, onCreatedAction, replaceEntityId)
 			{
 				ReplaceKnownFieldSeqs = replaceGuardBlob != null ? new ArraySegment<byte>(replaceGuardBlob) : default,
+				ReplaceData = replaceData,
+				SentServerMs = Connection.GetServerTime(),
 			});
 		}
 
@@ -1030,7 +1045,7 @@ namespace Impunity.Connection
 		/// <param name="instanceFlags">Packed <see cref="ImpunityInstanceFlags"/> (e.g. persisted) for the channel.</param>
 		/// <param name="propData">The serialized initial property values for the channel.</param>
 		/// <param name="seq">The channel's current broadcast seq at snapshot time; seeds all per-field received-seqs so
-		/// optimistic exclusive updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
+		/// optimistic guarded updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
 		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq)
 		{
 			// A fresh channel-create means the client has re-subscribed to this id; clear any
@@ -1101,7 +1116,7 @@ namespace Impunity.Connection
 		/// <param name="newlyCreated">True if the object was just created while subscribed; false if it is part of the
 		/// initial snapshot delivered when the channel was first received.</param>
 		/// <param name="seq">The object's current broadcast seq at snapshot time; seeds all per-field received-seqs so
-		/// optimistic exclusive updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
+		/// optimistic guarded updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
 		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq)
 		{
 			// In-flight create on a channel being immediately-unsubscribed. Drop it, and also
@@ -1203,7 +1218,7 @@ namespace Impunity.Connection
 		/// <summary>Seeds every entry of a freshly-registered entity's <see cref="IDistributedEntity.FieldRecvSeq"/> with the
 		/// entity's current server broadcast seq (from its create message). Without this, a new subscriber's zero-valued
 		/// received-seqs would be behind the server's per-field last-modified seq for any field changed before this client
-		/// subscribed, causing its optimistic exclusive updates to be rejected forever with no broadcast to correct them.</summary>
+		/// subscribed, causing its optimistic guarded updates to be rejected forever with no broadcast to correct them.</summary>
 		private static void SeedFieldRecvSeq(IDistributedEntity entity, ushort seq)
 		{
 			if (seq != 0 && entity.FieldRecvSeq != null)
@@ -1216,7 +1231,7 @@ namespace Impunity.Connection
 		{
 			DistributedObjects.Remove(entity.DistributedEntityId);
 			FailTransactionsForEntity(entity);
-			FailPendingReplicatedActions(entity);
+			FailPendingConditionalActions(entity);
 			PendingUpdateNotes.Remove(entity);
 
 			if (entity is IDistributedChannel channel)
@@ -1232,7 +1247,8 @@ namespace Impunity.Connection
 		/// <param name="entityId">The entity id the update applies to.</param>
 		/// <param name="updateData">The serialized delta of changed property values.</param>
 		/// <param name="seq">The server's outgoing sequence number for this update, used for stale-update detection.</param>
-		/// <param name="note">The writer's note on the update, or null (see <see cref="IDistributedEntity.SetUpdateNote"/>).</param>
+		/// <param name="note">The writer's notes on the update (a BSON array, one element per note), or null (see
+		/// <see cref="IDistributedEntity.AddUpdateNote"/>).</param>
 		/// <param name="noteSentMs">The writer's server-time stamp for <paramref name="note"/>.</param>
 		/// <param name="noteIsOwn">True when this connection wrote the update.</param>
 		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq, BsonValue? note = null, long noteSentMs = 0, bool noteIsOwn = false)
@@ -1248,7 +1264,7 @@ namespace Impunity.Connection
 
 			if (note != null)
 			{
-				ApplyNotedUpdate(entity, updateData, seq, new UpdateNote(note, noteSentMs, noteIsOwn));
+				ApplyNotedUpdate(entity, updateData, seq, note, noteSentMs, noteIsOwn);
 				return;
 			}
 
@@ -1263,7 +1279,8 @@ namespace Impunity.Connection
 		/// <param name="eventType">The application-defined event type id.</param>
 		/// <param name="eventData">The BSON payload delivered with the event.</param>
 		/// <param name="sentServerMs">Server time the sender fired the event at (<see cref="EntityEvent.SentServerMs"/>).</param>
-		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs)
+		/// <param name="isOwn">True when this connection fired the event (<see cref="EntityEvent.IsOwn"/>).</param>
+		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, bool isOwn = false)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
@@ -1276,7 +1293,7 @@ namespace Impunity.Connection
 
 			try
 			{
-				entity.OnEventTriggered(new EntityEvent(eventType, eventData, sentServerMs));
+				entity.OnEventTriggered(new EntityEvent(eventType, eventData, sentServerMs, isOwn));
 			}
 			catch (Exception e)
 			{
@@ -1347,7 +1364,9 @@ namespace Impunity.Connection
 		/// <see cref="IDistributedChannel.OnObjectRemoved"/>.</summary>
 		/// <param name="entityId">The entity id that was deleted.</param>
 		/// <param name="deleteData">Optional BSON payload supplied by the deleter, relayed to <see cref="IDistributedEntity.OnDeleted"/>; may be null.</param>
-		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
+		/// <param name="sentServerMs">Server time the deleter sent the request at (<see cref="EntityDeletion.SentServerMs"/>).</param>
+		/// <param name="isOwn">True when this connection's request deleted or replaced the entity.</param>
+		public void HandleEntityDelete(uint entityId, BsonValue? deleteData, long sentServerMs = 0, bool isOwn = false)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
@@ -1392,7 +1411,7 @@ namespace Impunity.Connection
 			UnregisterEntity(entity);
 			try
 			{
-				entity.OnDeleted(deleteData);
+				entity.OnDeleted(new EntityDeletion(deleteData, sentServerMs, isOwn));
 			}
 			catch (Exception e)
 			{
@@ -1555,7 +1574,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		// Sends an entity's pending changes as an ordinary (non-exclusive) update. With forTransaction, or when a
+		// Sends an entity's pending changes as an ordinary (unguarded) update. With forTransaction, or when a
 		// transaction is waiting on the entity and this send is reliable, the update is sent reliably with a reply and
 		// counted as in flight, so the transaction's body waits until the echo of this write has been applied (see
 		// ClientEntityTransact.cs).
@@ -1567,27 +1586,27 @@ namespace Impunity.Connection
 			}
 
 			ArraySegment<byte> updateDatabuffer = GetPropertyBytes(entity, out bool guaranteedSend);
-			GameStateActionBase? replicatedAction = TakeReplicatedAction(entity);
-			BsonValue? note = TakeUpdateNote(entity);
+			GameStateActionBase? conditionalAction = TakeConditionalAction(entity);
+			BsonArray? note = TakeUpdateNotes(entity);
 
 			if (updateDatabuffer.Array == null)
 			{
-				if (replicatedAction == null && note == null)
+				if (conditionalAction == null && note == null)
 				{
 					// Nothing changed and nothing to carry; don't burn a seq on an empty update.
 					return;
 				}
 
-				// Only here to carry a replicated action or a note (e.g. a Set that turned out to be a no-op).
+				// Only here to carry a conditional action or a note (e.g. a Set that turned out to be a no-op).
 				updateDatabuffer = new ArraySegment<byte>(Array.Empty<byte>());
 			}
 
 			ImpunityCallback? onReply = null;
-			if (forTransaction || ((guaranteedSend || replicatedAction != null || note != null) && HasTransactionPending(entity)))
+			if (forTransaction || ((guaranteedSend || conditionalAction != null || note != null) && HasTransactionPending(entity)))
 			{
 				guaranteedSend = true;
 				onReply = TrackWrite(entity, null);
-				TrackReplicatedAction(entity, replicatedAction);
+				TrackConditionalAction(entity, conditionalAction);
 
 				// Copy out of the shared encode buffer: a reply is awaited, so this update may outlive the frame whose
 				// sweep would reuse the buffer.
@@ -1600,51 +1619,55 @@ namespace Impunity.Connection
 			}
 
 			entity.SendSeq++;
-			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, replicatedAction, note);
+			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, conditionalAction, note);
 
 		}
 
-		/// <summary>Immediately flushes an entity's pending dirty fields as an exclusive (optimistic-concurrency) update,
+		/// <summary>Immediately flushes an entity's pending dirty fields as a guarded (optimistic-concurrency) update,
 		/// bypassing the per-frame dirty sweep. The update carries the client's known per-field seqs; the server rejects the
-		/// whole update (nothing applied) with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field changed since this
-		/// client last saw it, or <see cref="ImpunityErrorCode.ActionBlockedByLock"/> if another connection holds the lock.
-		/// On success and on rejection the winning values are already applied locally by the time <paramref name="onComplete"/>
-		/// runs (see the ordering guarantee in docs/guides/DistributedEntities.md). Backs <see cref="IDistributedEntity.UpdateExclusive"/>.
+		/// whole update (nothing applied) if any field changed since this client last saw it
+		/// (<see cref="GuardedResult.Stale"/>), or if another connection holds the lock (<see cref="GuardedResult.Failed"/>
+		/// with <see cref="ImpunityErrorCode.ActionBlockedByLock"/>).
+		/// On success and on rejection the winning values are already applied locally by the time <paramref name="onResult"/>
+		/// runs (see the ordering guarantee in docs/guides/DistributedEntities.md). Backs <see cref="IDistributedEntity.UpdateIfUnchanged"/>.
 		/// The update counts as in flight until its reply arrives: a <c>Transact</c> on the same entity does not run its
 		/// body before then. It is never held back itself, even while a transaction is active on the entity — it is sent
 		/// at once, carrying whatever is dirty, as it always has been.</summary>
-		/// <param name="entity">The entity whose pending dirty fields to flush exclusively.</param>
-		/// <param name="onComplete">Callback invoked with null on success or an error on rejection. Delivered on a later
-		/// <see cref="BaseGameConnection.Update"/>, never reentrantly.</param>
-		/// <param name="onReplicatedAction">Optional database action to attach before flushing (see
-		/// <see cref="AddReplicatedAction"/>). Rides this update together with any actions already pending.</param>
-		public void SendEntityUpdatesExclusive(IDistributedEntity entity, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null)
+		/// <param name="entity">The entity whose pending dirty fields to flush as a guarded update.</param>
+		/// <param name="onResult">Receives the outcome; the error is set only for <see cref="GuardedResult.Failed"/>.
+		/// Delivered on a later <see cref="BaseGameConnection.Update"/>, never reentrantly.</param>
+		/// <param name="onUpdatedAction">Optional database action to attach before flushing (see
+		/// <see cref="AddConditionalAction"/>). Rides this update together with any actions already pending.</param>
+		public void SendEntityUpdatesIfUnchanged(IDistributedEntity entity, ImpunityCallback<GuardedResult>? onResult, GameStateActionBase? onUpdatedAction = null)
 		{
+			ThrowIfInTransactBody(entity, "UpdateIfUnchanged");
+			ImpunityCallback? onComplete = GuardedCallback(onResult);
+
 			if (Connection == null)
 			{
 				// No connection to queue through, so both callbacks fire now, in the usual order.
 				onComplete?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
-				onReplicatedAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				onUpdatedAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
 				return;
 			}
 
 			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
 			{
 				Connection.QueueLocalCallback(onComplete, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
-				if (onReplicatedAction != null)
+				if (onUpdatedAction != null)
 				{
-					Connection.QueueLocalFailure(onReplicatedAction, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+					Connection.QueueLocalFailure(onUpdatedAction, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
 				}
 				return;
 			}
 
-			if (onReplicatedAction != null)
+			if (onUpdatedAction != null)
 			{
-				AddReplicatedAction(entity, onReplicatedAction);
+				AddConditionalAction(entity, onUpdatedAction);
 			}
 
-			// Nothing dirty is trivially a success — unless a replicated action is waiting, which is sent on an empty
-			// exclusive update so it still gets the lock/staleness verdict (an empty seq blob checks nothing, but a
+			// Nothing dirty is trivially a success — unless a conditional action is waiting, which is sent on an empty
+			// guarded update so it still gets the lock/staleness verdict (an empty seq blob checks nothing, but a
 			// foreign lock still rejects it).
 			if (entity.DirtyBits == 0 && !HasPendingUpdateExtras(entity))
 			{
@@ -1654,13 +1677,41 @@ namespace Impunity.Connection
 
 			// Counted as in flight until its reply arrives, so a Transact on this entity waits for it rather than
 			// racing this connection's own write.
-			SendExclusiveNow(entity, TrackWrite(entity, onComplete));
+			SendGuardedNow(entity, TrackWrite(entity, onComplete));
 		}
 
-		// Builds and sends an exclusive update from the entity's dirty fields and pending replicated actions. Callers
+		/// <summary>Turns the raw reply of a guarded write into the <see cref="GuardedResult"/> the public API
+		/// reports: no error is <see cref="GuardedResult.Applied"/>, <see cref="ImpunityErrorCode.ActionStaleData"/> is
+		/// <see cref="GuardedResult.Stale"/> with no error, and anything else is <see cref="GuardedResult.Failed"/>
+		/// with the error.</summary>
+		private static ImpunityCallback? GuardedCallback(ImpunityCallback<GuardedResult>? onResult)
+		{
+			if (onResult == null)
+			{
+				return null;
+			}
+
+			return err =>
+			{
+				if (err == null)
+				{
+					onResult(null, GuardedResult.Applied);
+				}
+				else if (err.ErrorCode == ImpunityErrorCode.ActionStaleData)
+				{
+					onResult(null, GuardedResult.Stale);
+				}
+				else
+				{
+					onResult(err, GuardedResult.Failed);
+				}
+			};
+		}
+
+		// Builds and sends a guarded update from the entity's dirty fields and pending conditional actions. Callers
 		// have checked the connection and registration, and that there is something to send.
 		// extraGuard: fields the write does not change but depends on (a transaction's DependsOn), added to the blob.
-		private void SendExclusiveNow(IDistributedEntity entity, ImpunityCallback onComplete, ulong extraGuard = 0)
+		private void SendGuardedNow(IDistributedEntity entity, ImpunityCallback onComplete, ulong extraGuard = 0)
 		{
 			// The known-seqs blob covers the dirty fields plus any extra guard. Must be gathered before GetPropertyBytes
 			// clears the dirty bits.
@@ -1679,16 +1730,16 @@ namespace Impunity.Connection
 			// Drop from the per-frame sweep so it doesn't also send a now-empty follow-up update.
 			DirtyObjects.Remove(entity);
 
-			// Every exclusive send is a tracked write (UpdateExclusive or a transaction's own update), so the actions riding
+			// Every guarded send is a tracked write (UpdateIfUnchanged or a transaction's own update), so the actions riding
 			// it count as in flight until they have reported too.
-			GameStateActionBase? replicatedAction = TakeReplicatedAction(entity);
-			TrackReplicatedAction(entity, replicatedAction);
+			GameStateActionBase? conditionalAction = TakeConditionalAction(entity);
+			TrackConditionalAction(entity, conditionalAction);
 
 			entity.SendSeq++;
-			Connection!.UpdateEntityExclusive(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, replicatedAction, TakeUpdateNote(entity));
+			Connection!.UpdateEntityIfUnchanged(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, conditionalAction, TakeUpdateNotes(entity));
 		}
 
-		/// <summary>Builds the known-field-seq blob an exclusive update or a guarded delete/replace carries:
+		/// <summary>Builds the known-field-seq blob a guarded update or a guarded delete/replace carries:
 		/// <c>[fieldId][seq lo][seq hi]...[0]</c> for each field in <paramref name="mask"/>, using this client's
 		/// last-received seq per field (0 if never received). The server rejects the operation as stale if any listed
 		/// field changed since.</summary>
@@ -1730,7 +1781,7 @@ namespace Impunity.Connection
 		{
 			if (guardMask == 0)
 			{
-				throw new ArgumentException("A guard must name at least one field (OR together the fields' Mask values); use Delete for an unguarded delete", paramName);
+				throw new ArgumentException("A guard must name at least one field (use a field's Guard property, combining several with |); use Delete for an unguarded delete", paramName);
 			}
 
 			ValidateFieldMask(entity, guardMask, paramName);
@@ -1756,18 +1807,101 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Deletes an entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
-		/// last received them. Backs <see cref="IDistributedEntity.DeleteExclusive"/>; see there for the contract.</summary>
-		/// <param name="entity">The registered entity to delete.</param>
-		/// <param name="guardMask">The fields the delete depends on: OR of their <c>Mask</c> values. Must be non-empty.</param>
-		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification.</param>
-		/// <param name="onComplete">True if deleted, false if another connection's lock blocked it, or an error
-		/// (<see cref="ImpunityErrorCode.ActionStaleData"/> when a guarded field changed).</param>
-		/// <param name="onDeletedAction">Optional conditional database action, run only if this request deleted it.</param>
-		/// <exception cref="ArgumentException">The mask is empty or names bits outside the entity's fields. Nothing is sent
-		/// and <paramref name="onDeletedAction"/> is left to the caller.</exception>
-		public void DeleteEntityExclusive(IDistributedEntity entity, ulong guardMask, BsonValue deleteData, ImpunityCallback<bool>? onComplete, GameStateActionBase? onDeletedAction = null)
+		/// <summary>Checks that <paramref name="entity"/> can be replaced by <paramref name="newObject"/> and returns the
+		/// channel the replacement is created in. Only an object with a unique name, in a channel, can be replaced; the
+		/// replacement takes that name (it is set on <paramref name="newObject"/> if it has none).</summary>
+		/// <exception cref="InvalidOperationException">The entity is not an object with a unique name and a channel.</exception>
+		/// <exception cref="ArgumentException"><paramref name="newObject"/> already has a different unique name.</exception>
+		internal static IDistributedChannel ResolveReplaceTarget(IDistributedEntity entity, IDistributedObject newObject)
 		{
+			if (!(entity is IDistributedObject replaced) || replaced.UniqueName == null || replaced.Channel == null)
+			{
+				throw new InvalidOperationException("Only an object with a unique name, in a channel, can be replaced");
+			}
+
+			if (newObject.UniqueName == null)
+			{
+				newObject.UniqueName = replaced.UniqueName;
+			}
+			else if (newObject.UniqueName != replaced.UniqueName)
+			{
+				throw new ArgumentException("The replacement's unique name (" + newObject.UniqueName + ") differs from the replaced entity's ("
+					+ replaced.UniqueName + ")", nameof(newObject));
+			}
+
+			return replaced.Channel;
+		}
+
+		/// <summary>Replaces an entity with <paramref name="newObject"/> only if the fields in <paramref name="guard"/> are
+		/// unchanged since this client last received them. Backs <see cref="IDistributedEntity.ReplaceIfUnchanged{T}"/>;
+		/// see there for the contract.</summary>
+		/// <param name="entity">The registered object to replace. It must have a unique name.</param>
+		/// <param name="guard">The fields of <paramref name="entity"/> the replace depends on. Must be non-empty.</param>
+		/// <param name="newObject">The replacement, created in the entity's channel under its unique name.</param>
+		/// <param name="replaceData">Optional cause payload relayed with the replaced entity's delete notification.</param>
+		/// <param name="onResult"><see cref="GuardedResult.Applied"/> once the replacement is registered,
+		/// <see cref="GuardedResult.Stale"/> when a guarded field changed, or <see cref="GuardedResult.Failed"/> with the
+		/// error.</param>
+		/// <param name="onCreatedAction">Optional conditional database action, run only if the replace goes through.</param>
+		/// <exception cref="ArgumentException">The guard is empty or names fields of a different entity, or the
+		/// replacement has a different unique name. Nothing is sent and <paramref name="onCreatedAction"/> is left to the
+		/// caller.</exception>
+		/// <exception cref="InvalidOperationException">The entity is not an object with a unique name and a channel.</exception>
+		public void ReplaceEntityIfUnchanged<T>(IDistributedEntity entity, FieldGuard guard, T newObject, BsonValue? replaceData,
+			ImpunityCallback<GuardedResult>? onResult, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			ThrowIfInTransactBody(entity, "ReplaceIfUnchanged");
+			if (newObject == null)
+			{
+				throw new ArgumentNullException(nameof(newObject));
+			}
+			guard.MaskFor(entity, nameof(guard), true);
+			ImpunityCallback? onError = GuardedCallback(onResult);
+
+			if (Connection == null)
+			{
+				// No connection to queue through, so both callbacks fire now, in the usual order.
+				onError?.Invoke(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				onCreatedAction?.FailLocally(new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity manager has no connection"));
+				return;
+			}
+
+			if (entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
+			{
+				Connection.QueueLocalCallback(onError, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				if (onCreatedAction != null)
+				{
+					Connection.QueueLocalFailure(onCreatedAction, new ImpunityErrorResponse(ImpunityErrorCode.ActionBadRequest, "Entity is not registered with this connection"));
+				}
+				return;
+			}
+
+			IDistributedChannel channel = ResolveReplaceTarget(entity, newObject);
+			CreateObject(newObject, channel, true, (err, _) => onError?.Invoke(err), onCreatedAction, entity.DistributedEntityId, guard, replaceData);
+		}
+
+		/// <summary>Deletes an entity only if the fields in <paramref name="guard"/> are unchanged since this client
+		/// last received them. Backs <see cref="IDistributedEntity.DeleteIfUnchanged"/>; see there for the contract.</summary>
+		/// <param name="entity">The registered entity to delete.</param>
+		/// <param name="guard">The fields the delete depends on: their <c>Guard</c>s combined with <c>|</c>. Must be non-empty.</param>
+		/// <param name="deleteData">Optional payload relayed to subscribers with the delete notification.</param>
+		/// <param name="onResult"><see cref="GuardedResult.Applied"/> if deleted, <see cref="GuardedResult.Stale"/>
+		/// when a guarded field changed, or <see cref="GuardedResult.Failed"/> with the error (another connection's
+		/// lock, entity gone).</param>
+		/// <param name="onDeletedAction">Optional conditional database action, run only if this request deleted it.</param>
+		/// <exception cref="ArgumentException">The guard is empty or names fields of a different entity. Nothing is sent
+		/// and <paramref name="onDeletedAction"/> is left to the caller.</exception>
+		public void DeleteEntityIfUnchanged(IDistributedEntity entity, FieldGuard guard, BsonValue? deleteData, ImpunityCallback<GuardedResult>? onResult, GameStateActionBase? onDeletedAction = null)
+		{
+			// The server answers a delete blocked by a foreign lock with "false" rather than an error (as a plain Delete
+			// reports it); for a guarded write that is a failure like any other, with the same code a guarded update gets.
+			ThrowIfInTransactBody(entity, "DeleteIfUnchanged");
+			ulong guardMask = guard.MaskFor(entity, nameof(guard), true);
+			ImpunityCallback? onError = GuardedCallback(onResult);
+			uint entityId = entity.DistributedEntityId;
+			ImpunityCallback<bool>? onComplete = onError == null ? null : (ImpunityCallback<bool>)((err, deleted) =>
+				onError(err ?? (deleted ? null : new ImpunityErrorResponse(ImpunityErrorCode.ActionBlockedByLock, "Entity " + entityId + " is locked by another connection"))));
+
 			if (Connection == null)
 			{
 				// No connection to queue through, so both callbacks fire now, in the usual order.
@@ -1790,10 +1924,11 @@ namespace Impunity.Connection
 				return;
 			}
 
-			byte[] guard = BuildGuardBlob(entity, guardMask, nameof(guardMask));
-			Connection.DoAction(new DeleteEntityAction(entity.DistributedEntityId, deleteData, onComplete, onDeletedAction)
+			byte[] guardBlob = BuildGuardBlob(entity, guardMask, nameof(guard));
+			Connection.DoAction(new DeleteEntityAction(entity.DistributedEntityId, deleteData!, onComplete, onDeletedAction)
 			{
-				KnownFieldSeqs = new ArraySegment<byte>(guard),
+				KnownFieldSeqs = new ArraySegment<byte>(guardBlob),
+				SentServerMs = Connection.GetServerTime(),
 			});
 		}
 

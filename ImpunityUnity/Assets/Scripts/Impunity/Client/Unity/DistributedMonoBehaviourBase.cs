@@ -140,38 +140,43 @@ namespace Impunity.Unity
 		}
 
 		/// <inheritdoc/>
-		public void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null)
+		public void UpdateIfUnchanged(ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onUpdatedAction = null)
 		{
 			if (Manager == null)
 			{
 				// No manager means the entity was never registered with a connection; there is no queue to defer through.
-				onComplete?.Invoke(NotRegisteredError());
-				onReplicatedAction?.FailLocally(NotRegisteredError());
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
+				onUpdatedAction?.FailLocally(NotRegisteredError());
 				return;
 			}
 
-			Manager.SendEntityUpdatesExclusive(this, onComplete, onReplicatedAction);
+			Manager.SendEntityUpdatesIfUnchanged(this, onComplete, onUpdatedAction);
 		}
 
 		/// <inheritdoc/>
-		public void AddReplicatedAction(GameStateActionBase action)
+		public void AddConditionalAction(GameStateActionBase action)
 		{
 			if (Manager == null)
 			{
 				throw new InvalidOperationException("Entity is not registered with a connection");
 			}
 
-			Manager.AddReplicatedAction(this, action);
+			Manager.AddConditionalAction(this, action);
 		}
 
 		/// <inheritdoc/>
-		public void SetUpdateNote(BsonValue? note)
+		public void AddUpdateNote(BsonValue note)
 		{
-			Manager?.SetUpdateNote(this, note);
+			if (note == null || note.IsNull)
+			{
+				throw new ArgumentNullException(nameof(note), "An update note needs a payload");
+			}
+
+			Manager?.AddUpdateNote(this, note);
 		}
 
 		/// <inheritdoc/>
-		public UpdateNote? CurrentUpdateNote => Manager?.GetCurrentUpdateNote(this);
+		public IReadOnlyList<UpdateNote> CurrentUpdateNotes => Manager?.GetCurrentUpdateNotes(this) ?? Array.Empty<UpdateNote>();
 
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
@@ -194,22 +199,37 @@ namespace Impunity.Unity
 				return;
 			}
 
+			Manager!.ThrowIfInTransactBody(this, nameof(Delete));
 			connection.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
-		/// <summary>Deletes this entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
-		/// last received them. See <see cref="IDistributedEntity.DeleteExclusive"/>.</summary>
-		public void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
+		/// <summary>Deletes this entity only if the fields in <paramref name="guard"/> are unchanged since this client
+		/// last received them. See <see cref="IDistributedEntity.DeleteIfUnchanged"/>.</summary>
+		public void DeleteIfUnchanged(FieldGuard guard, BsonValue? deleteData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onDeletedAction = null)
 		{
 			ClientEntityManager? manager = Manager;
 			if (manager == null || manager.Connection == null)
 			{
-				onComplete?.Invoke(NotRegisteredError(), false);
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
 				onDeletedAction?.FailLocally(NotRegisteredError());
 				return;
 			}
 
-			manager.DeleteEntityExclusive(this, guardMask, deleteData, onComplete, onDeletedAction);
+			manager.DeleteEntityIfUnchanged(this, guard, deleteData, onComplete, onDeletedAction);
+		}
+
+		/// <inheritdoc/>
+		public void ReplaceIfUnchanged<T>(FieldGuard guard, T newObject, BsonValue? replaceData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			ClientEntityManager? manager = Manager;
+			if (manager == null || manager.Connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
+				onCreatedAction?.FailLocally(NotRegisteredError());
+				return;
+			}
+
+			manager.ReplaceEntityIfUnchanged(this, guard, newObject, replaceData, onComplete, onCreatedAction);
 		}
 
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
@@ -362,13 +382,14 @@ namespace Impunity.Unity
 		public event Action<UpdateNote>? OnUpdateNoteEvent;
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
-		/// <param name="deleteData">Optional BSON payload supplied to <see cref="Delete"/> by the deleter, or null.</param>
-		public virtual void OnDeleted(BsonValue? deleteData)
+		/// <param name="deletion">The deleter's cause payload (<c>deleteData</c> / <c>replaceData</c>), when it was sent, and whether this
+		/// connection did it.</param>
+		public virtual void OnDeleted(EntityDeletion deletion)
 		{
-			OnDeletedEvent?.Invoke(deleteData);
+			OnDeletedEvent?.Invoke(deletion);
 		}
 		/// <summary>Raised by <see cref="OnDeleted"/> when the entity is deleted.</summary>
-		public event Action<BsonValue?>? OnDeletedEvent;
+		public event Action<EntityDeletion>? OnDeletedEvent;
 		/// <summary>Called when the entity stops being replicated to this client and its local reference is released by
 		/// the manager. Fires when the client unsubscribes from the channel, when the channel is deleted, or after the
 		/// entity itself is deleted (always after <see cref="OnDeleted"/>). Use it to release any local resources that

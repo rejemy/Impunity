@@ -2,7 +2,7 @@
 //
 // Ported from Assets/Tests/PlayMode/ImpunityIntegrationTests.cs onto the async API + harness.
 // Covers: local CRUD, TCP DB ops, live channels/entities, broadcasts, named locks, distributed
-// collections, unsubscribe modes, exclusive (optimistic-concurrency) updates, delete-on-disconnect.
+// collections, unsubscribe modes, guarded (optimistic-concurrency) updates, delete-on-disconnect.
 //
 // Staleness tests deliberately pump only ONE connection (e.g. PumpUntil(..., LocalGame)) so the other
 // client never processes the winner's broadcast — pass explicit connections, never AllConnections(),
@@ -37,6 +37,7 @@ namespace Impunity.Tests
 				{
 					typeof(IntegrationTestEntity),
 					typeof(IntegrationTestChannel),
+					typeof(IntegrationEmptyEntity),
 					typeof(MigTestChannel),
 					typeof(MigTestObject)
 				}
@@ -389,6 +390,29 @@ namespace Impunity.Tests
 			Assert.AreEqual("Hero", c2Entity.DisplayName.Get());
 		}
 
+		/// <summary>A type with no distributed fields has no field table; creating one must still send (an empty)
+		/// initial state and replicate, rather than throw while gathering its fields.</summary>
+		[Test, Category("LiveState")]
+		public async Task CreateAndReplicateEntityWithNoFields()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var c1Channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("room", new IntegrationTestChannel()), AllConnections());
+			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("room", null), AllConnections());
+
+			var empty = await Pump(LocalGame.EntityManager.CreateObjectAsync(new IntegrationEmptyEntity(), c1Channel, false), AllConnections());
+			Assert.AreNotEqual(0u, empty.DistributedEntityId);
+
+			await PumpUntil(() => c2Channel.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
+
+			foreach (var obj in c2Channel.DistributedObjects.Values)
+			{
+				Assert.IsInstanceOf<IntegrationEmptyEntity>(obj);
+			}
+		}
+
 		[Test, Category("LiveState")]
 		public async Task DistributedValueReplication()
 		{
@@ -450,11 +474,20 @@ namespace Impunity.Tests
 			c2Channel.OnObjectRemovedEvent += o => removedObj = o;
 
 			// C1 deletes entity
+			long beforeDelete = LocalGame.GetServerTime();
 			entity.Delete("goodbye", null);
 
 			// Wait for C2 to see deletion
 			await PumpUntil(() => c2Entity.WasDeleted, TimeSpan.FromSeconds(3), AllConnections());
 			Assert.IsTrue(c2Entity.WasDeleted, "OnDeleted did not fire on the deleted object");
+
+			// The deletion carries the cause, the deleter's send time, and who did it.
+			await PumpUntil(() => entity.WasDeleted, TimeSpan.FromSeconds(3), AllConnections());
+			Assert.AreEqual("goodbye", c2Entity.LastDeletion.Data?.AsString);
+			Assert.IsFalse(c2Entity.LastDeletion.IsOwn, "A deletion by another client was marked as this client's own");
+			Assert.IsTrue(entity.LastDeletion.IsOwn, "The deleter's own deletion was not marked as its own");
+			Assert.That(c2Entity.LastDeletion.SentServerMs, Is.InRange(beforeDelete, LocalGame.GetServerTime()));
+			Assert.AreEqual(c2Entity.LastDeletion.SentServerMs, entity.LastDeletion.SentServerMs);
 			Assert.AreEqual(1, c2Entity.UndistributedCount, "OnUndistributed not fired exactly once on the deleted object");
 			Assert.AreSame(c2Entity, removedObj, "Channel OnObjectRemoved did not fire for the deleted object");
 			Assert.IsFalse(c2Channel.DistributedObjects.ContainsKey(c2Entity.DistributedEntityId),
@@ -496,6 +529,8 @@ namespace Impunity.Tests
 			Assert.AreEqual(7, c1Got[0].Type);
 			Assert.AreEqual("boom", c1Got[0].Data.AsString);
 			Assert.AreEqual(7, c2Got[0].Type, "the sender gets its own event back by default");
+			Assert.IsTrue(c2Got[0].IsOwn, "the sender's echo should be marked as its own");
+			Assert.IsFalse(c1Got[0].IsOwn, "another client's event was marked as this client's own");
 
 			// The sender's own clock estimate, carried as is to every receiver
 			Assert.That(c1Got[0].SentServerMs, Is.InRange(before, after));
@@ -921,11 +956,11 @@ namespace Impunity.Tests
 		}
 
 		// ═══════════════════════════════════════════════════════════
-		// 8. Exclusive (optimistic-concurrency) Updates
+		// 8. Guarded (optimistic-concurrency) updates: UpdateIfUnchanged
 		// ═══════════════════════════════════════════════════════════
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_FreshClientSucceeds()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_FreshClientSucceeds()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -937,24 +972,24 @@ namespace Impunity.Tests
 			c1Entity.Health.Set(50);
 			await PumpUntil(() => c1Entity.Health.Get() == 50 && c2Entity.Health.Get() == 50, TimeSpan.FromSeconds(3), AllConnections());
 
-			// C2, fully up to date, exclusively writes a new value.
-			bool done = false; ImpunityErrorResponse err = null; int valueInCallback = -1;
+			// C2, fully up to date, writes (guarded) a new value.
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed; int valueInCallback = -1;
 			c2Entity.Health.Set(60);
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; valueInCallback = c2Entity.Health.Get(); });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; valueInCallback = c2Entity.Health.Get(); });
 
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "Fresh exclusive update should succeed");
+			Assert.AreEqual(GuardedResult.Applied, result, "Fresh guarded update should succeed");
 			Assert.AreEqual(60, valueInCallback, "Winner's own echo should be applied before the success callback fires");
 			await PumpUntil(() => c1Entity.Health.Get() == 60, TimeSpan.FromSeconds(3), AllConnections());
 			Assert.AreEqual(60, c1Entity.Health.Get(), "Value did not replicate to C1");
 		}
 
 		// The first entity a server registers must not get id 0: clients read id 0 as "not registered", so
-		// an exclusive update of it was refused locally, without ever reaching the server. A persisted
+		// a guarded update of it was refused locally, without ever reaching the server. A persisted
 		// channel reloaded right after a restart is that first entity (it takes over its load proxy's id).
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_ChannelReloadedFirstAfterRestart_Succeeds()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_ChannelReloadedFirstAfterRestart_Succeeds()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -974,16 +1009,16 @@ namespace Impunity.Tests
 			Assert.IsNotNull(reloaded, "Persisted channel did not reload");
 			Assert.AreNotEqual(0u, reloaded.DistributedEntityId, "The server's first entity got id 0, which clients treat as unregistered");
 
-			bool done = false; ImpunityErrorResponse err = null;
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			reloaded.Label.Set("updated");
-			reloaded.UpdateExclusive((e) => { done = true; err = e; });
+			reloaded.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), LocalGame);
 
-			Assert.IsNull(err, "Exclusive update of the server's first entity should succeed");
+			Assert.AreEqual(GuardedResult.Applied, result, "Guarded update of the server's first entity should succeed");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_StaleRejectsWholeUpdate()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_StaleRejectsWholeUpdate()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1004,16 +1039,16 @@ namespace Impunity.Tests
 			c1Entity.Health.OnChanged += (o, n) => c1HealthChanged = true;
 			c1Entity.DisplayName.OnChanged += (o, n) => c1NameChanged = true;
 
-			// Stale C2 writes Health AND DisplayName in one exclusive update.
-			bool done = false; ImpunityErrorResponse err = null; int healthInCallback = -1; string nameInCallback = null;
+			// Stale C2 writes Health AND DisplayName in one guarded update.
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed; int healthInCallback = -1; string nameInCallback = null;
 			c2Entity.Health.Set(99);
 			c2Entity.DisplayName.Set("loser");
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; healthInCallback = c2Entity.Health.Get(); nameInCallback = c2Entity.DisplayName.Get(); });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; healthInCallback = c2Entity.Health.Get(); nameInCallback = c2Entity.DisplayName.Get(); });
 
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNotNull(err, "Stale exclusive update should be rejected");
-			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, err.ErrorCode, "Rejection should be ActionStaleData");
+			Assert.AreEqual(GuardedResult.Stale, result, "Stale guarded update should be rejected");
+			Assert.IsNull(err, "Losing the race is a result, not an error");
 			Assert.AreEqual(70, healthInCallback, "Winner's value should already be applied on C2 when the error callback fires");
 
 			// Give any (erroneously) relayed update time to arrive.
@@ -1026,8 +1061,8 @@ namespace Impunity.Tests
 			Assert.AreNotEqual("loser", c1Entity.DisplayName.Get(), "C1 DisplayName changed despite all-or-nothing rejection");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_UnrelatedFieldChangeDoesNotConflict()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_UnrelatedFieldChangeDoesNotConflict()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1042,21 +1077,21 @@ namespace Impunity.Tests
 			c1Entity.Health.Set(70);
 			await PumpUntil(() => c1Entity.Health.Get() == 70, TimeSpan.FromSeconds(3), LocalGame);
 
-			// C2 is stale on Health, but exclusively writes only DisplayName — a different field — so it must succeed
+			// C2 is stale on Health, but writes (guarded) only DisplayName — a different field — so it must succeed
 			// (staleness is scoped to written fields only).
-			bool done = false; ImpunityErrorResponse err = null;
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.DisplayName.Set("hello");
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "Exclusive write to an unrelated field must not conflict with a concurrent change to a different field");
+			Assert.AreEqual(GuardedResult.Applied, result, "Guarded write to an unrelated field must not conflict with a concurrent change to a different field");
 			await PumpUntil(() => c1Entity.DisplayName.Get() == "hello", TimeSpan.FromSeconds(3), AllConnections());
 			Assert.AreEqual("hello", c1Entity.DisplayName.Get());
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_RaceExactlyOneWinner()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_RaceExactlyOneWinner()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1070,21 +1105,21 @@ namespace Impunity.Tests
 			// Both clients (each fully up to date) race to set the same field in the same frame.
 			int c1Done = 0, c2Done = 0; int errorCount = 0;
 			c1Entity.Health.Set(11);
-			c1Entity.UpdateExclusive((e) => { c1Done++; if (e != null) errorCount++; });
+			c1Entity.UpdateIfUnchanged((e, r) => { c1Done++; if (r == GuardedResult.Stale) errorCount++; });
 			c2Entity.Health.Set(22);
-			c2Entity.UpdateExclusive((e) => { c2Done++; if (e != null) errorCount++; });
+			c2Entity.UpdateIfUnchanged((e, r) => { c2Done++; if (r == GuardedResult.Stale) errorCount++; });
 
 			await PumpUntil(() => c1Done > 0 && c2Done > 0, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.AreEqual(1, errorCount, "Exactly one of the racing exclusive updates should be rejected as stale");
+			Assert.AreEqual(1, errorCount, "Exactly one of the racing guarded updates should be rejected as stale");
 			// Both sides converge on the same (winner's) value.
 			await PumpUntil(() => c1Entity.Health.Get() == c2Entity.Health.Get() && c1Entity.Health.Get() != 50, TimeSpan.FromSeconds(3), AllConnections());
 			Assert.AreEqual(c1Entity.Health.Get(), c2Entity.Health.Get(), "Clients did not converge on the winner's value");
 			Assert.IsTrue(c1Entity.Health.Get() == 11 || c1Entity.Health.Get() == 22, "Converged value should be one of the two contenders");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_NotDirtyCompletesImmediately()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_NotDirtyCompletesImmediately()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1093,17 +1128,17 @@ namespace Impunity.Tests
 			var (c1Entity, c2Entity) = await SetupTwoClientEntity("excl5");
 
 			ushort seqBefore = c2Entity.SendSeq;
-			bool done = false; ImpunityErrorResponse err = null;
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "UpdateExclusive with nothing dirty should succeed");
+			Assert.AreEqual(GuardedResult.Applied, result, "UpdateIfUnchanged with nothing dirty should succeed");
 			Assert.AreEqual(seqBefore, c2Entity.SendSeq, "No message should be sent when nothing is dirty");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_LateSubscriberSeeded()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_LateSubscriberSeeded()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1122,7 +1157,7 @@ namespace Impunity.Tests
 				await PumpUntil(() => c1Entity.Health.Get() == i, TimeSpan.FromSeconds(3), AllConnections());
 			}
 
-			// C2 subscribes only now — its FieldRecvSeq must be seeded from the entity's current OutSeq, or its exclusive
+			// C2 subscribes only now — its FieldRecvSeq must be seeded from the entity's current OutSeq, or its guarded
 			// update below would be rejected forever (livelock).
 			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("excl6", null), AllConnections());
 			await PumpUntil(() => c2Channel.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
@@ -1131,16 +1166,16 @@ namespace Impunity.Tests
 			Assert.IsNotNull(c2Entity);
 			Assert.AreEqual(6, c2Entity.Health.Get(), "Late joiner did not replicate current state");
 
-			bool done = false; ImpunityErrorResponse err = null;
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.Health.Set(60);
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "Late subscriber's first exclusive update should succeed (FieldRecvSeq must be seeded from create-time OutSeq)");
+			Assert.AreEqual(GuardedResult.Applied, result, "Late subscriber's first guarded update should succeed (FieldRecvSeq must be seeded from create-time OutSeq)");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_CreatorOfFreshObjectSucceeds()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_CreatorOfFreshObjectSucceeds()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1152,13 +1187,13 @@ namespace Impunity.Tests
 			c1Entity.Health.Set(10);
 			await Pump(LocalGame.EntityManager.CreateObjectAsync(c1Entity, c1Channel, false), AllConnections());
 
-			// Immediately after create, the creator (FieldRecvSeq all-zero, server OutSeq/LastModSeq all-zero) writes exclusively.
-			bool done = false; ImpunityErrorResponse err = null;
+			// Immediately after create, the creator (FieldRecvSeq all-zero, server OutSeq/LastModSeq all-zero) writes with UpdateIfUnchanged.
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c1Entity.Health.Set(20);
-			c1Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c1Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "Creator of a fresh object should be able to exclusively update it");
+			Assert.AreEqual(GuardedResult.Applied, result, "Creator of a fresh object should be able to update it with UpdateIfUnchanged");
 
 			// And a second subscriber sees the value.
 			var c2Channel = await Pump(RemoteGame.EntityManager.SubscribeToChannelAsync<IntegrationTestChannel>("excl7", null), AllConnections());
@@ -1168,8 +1203,8 @@ namespace Impunity.Tests
 			Assert.AreEqual(20, c2Entity.Health.Get());
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_ChannelEntityFields()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_ChannelEntityFields()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1189,19 +1224,19 @@ namespace Impunity.Tests
 			c1Channel.Status.Set("busy");
 			await PumpUntil(() => c1Channel.Status.Get() == "busy", TimeSpan.FromSeconds(3), LocalGame);
 
-			// Stale C2 exclusive update on the channel entity is rejected.
-			bool done = false; ImpunityErrorResponse err = null;
+			// Stale C2 guarded update on the channel entity is rejected.
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Channel.Status.Set("stale");
-			c2Channel.UpdateExclusive((e) => { done = true; err = e; });
+			c2Channel.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNotNull(err, "Stale exclusive update on a channel entity should be rejected");
-			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, err.ErrorCode);
+			Assert.AreEqual(GuardedResult.Stale, result, "Stale guarded update on a channel entity should be rejected");
+			Assert.IsNull(err);
 			Assert.AreNotEqual("stale", c1Channel.Status.Get(), "Rejected channel update must not apply");
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_LockHolderBypassesStaleness()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_LockHolderBypassesStaleness()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1220,18 +1255,18 @@ namespace Impunity.Tests
 			var locked = await Pump(c2Entity.TryLockAsync(), AllConnections());
 			Assert.IsTrue(locked, "C2 should acquire the lock");
 
-			bool done = false; ImpunityErrorResponse err = null;
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.Health.Set(88);
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNull(err, "Lock holder's exclusive update should bypass the staleness check");
+			Assert.AreEqual(GuardedResult.Applied, result, "Lock holder's guarded update should bypass the staleness check");
 			await PumpUntil(() => c1Entity.Health.Get() == 88, TimeSpan.FromSeconds(3), AllConnections());
 			Assert.AreEqual(88, c1Entity.Health.Get());
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_LockedByOtherReturnsError()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_LockedByOtherReturnsError()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1247,18 +1282,19 @@ namespace Impunity.Tests
 			Assert.IsTrue(locked);
 			await PumpUntil(() => c2Entity.IsLocked, TimeSpan.FromSeconds(3), AllConnections());
 
-			// C2's exclusive update should get an explicit lock error (not silence).
-			bool done = false; ImpunityErrorResponse err = null;
+			// C2's guarded update should get an explicit lock error (not silence).
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.Health.Set(99);
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
 
-			Assert.IsNotNull(err, "Exclusive update on an entity locked by another client should error");
+			Assert.IsNotNull(err, "Guarded update on an entity locked by another client should error");
 			Assert.AreEqual(ImpunityErrorCode.ActionBlockedByLock, err.ErrorCode);
+			Assert.AreEqual(GuardedResult.Failed, result);
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_ClientAuthoritativeAlwaysPasses()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_ClientAuthoritativeAlwaysPasses()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1267,7 +1303,7 @@ namespace Impunity.Tests
 			var c1Channel = await Pump(LocalGame.EntityManager.SubscribeToChannelAsync("excl11", new IntegrationTestChannel()), AllConnections());
 
 			// Client-authoritative entities are auto-locked to their creator and never echoed, so their FieldRecvSeq never
-			// advances — the lock bypass is what keeps exclusive updates working for them.
+			// advances — the lock bypass is what keeps guarded updates working for them.
 			var c1Entity = new IntegrationTestEntity();
 			c1Entity.IsClientAuthoritative = true;
 			c1Entity.Health.Set(1);
@@ -1275,16 +1311,16 @@ namespace Impunity.Tests
 
 			for (int i = 0; i < 3; i++)
 			{
-				bool done = false; ImpunityErrorResponse err = null;
+				bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 				c1Entity.Health.Set(100 + i);
-				c1Entity.UpdateExclusive((e) => { done = true; err = e; });
+				c1Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 				await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
-				Assert.IsNull(err, "Client-authoritative creator's exclusive update #" + i + " should always pass");
+				Assert.AreEqual(GuardedResult.Applied, result, "Client-authoritative creator's guarded update #" + i + " should always pass");
 			}
 		}
 
-		[Test, Category("ExclusiveUpdate")]
-		public async Task Exclusive_UnregisteredEntityErrors()
+		[Test, Category("GuardedUpdate")]
+		public async Task UpdateIfUnchanged_UnregisteredEntityErrors()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1294,12 +1330,12 @@ namespace Impunity.Tests
 			var orphan = new IntegrationTestEntity();
 			orphan.Health.Set(5);
 
-			bool done = false; ImpunityErrorResponse err = null;
-			orphan.UpdateExclusive((e) => { done = true; err = e; });
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
+			orphan.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 
 			// Delivered synchronously (no manager to defer through), so it is already done here.
 			Assert.IsTrue(done, "Callback should fire for an unregistered entity");
-			Assert.IsNotNull(err, "Unregistered entity exclusive update should error");
+			Assert.IsNotNull(err, "Unregistered entity guarded update should error");
 			Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, err.ErrorCode);
 			await Task.CompletedTask;
 		}
@@ -1362,7 +1398,7 @@ namespace Impunity.Tests
 		}
 
 		[Test, Category("MultiWriter")]
-		public async Task MultiWriter_ExclusiveWinWithLowerSendSeq_IsStoredByServer()
+		public async Task MultiWriter_GuardedWinWithLowerSendSeq_IsStoredByServer()
 		{
 			CreateServer();
 			await ConnectLocal();
@@ -1376,11 +1412,11 @@ namespace Impunity.Tests
 				await PumpUntil(() => c2Entity.Health.Get() == i, TimeSpan.FromSeconds(3), AllConnections());
 			}
 
-			bool done = false; ImpunityErrorResponse err = null;
+			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.Health.Set(88);
-			c2Entity.UpdateExclusive((e) => { done = true; err = e; });
+			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 			await PumpUntil(() => done, TimeSpan.FromSeconds(3), AllConnections());
-			Assert.IsNull(err, "Up-to-date exclusive write should win");
+			Assert.AreEqual(GuardedResult.Applied, result, "Up-to-date guarded write should win");
 
 			var (_, serverCopy) = await ResubscribeRemote(c2Channel, "mw2");
 			Assert.AreEqual(88, serverCopy.Health.Get(), "The server reported a win for a write it never stored");

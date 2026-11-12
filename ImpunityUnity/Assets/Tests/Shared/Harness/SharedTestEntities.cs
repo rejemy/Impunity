@@ -192,9 +192,12 @@ namespace Impunity.Tests
 		public bool WasDeleted;
 		public int UndistributedCount;
 
-		public override void OnDeleted(BsonValue deleteData)
+		public EntityDeletion LastDeletion;
+
+		public override void OnDeleted(EntityDeletion deletion)
 		{
 			WasDeleted = true;
+			LastDeletion = deletion;
 		}
 
 		public override void OnUndistributed()
@@ -225,10 +228,17 @@ namespace Impunity.Tests
 		}
 	}
 
+	/// <summary>An entity type with no distributed fields at all: its type info has no field table.</summary>
+	[DistributedEntity(IntegrationTestTypes.EMPTY_ENTITY)]
+	public partial class IntegrationEmptyEntity : DistributedObjectBase
+	{
+	}
+
 	public static class IntegrationTestTypes
 	{
 		public const int ENTITY = 1;
 		public const int CHANNEL = 2;
+		public const int EMPTY_ENTITY = 3;
 	}
 
 	public static class IntegrationTestCollections

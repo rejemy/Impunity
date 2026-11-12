@@ -308,9 +308,9 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs)
+		public void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, bool isOwn)
 		{
-			EntityManager.HandleEntityEvent(entityId, eventType, eventData, sentServerMs);
+			EntityManager.HandleEntityEvent(entityId, eventType, eventData, sentServerMs, isOwn);
 		}
 
 		/// <inheritdoc/>
@@ -332,9 +332,9 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void HandleEntityDelete(uint entityId, BsonValue? deleteData)
+		public void HandleEntityDelete(uint entityId, BsonValue? deleteData, long sentServerMs, bool isOwn)
 		{
-			EntityManager.HandleEntityDelete(entityId, deleteData);
+			EntityManager.HandleEntityDelete(entityId, deleteData, sentServerMs, isOwn);
 		}
 
 		/// <inheritdoc/>
@@ -715,9 +715,17 @@ namespace Impunity.Connection
 		/// then nothing changes and the conditional action is skipped. So of two clients replacing the same entity, only
 		/// the first succeeds — e.g. a hole becoming the crop planted in it, with the seed spent as the conditional.
 		/// </param>
-		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0)
+		/// <param name="replaceData">Why the existing object is being replaced: relayed to every subscriber in the replaced
+		/// entity's <see cref="IDistributedEntity.OnDeleted"/> (<see cref="EntityDeletion.Data"/>), as <c>deleteData</c>
+		/// is for a delete. Null for none; unused when nothing is replaced.</param>
+		public void CreateObject(int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, ImpunityCallback<uint>? onComplete, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0,
+			BsonValue? replaceData = null)
 		{
-			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace || replaceEntityId != 0, onComplete, onCreatedAction, replaceEntityId));
+			DoAction(new CreateObjectAction(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace || replaceEntityId != 0, onComplete, onCreatedAction, replaceEntityId)
+			{
+				ReplaceData = replaceData,
+				SentServerMs = GetServerTime(),
+			});
 		}
 
 		/// <summary>Sends a serialized property delta for a live entity to the server, which validates and relays it to other subscribers.</summary>
@@ -726,19 +734,19 @@ namespace Impunity.Connection
 		/// <param name="guaranteed">If true, send reliably (TCP); if false, allow best-effort delivery (UDP) for high-frequency updates.</param>
 		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
 		/// <param name="onComplete">Optional completion callback; updates are typically fire-and-forget.</param>
-		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the server
+		/// <param name="onUpdatedAction">Optional database action sent in the same message and run only if the server
 		/// applies the update. Forces the update to be sent reliably. Application code normally attaches these through
-		/// <see cref="IDistributedEntity.AddReplicatedAction"/> rather than calling this directly.</param>
-		/// <param name="note">Optional note relayed with the update (see <see cref="IDistributedEntity.SetUpdateNote"/>),
+		/// <see cref="IDistributedEntity.AddConditionalAction"/> rather than calling this directly.</param>
+		/// <param name="note">Optional note relayed with the update (see <see cref="IDistributedEntity.AddUpdateNote"/>),
 		/// stamped with <see cref="GetServerTime"/>. Forces the update to be sent reliably.</param>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null,
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
 			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
-			action.OnReplicatedAction = onReplicatedAction;
+			action.OnUpdatedAction = onUpdatedAction;
 			StampNote(action, note);
 			// The action must not travel over a lossy transport: a dropped datagram would lose both halves.
-			action.SetGuaranteed(guaranteed || onReplicatedAction != null || action.Note != null);
+			action.SetGuaranteed(guaranteed || onUpdatedAction != null || action.Note != null);
 			DoAction(action);
 		}
 
@@ -751,7 +759,7 @@ namespace Impunity.Connection
 			}
 		}
 
-		/// <summary>Sends an exclusive (optimistic-concurrency) property delta for a live entity. The server applies and
+		/// <summary>Sends a guarded (optimistic-concurrency) property delta for a live entity. The server applies and
 		/// relays it only if the client's known per-field seqs (<paramref name="knownFieldSeqs"/>) match the server's
 		/// last-modified seqs for every field in the update; otherwise the whole update is rejected and
 		/// <paramref name="onComplete"/> receives an <see cref="ImpunityErrorCode.ActionStaleData"/> error. Always sent
@@ -762,22 +770,22 @@ namespace Impunity.Connection
 		/// <param name="knownFieldSeqs">The client's known per-field seqs blob, format <c>[fieldId:byte][seq:ushort LE]...[0]</c>.</param>
 		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
 		/// <param name="onComplete">Completion callback; receives an error on rejection (stale data or lock held by another).</param>
-		/// <param name="onReplicatedAction">Optional database action sent in the same message and run only if the update is
+		/// <param name="onUpdatedAction">Optional database action sent in the same message and run only if the update is
 		/// accepted; on rejection it is skipped (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>).</param>
 		/// <param name="note">Optional note relayed with the update if it is accepted (see
-		/// <see cref="IDistributedEntity.SetUpdateNote"/>).</param>
-		public void UpdateEntityExclusive(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onReplicatedAction = null,
+		/// <see cref="IDistributedEntity.AddUpdateNote"/>).</param>
+		public void UpdateEntityIfUnchanged(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
 			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, knownFieldSeqs, onComplete);
-			action.OnReplicatedAction = onReplicatedAction;
+			action.OnUpdatedAction = onUpdatedAction;
 			StampNote(action, note);
 			action.SetGuaranteed(true);
 			DoAction(action);
 		}
 
 		/// <summary>Queues a completion callback to fire on the next <see cref="Update"/> without a server round-trip, used
-		/// for locally-resolved outcomes (e.g. an exclusive update with nothing to send, or a client-side validation error).
+		/// for locally-resolved outcomes (e.g. a guarded update with nothing to send, or a client-side validation error).
 		/// Delivered via the same <c>CompletedActions</c> queue as server replies, so it never runs reentrantly.</summary>
 		internal void QueueLocalCallback(ImpunityCallback? onComplete, ImpunityErrorResponse? error)
 		{
@@ -792,7 +800,7 @@ namespace Impunity.Connection
 		}
 
 		/// <summary>Completes an action that was never sent with the given error, invoking its own (typed) callback on the
-		/// next <see cref="Update"/>. Used to resolve pending replicated actions whose entity went away before they could
+		/// next <see cref="Update"/>. Used to resolve pending conditional actions whose entity went away before they could
 		/// ride an update. No-op for an action without a callback.</summary>
 		internal void QueueLocalFailure(GameStateActionBase action, ImpunityErrorResponse error)
 		{
@@ -822,7 +830,7 @@ namespace Impunity.Connection
 		/// </param>
 		public void DeleteEntity(uint entityId, BsonValue deleteData, ImpunityCallback<bool>? onComplete, GameStateActionBase? onDeletedAction = null)
 		{
-			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete, onDeletedAction));
+			DoAction(new DeleteEntityAction(entityId, deleteData, onComplete, onDeletedAction) { SentServerMs = GetServerTime() });
 		}
 
 		/// <summary>Fires a one-shot, fire-and-forget event on an entity. The server relays it to every subscriber of the entity's channel, including the sender.</summary>

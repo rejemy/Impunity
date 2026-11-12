@@ -111,7 +111,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> PropBytes;
 
 		/// <summary>The channel entity's current <c>OutSeq</c> at snapshot time. The client seeds every field's received-seq
-		/// with it so exclusive updates are not falsely rejected against modifications made before this client subscribed.</summary>
+		/// with it so guarded updates are not falsely rejected against modifications made before this client subscribed.</summary>
 		[BsonField("sq")]
 		public ushort Seq;
 
@@ -221,12 +221,16 @@ namespace Impunity.GameState
 		[BsonField("st")]
 		public long SentServerMs;
 
+		/// <summary>True on the copy sent to the connection that fired the event.</summary>
+		[BsonField("mn")]
+		public bool FromRecipient;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_EVENT_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleEntityEvent(EntityId, EventType, EventData, SentServerMs);
+			handler.HandleEntityEvent(EntityId, EventType, EventData, SentServerMs, FromRecipient);
 		}
 	}
 
@@ -239,12 +243,21 @@ namespace Impunity.GameState
 		[BsonField("dd")]
 		public BsonValue? DeleteData;
 
+		/// <summary>Server time (Unix ms) the deleter sent the request at: its own stamp, or the server's clock for a
+		/// removal the server made itself.</summary>
+		[BsonField("st")]
+		public long SentServerMs;
+
+		/// <summary>True on the copy sent to the connection whose request deleted (or replaced) the entity.</summary>
+		[BsonField("mn")]
+		public bool FromRecipient;
+
 		public override ushort GetActionType() { return (ushort)ServerActionType.ENTITY_DELETE_MESSAGE; }
 
 		// Called in client main thread
 		public override void DoAction(IServerMessageHandler handler)
 		{
-			handler.HandleEntityDelete(EntityId, DeleteData);
+			handler.HandleEntityDelete(EntityId, DeleteData != null && !DeleteData.IsNull ? DeleteData : null, SentServerMs, FromRecipient);
 		}
 	}
 

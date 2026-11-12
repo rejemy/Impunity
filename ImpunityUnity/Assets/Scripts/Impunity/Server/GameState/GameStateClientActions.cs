@@ -221,7 +221,7 @@ namespace Impunity.GameState
 		public string ConnectionKey = null!;
 
 		/// <summary>The client's <see cref="ImpunityConstants.ImpunityVersion"/>. A remote server refuses the connection
-		/// unless it equals its own; null (a client that predates the field) never matches. Local connections run in
+		/// unless it equals its own; null never matches. Local connections run in
 		/// the same build and are not checked.</summary>
 		[BsonField("iv")]
 		public string? ImpunityVersion;
@@ -826,8 +826,8 @@ namespace Impunity.GameState
 	// A CreateObject, DeleteEntity or UpdateEntity request can carry one database action that the server runs only if the
 	// entity operation succeeded for this client — e.g. "delete this item from the world, and only if that worked, add it
 	// to my inventory", or "put this item in the chest, and only if that update was accepted, remove it from my
-	// inventory". (On the client, updates pick theirs up from the entity's pending replicated actions; several pending at
-	// once are sent as one CompoundDatabaseAction — see ClientEntityReplicatedActions.cs.) Both travel in one message, so a connection that dies mid-operation can't have landed just one of
+	// inventory". (On the client, updates pick theirs up from the entity's pending conditional actions; several pending at
+	// once are sent as one CompoundDatabaseAction — see ClientEntityConditionalActions.cs.) Both travel in one message, so a connection that dies mid-operation can't have landed just one of
 	// them. The entity operation runs first on the live thread (which is single-threaded, so it is the arbiter when two
 	// clients race for the same entity); the conditional then runs on the database thread. It is not a transaction:
 	// the two are separate commits, and a failed conditional does not undo the entity operation.
@@ -1128,11 +1128,21 @@ namespace Impunity.GameState
 		public uint ReplaceEntityId;
 
 		/// <summary>When non-null, a guarded replace: the client's known per-field seqs for the entity being replaced
-		/// (<see cref="ReplaceEntityId"/>, required), in the exclusive-update blob format. The create fails with
+		/// (<see cref="ReplaceEntityId"/>, required), in the guarded-update blob format. The create fails with
 		/// <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing, if any listed field changed since the client
 		/// saw it. A lock holder bypasses the check. Absent ⇒ unguarded.</summary>
 		[BsonField("rxs")]
 		public ArraySegment<byte> ReplaceKnownFieldSeqs;
+
+		/// <summary>Why the replaced entity is being replaced: relayed to every subscriber with that entity's delete
+		/// notification, as <c>deleteData</c> is for a plain delete. Null for none; ignored when nothing is replaced.</summary>
+		[BsonField("rd")]
+		public BsonValue? ReplaceData;
+
+		/// <summary>The sender's estimate of server time when it sent the create, stamped on the replaced entity's delete
+		/// notification. 0 means unstamped: the server uses its own clock.</summary>
+		[BsonField("st")]
+		public long SentServerMs;
 
 		/// <summary>Database action to run on the database thread if, and only if, the object is created. Null for none.</summary>
 		[BsonField("ca")]
@@ -1169,7 +1179,8 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false, ReplaceEntityId, ReplaceKnownFieldSeqs);
+				Result = game.Live.CreateObject(Origin.ConnectionReplicant, EntityTypeId, InstanceFlags, ChannelId, PropBytes, UniqueName, ReplaceExisting, false, ReplaceEntityId, ReplaceKnownFieldSeqs,
+					ReplaceData != null && !ReplaceData.IsNull ? ReplaceData : null, SentServerMs);
 				created = true;
 			}
 			finally
@@ -1194,20 +1205,20 @@ namespace Impunity.GameState
 		[BsonField("sq")]
 		public ushort Seq;
 
-		/// <summary>When non-null, marks this as an exclusive (optimistic-concurrency) update: a blob of the client's known
+		/// <summary>When non-null, marks this as a guarded (optimistic-concurrency) update: a blob of the client's known
 		/// per-field seqs, format <c>[fieldId:byte][seq:ushort little-endian]...[0]</c>. The server rejects the whole update
 		/// with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field is stale. Absent ⇒ ordinary update.</summary>
 		[BsonField("xs")]
 		public ArraySegment<byte> KnownFieldSeqs;
 
 		/// <summary>Database action to run on the database thread if, and only if, the server applied this update — not
-		/// when it was rejected (stale exclusive update, entity locked by another connection, entity gone) or silently
+		/// when it was rejected (stale guarded update, entity locked by another connection, entity gone) or silently
 		/// dropped (a plain update to an entity locked by another connection). Null for none. Set by the entity manager
-		/// from the entity's pending replicated actions.</summary>
+		/// from the entity's pending conditional actions.</summary>
 		[BsonField("ca")]
-		public GameStateActionBase? OnReplicatedAction;
+		public GameStateActionBase? OnUpdatedAction;
 
-		/// <summary>Correlation id for <see cref="OnReplicatedAction"/>'s own reply; 0 when none is expected.</summary>
+		/// <summary>Correlation id for <see cref="OnUpdatedAction"/>'s own reply; 0 when none is expected.</summary>
 		[BsonField("cm")]
 		public ushort ConditionalMessageId;
 
@@ -1222,7 +1233,7 @@ namespace Impunity.GameState
 		[BsonField("st")]
 		public long NoteSentServerMs;
 
-		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnReplicatedAction;
+		GameStateActionBase? IHasConditionalAction.ConditionalAction => OnUpdatedAction;
 		ushort IHasConditionalAction.ConditionalMessageId { get => ConditionalMessageId; set => ConditionalMessageId = value; }
 
 		public override ushort GetActionType() { return (ushort)ClientActionType.UPDATE_ENTITY; }
@@ -1277,11 +1288,16 @@ namespace Impunity.GameState
 		public BsonValue DeleteData = null!;
 
 		/// <summary>When non-null, a guarded delete: the client's known per-field seqs for the fields the delete depends
-		/// on, in the exclusive-update blob format. The delete fails with <see cref="ImpunityErrorCode.ActionStaleData"/>,
+		/// on, in the guarded-update blob format. The delete fails with <see cref="ImpunityErrorCode.ActionStaleData"/>,
 		/// changing nothing and skipping the conditional, if any listed field changed since the client saw it. A lock
 		/// holder bypasses the check. Absent ⇒ unguarded.</summary>
 		[BsonField("xs")]
 		public ArraySegment<byte> KnownFieldSeqs;
+
+		/// <summary>The sender's estimate of server time when it sent the delete, relayed to every subscriber with the
+		/// delete notification. 0 means unstamped: the server uses its own clock.</summary>
+		[BsonField("st")]
+		public long SentServerMs;
 
 		/// <summary>Database action to run on the database thread if, and only if, this request deleted the entity — not
 		/// when it was already gone (<see cref="ImpunityErrorCode.ActionNotFound"/>) or locked by another connection
@@ -1315,7 +1331,7 @@ namespace Impunity.GameState
 			try
 			{
 				ConditionalActions.Validate(this);
-				Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData, KnownFieldSeqs);
+				Result = game.Live.DeleteEntity(Origin.ConnectionReplicant, EntityId, DeleteData, KnownFieldSeqs, SentServerMs);
 				deleted = Result;
 			}
 			finally
@@ -1339,13 +1355,13 @@ namespace Impunity.GameState
 		[BsonField("mb")]
 		public BsonValue EventData = null!;
 
-		/// <summary>The sender's estimate of server time when it fired the event. 0 (absent, from an older client) means
-		/// unstamped: the server stamps the relay with its own clock instead.</summary>
+		/// <summary>The sender's estimate of server time when it fired the event. 0 means unstamped (an action built
+		/// without a stamp): the server stamps the relay with its own clock instead.</summary>
 		[BsonField("st")]
 		public long SentServerMs;
 
-		/// <summary>Whether the sending connection is left out of the relay. Absent (from an older client) reads as false,
-		/// the original deliver-to-everyone behavior.</summary>
+		/// <summary>Whether the sending connection is left out of the relay. False delivers to every subscriber, the
+		/// sender included.</summary>
 		[BsonField("xs")]
 		public bool ExcludeSender;
 
@@ -1372,7 +1388,7 @@ namespace Impunity.GameState
 		protected override void DoAction(GameStateServer game)
 		{
 			long sentServerMs = SentServerMs != 0 ? SentServerMs : GameStateServer.GetServerTime();
-			game.Live.SendEntityEvent(EntityId, EventType, EventData, sentServerMs, ExcludeSender ? Origin.ConnectionReplicant : null);
+			game.Live.SendEntityEvent(EntityId, EventType, EventData, sentServerMs, Origin.ConnectionReplicant, ExcludeSender);
 		}
 	}
 

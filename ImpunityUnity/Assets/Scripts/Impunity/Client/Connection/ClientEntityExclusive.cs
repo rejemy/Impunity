@@ -36,6 +36,23 @@ namespace Impunity.Connection
 		Failed,
 	}
 
+	/// <summary>Outcome of an optimistic, guarded write: <c>UpdateIfUnchanged</c> or <c>DeleteIfUnchanged</c>. Losing the
+	/// race is an expected outcome and is reported as a value (<see cref="Stale"/>), never as an error; the error
+	/// argument is set only for <see cref="Failed"/>.</summary>
+	public enum GuardedResult
+	{
+		/// <summary>The server accepted the write: the update was applied and relayed, or the entity was deleted.</summary>
+		Applied,
+		/// <summary>A guarded field changed before the write arrived, so nothing happened. The winner's values are
+		/// already applied locally; read them and decide again. A database action riding the write was skipped.</summary>
+		Stale,
+		/// <summary>The write could not be made, and nothing happened. The error argument says why:
+		/// <see cref="ImpunityErrorCode.ActionBlockedByLock"/> when another connection holds the entity's lock (an
+		/// explicit lock always wins over an optimistic write, which is not retried against it),
+		/// <see cref="ImpunityErrorCode.ActionNotFound"/> when the entity is gone, or a connection error.</summary>
+		Failed,
+	}
+
 	public partial class ClientEntityManager
 	{
 		/// <summary>Timeout applied to <c>RunExclusive</c> calls that do not name one (the default). Counts only the
@@ -491,7 +508,7 @@ namespace Impunity.Connection
 		/// per-frame sweep in <see cref="SendUpdates"/>. Actions leave the connection in call order, so anything sent
 		/// after this call is ordered behind the update — which is what lets a lock release carry the writes made
 		/// under it. Fields written with <c>SetUnguaranteed</c> still go out unreliably and carry no such ordering.
-		/// A pending replicated action counts as something to send, so it rides this update rather than one sent after
+		/// A pending conditional action counts as something to send, so it rides this update rather than one sent after
 		/// the unlock. No-op when the entity has nothing pending, or when no entity is registered under
 		/// <paramref name="entityId"/>.</summary>
 		/// <param name="entityId">The id of the entity whose pending changes to send.</param>

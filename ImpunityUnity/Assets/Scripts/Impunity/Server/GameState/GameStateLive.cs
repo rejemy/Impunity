@@ -180,7 +180,7 @@ namespace Impunity.GameState
 		private GameStateReplicant?[] LastWriter = null!;
 
 		/// <summary>Per-field <see cref="OutSeq"/> value of the last broadcast that carried each field's most recent modification,
-		/// indexed by propId. 0 = never broadcast. Used to reject stale <c>UpdateExclusive</c> optimistic-concurrency updates.</summary>
+		/// indexed by propId. 0 = never broadcast. Used to reject stale <c>UpdateIfUnchanged</c> optimistic-concurrency updates.</summary>
 		private ushort[] LastModSeq = null!;
 
 		/// <summary>Outgoing sequence counter for broadcasting updates to clients.</summary>
@@ -433,14 +433,14 @@ namespace Impunity.GameState
 			}
 		}
 
-		/// <summary>Validates the known-field-sequence blob carried by an exclusive (optimistic-concurrency) update.
+		/// <summary>Validates the known-field-sequence blob carried by a guarded (optimistic-concurrency) update.
 		/// The blob is a sequence of <c>[fieldId:byte][clientKnownSeq:ushort little-endian]</c> pairs terminated by a
 		/// <c>0</c> field id. For each field, the update is stale if the client's known seq is behind this entity's
 		/// <see cref="LastModSeq"/> for that field (i.e. the field was broadcast-modified since the client last saw it).
 		/// Throws <see cref="ImpunityServerException"/> with <see cref="ImpunityErrorCode.ActionStaleData"/> on the first
 		/// stale field, or <see cref="ImpunityErrorCode.ActionInvalidParameter"/> on a malformed blob — in either case the
 		/// caller must not have applied any part of the update yet (all-or-nothing).</summary>
-		public void ValidateExclusiveSeqs(ArraySegment<byte> knownSeqs)
+		public void ValidateGuardSeqs(ArraySegment<byte> knownSeqs)
 		{
 			if (knownSeqs.Array == null || knownSeqs.Count == 0)
 			{
@@ -455,7 +455,7 @@ namespace Impunity.GameState
 			{
 				if (i >= end)
 				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed exclusive update seq blob (unterminated)");
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed guarded update seq blob (unterminated)");
 				}
 
 				int propId = buf[i++];
@@ -466,7 +466,7 @@ namespace Impunity.GameState
 
 				if (i + 1 >= end)
 				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed exclusive update seq blob (truncated seq)");
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Malformed guarded update seq blob (truncated seq)");
 				}
 
 				ushort clientKnown = (ushort)(buf[i] | (buf[i + 1] << 8));
@@ -474,7 +474,7 @@ namespace Impunity.GameState
 
 				if (LastModSeq == null || propId >= LastModSeq.Length || propId >= Properties.Length || Properties[propId] == null)
 				{
-					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id in exclusive update: " + propId);
+					throw new ImpunityServerException(ImpunityErrorCode.ActionInvalidParameter, "Invalid property id in guarded update: " + propId);
 				}
 
 				// Stale if the client hasn't seen the broadcast that last modified this field.
@@ -482,7 +482,7 @@ namespace Impunity.GameState
 				if (!((short)(clientKnown - LastModSeq[propId]) >= 0))
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionStaleData,
-						"Exclusive update rejected: field " + propId + " changed since last read (known " + clientKnown + ", latest " + LastModSeq[propId] + ")");
+						"Guarded update rejected: field " + propId + " changed since last read (known " + clientKnown + ", latest " + LastModSeq[propId] + ")");
 				}
 			}
 		}
@@ -490,7 +490,7 @@ namespace Impunity.GameState
 		/// <summary>
 		/// Applies a client property update to this entity. <paramref name="broadcastSeq"/> is the <see cref="OutSeq"/>
 		/// value that will stamp the relayed broadcast of this update; each carried field records it in
-		/// <see cref="LastModSeq"/> for optimistic-concurrency (exclusive-update) staleness checks. Pass 0 when this
+		/// <see cref="LastModSeq"/> for optimistic-concurrency (guarded-update) staleness checks. Pass 0 when this
 		/// update is not being broadcast (e.g. create-time property seeding on an object not yet in a channel).
 		/// <c>note</c> is the sender's note for this update (see <see cref="UpdateEntityAction.Note"/>), stamped
 		/// <c>noteSentMs</c>: relayed with it, never stored, null for none. Only the relaying overrides use it.
@@ -625,13 +625,18 @@ namespace Impunity.GameState
 			return propBytes;
 		}
 
-		/// <summary>Relays a one-shot event to the entity's listeners, all but <paramref name="except"/> when given.</summary>
-		public virtual void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
+		/// <summary>Relays a one-shot event to the entity's listeners. <paramref name="sender"/> gets a copy marked as its
+		/// own, or none at all with <paramref name="excludeSender"/>.</summary>
+		public virtual void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? sender, bool excludeSender)
 		{
 			throw new Exception("SendEvent unimplemented in abstract base class");
 		}
 
-		public virtual void Destroy(BsonValue? deleteData)
+		/// <summary>Removes the entity and tells its listeners. <paramref name="deleteData"/> is the deleter's cause
+		/// payload, <paramref name="sentServerMs"/> its send stamp (0: the server's clock now), and
+		/// <paramref name="deletedBy"/> the connection that asked for it (null for a server-side removal), whose copy
+		/// of the notification is marked as its own.</summary>
+		public virtual void Destroy(BsonValue? deleteData, long sentServerMs = 0, GameStateReplicant? deletedBy = null)
 		{
 			Cleanup();
 		}
@@ -769,15 +774,9 @@ namespace Impunity.GameState
 			SendUpdateToListeners(Id, propData, OutSeq, guaranteed, updatedBy, IsClientAuthoritative(), note, noteSentMs);
 		}
 
-		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
+		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? sender, bool excludeSender)
 		{
-			EntityEventMessageAction eventMessage = new EntityEventMessageAction();
-			eventMessage.EntityId = Id;
-			eventMessage.EventType = eventType;
-			eventMessage.EventData = eventData;
-			eventMessage.SentServerMs = sentServerMs;
-
-			SendToListeners(eventMessage, except);
+			SendEventToListeners(Id, eventType, eventData, sentServerMs, sender, excludeSender);
 		}
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
@@ -807,15 +806,11 @@ namespace Impunity.GameState
 			SendToListeners(unlockedMessage, unlockedBy);
 		}
 
-		public override void Destroy(BsonValue? deleteData)
+		public override void Destroy(BsonValue? deleteData, long sentServerMs = 0, GameStateReplicant? deletedBy = null)
 		{
-			base.Destroy(deleteData);
+			base.Destroy(deleteData, sentServerMs, deletedBy);
 
-			EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
-			deleteMessage.EntityId = Id;
-			deleteMessage.DeleteData = deleteData;
-
-			SendToListeners(deleteMessage, null);
+			SendDeleteToListeners(Id, deleteData, sentServerMs, deletedBy);
 
 			foreach (GameStateObject member in Members.Values)
 			{
@@ -878,6 +873,58 @@ namespace Impunity.GameState
 					};
 					own.SetGuaranteed(guaranteed);
 					replicant.SendMessageViaConnection(own);
+				}
+			}
+		}
+
+		/// <summary>Relays a one-shot event on entity <paramref name="entityId"/> (this channel or one of its objects).
+		/// Everyone but the sender shares one message; the sender gets its own copy marked as sent by it, or nothing
+		/// with <paramref name="excludeSender"/>.</summary>
+		public void SendEventToListeners(uint entityId, int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? sender, bool excludeSender)
+		{
+			EntityEventMessageAction Make(bool own) => new EntityEventMessageAction
+			{
+				EntityId = entityId,
+				EventType = eventType,
+				EventData = eventData,
+				SentServerMs = sentServerMs,
+				FromRecipient = own,
+			};
+
+			SendToListenersMarkingSender(Make(false), sender, excludeSender ? null : (Func<ServerActionBase>)(() => Make(true)));
+		}
+
+		/// <summary>Tells the listeners that entity <paramref name="entityId"/> (this channel or one of its objects) was
+		/// deleted. <paramref name="deletedBy"/>, when it is a listener, gets its own copy marked as its doing; a
+		/// server-side removal (null) is one shared message.</summary>
+		public void SendDeleteToListeners(uint entityId, BsonValue? deleteData, long sentServerMs, GameStateReplicant? deletedBy)
+		{
+			long stamp = sentServerMs != 0 ? sentServerMs : GameStateServer.GetServerTime();
+			EntityDeleteMessageAction Make(bool own) => new EntityDeleteMessageAction
+			{
+				EntityId = entityId,
+				DeleteData = deleteData,
+				SentServerMs = stamp,
+				FromRecipient = own,
+			};
+
+			SendToListenersMarkingSender(Make(false), deletedBy, () => Make(true));
+		}
+
+		/// <summary>Sends <paramref name="shared"/> to every listener except <paramref name="sender"/>, which gets the
+		/// message built by <paramref name="makeOwn"/> instead (its copy, marked as its own), or nothing when that is
+		/// null. With no sender this is a plain fan-out of one message, encoded once.</summary>
+		private void SendToListenersMarkingSender(ServerActionBase shared, GameStateReplicant? sender, Func<ServerActionBase>? makeOwn)
+		{
+			foreach (GameStateReplicant replicant in Listeners.Values)
+			{
+				if (sender == null || replicant.Id != sender.Id)
+				{
+					replicant.SendMessageViaConnection(shared);
+				}
+				else if (makeOwn != null)
+				{
+					replicant.SendMessageViaConnection(makeOwn());
 				}
 			}
 		}
@@ -1089,20 +1136,14 @@ namespace Impunity.GameState
 			Channel.SendUpdateToListeners(Id, propData, OutSeq, guaranteed, updatedBy, IsClientAuthoritative(), note, noteSentMs);
 		}
 
-		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
+		public override void SendEvent(int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? sender, bool excludeSender)
 		{
 			if (Channel == null)
 			{
 				return;
 			}
 
-			EntityEventMessageAction eventMessage = new EntityEventMessageAction();
-			eventMessage.EntityId = Id;
-			eventMessage.EventType = eventType;
-			eventMessage.EventData = eventData;
-			eventMessage.SentServerMs = sentServerMs;
-
-			Channel.SendToListeners(eventMessage, except);
+			Channel.SendEventToListeners(Id, eventType, eventData, sentServerMs, sender, excludeSender);
 		}
 
 		public override bool Lock(GameStateReplicant lockedBy, bool waitForUnlock)
@@ -1135,18 +1176,15 @@ namespace Impunity.GameState
 			}
 		}
 
-		public override void Destroy(BsonValue? deleteData)
+		public override void Destroy(BsonValue? deleteData, long sentServerMs = 0, GameStateReplicant? deletedBy = null)
 		{
-			base.Destroy(deleteData);
+			base.Destroy(deleteData, sentServerMs, deletedBy);
 
 			if (Channel != null)
 			{
-				EntityDeleteMessageAction deleteMessage = new EntityDeleteMessageAction();
-				deleteMessage.EntityId = Id;
-				deleteMessage.DeleteData = deleteData;
 				Channel.RemoveObject(this);
 
-				Channel.SendToListeners(deleteMessage, null);
+				Channel.SendDeleteToListeners(Id, deleteData, sentServerMs, deletedBy);
 			}
 
 			Channel = null;
@@ -1433,10 +1471,10 @@ namespace Impunity.GameState
 			}
 		}
 
-		private void DestroyEntity(GameStateEntity entity, BsonValue? deleteData)
+		private void DestroyEntity(GameStateEntity entity, BsonValue? deleteData, long sentServerMs = 0, GameStateReplicant? deletedBy = null)
 		{
 			UnregisterEntity(entity);
-			entity.Destroy(deleteData);
+			entity.Destroy(deleteData, sentServerMs, deletedBy);
 		}
 
 		public void UnregisterEntity(GameStateEntity entity)
@@ -1712,10 +1750,13 @@ namespace Impunity.GameState
 
 		// replaceEntityId non-zero: replace exactly this entity, which must hold uniqueName — fails with ActionNotFound
 		// when nothing holds the name, and with ActionUniqueNameExists when another entity does. Implies replace.
-		// replaceGuardSeqs: a known-field-seq blob (as an exclusive update carries) checked against the entity being
+		// replaceGuardSeqs: a known-field-seq blob (as a guarded update carries) checked against the entity being
 		// replaced before it is removed — ActionStaleData if a guarded field changed since the client saw it. Needs
 		// replaceEntityId, since the blob only means something for the entity the client read. A lock holder bypasses it.
-		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force, uint replaceEntityId = 0, ArraySegment<byte> replaceGuardSeqs = default)
+		// replaceData / replaceSentMs: the cause payload and send stamp relayed with the replaced entity's delete
+		// notification (its OnDeleted), exactly as deleteData is for a plain delete.
+		public uint CreateObject(GameStateReplicant origin, int typeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string? uniqueName, bool replace, bool force, uint replaceEntityId = 0, ArraySegment<byte> replaceGuardSeqs = default,
+			BsonValue? replaceData = null, long replaceSentMs = 0)
 		{
 			ValidateInstanceFlags(instanceFlags);
 
@@ -1768,14 +1809,14 @@ namespace Impunity.GameState
 				// is left to DeleteEntity below (ActionBlockedByLock), and a lock holder bypasses the check, as for updates.
 				if (replaceGuardSeqs.Array != null && existing.IsAccessibleBy(origin.ConnectionKey) && !existing.IsLockedBy(origin.ConnectionKey))
 				{
-					existing.ValidateExclusiveSeqs(replaceGuardSeqs);
+					existing.ValidateGuardSeqs(replaceGuardSeqs);
 				}
 
 				if (force)
 				{
-					DestroyEntity(existing, null);
+					DestroyEntity(existing, replaceData, replaceSentMs, origin);
 				}
-				else if (!DeleteEntity(origin, existing.Id, null))
+				else if (!DeleteEntity(origin, existing.Id, replaceData, default, replaceSentMs))
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Couldn't replace object " + uniqueName + " because existing object was locked by someone else");
 				}
@@ -1831,7 +1872,7 @@ namespace Impunity.GameState
 			return dobj;
 		}
 
-		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0, ArraySegment<byte> exclusiveSeqs = default,
+		public bool UpdateEntity(GameStateReplicant origin, uint entityId, ArraySegment<byte> propData, bool guaranteed, ushort seq = 0, ArraySegment<byte> guardSeqs = default,
 			BsonValue? note = null, long noteSentMs = 0)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
@@ -1840,13 +1881,13 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			bool exclusive = exclusiveSeqs.Array != null;
+			bool guarded = guardSeqs.Array != null;
 
 			if (!entity.IsAccessibleBy(origin.ConnectionKey))
 			{
-				// Can't update locked entity. Exclusive updates carry a callback and expect to learn about the
+				// Can't update locked entity. Guarded updates carry a callback and expect to learn about the
 				// rejection; plain updates keep the historical silent-drop behavior.
-				if (exclusive)
+				if (guarded)
 				{
 					throw new ImpunityServerException(ImpunityErrorCode.ActionBlockedByLock, "Entity " + entityId + " is locked by another connection");
 				}
@@ -1856,9 +1897,9 @@ namespace Impunity.GameState
 			// Optimistic-concurrency check. Holding the lock is a stronger guarantee than the seq check, so a lock
 			// holder bypasses it (this is also what makes client-authoritative entities — auto-locked to their creator
 			// and never echoed — always pass). Validate every field before applying any: rejection is all-or-nothing.
-			if (exclusive && !entity.IsLockedBy(origin.ConnectionKey))
+			if (guarded && !entity.IsLockedBy(origin.ConnectionKey))
 			{
-				entity.ValidateExclusiveSeqs(exclusiveSeqs);
+				entity.ValidateGuardSeqs(guardSeqs);
 			}
 
 			List<LiveEntityPersistedPropertyData>? persistedProps;
@@ -1875,9 +1916,9 @@ namespace Impunity.GameState
 
 
 
-		/// <summary>Relays a one-shot event fired on an entity to its channel's listeners, all but <paramref name="except"/>
-		/// when given (the sender, when it excluded itself).</summary>
-		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? except)
+		/// <summary>Relays a one-shot event fired on an entity to its channel's listeners. <paramref name="sender"/> gets a
+		/// copy marked as its own, or none with <paramref name="excludeSender"/>.</summary>
+		public void SendEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, GameStateReplicant? sender, bool excludeSender)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1885,14 +1926,14 @@ namespace Impunity.GameState
 				throw new ImpunityServerException(ImpunityErrorCode.ActionNotFound, "No entity with ID " + entityId);
 			}
 
-			entity.SendEvent(eventType, eventData, sentServerMs, except);
+			entity.SendEvent(eventType, eventData, sentServerMs, sender, excludeSender);
 		}
 
 		/// <summary>Deletes a live entity for <paramref name="origin"/>. Returns false, changing nothing, when another
-		/// connection holds its lock. With <paramref name="guardSeqs"/> (a known-field-seq blob, as an exclusive update
+		/// connection holds its lock. With <paramref name="guardSeqs"/> (a known-field-seq blob, as a guarded update
 		/// carries) it is a guarded delete: throws <see cref="ImpunityErrorCode.ActionStaleData"/>, changing nothing, if a
 		/// guarded field changed since the client last saw it. A lock holder bypasses the guard.</summary>
-		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData, ArraySegment<byte> guardSeqs = default)
+		public bool DeleteEntity(GameStateReplicant origin, uint entityId, BsonValue? deleteData, ArraySegment<byte> guardSeqs = default, long sentServerMs = 0)
 		{
 			GameStateEntity? entity = AllEntities.GetValueOrDefault(entityId);
 			if (entity == null || entity.InLoadingState)
@@ -1908,10 +1949,10 @@ namespace Impunity.GameState
 
 			if (guardSeqs.Array != null && !entity.IsLockedBy(origin.ConnectionKey))
 			{
-				entity.ValidateExclusiveSeqs(guardSeqs);
+				entity.ValidateGuardSeqs(guardSeqs);
 			}
 
-			DestroyEntity(entity, deleteData);
+			DestroyEntity(entity, deleteData, sentServerMs, origin);
 
 			if (entity.IsPersisted())
 			{

@@ -200,7 +200,7 @@ namespace Impunity
 		ActionUniqueNameExists = 3003,
 		ActionNotFound = 3004,
 		ActionBlockedByLock = 3005,
-		ActionStaleData = 3006, // An exclusive update was rejected because the client's known field seq was behind the server's
+		ActionStaleData = 3006, // A guarded update was rejected because the client's known field seq was behind the server's
 		ActionConditionNotMet = 3007, // A conditional action was not run because the entity create/delete it was attached to did not succeed
 	}
 

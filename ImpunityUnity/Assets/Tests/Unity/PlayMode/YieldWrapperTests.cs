@@ -3,7 +3,7 @@
 // The shared suites moved to the async API, so the Unity coroutine wrappers (ImpunityYield /
 // ImpunityYield<T> and the ...Yield() extensions in Client/Unity/ImpunityUnityExt.cs) get their
 // coverage here: the yield-completion contract (keepWaiting / Value / Error) across connect, database
-// ops, channels, entities, exclusive updates, locks, and an error path.
+// ops, channels, entities, guarded updates, locks, and an error path.
 //
 // Reuses the shared harness (server setup/teardown, ports, temp dirs) and entity types from the
 // ImpunitySharedTests assembly; only the pumping here is coroutine-based, since that IS the API under
@@ -204,7 +204,7 @@ public class YieldWrapperTests : ImpunityTestHarness
 	}
 
 	[UnityTest, Category("YieldWrappers")]
-	public IEnumerator CreateObjectYield_And_UpdateExclusiveYield()
+	public IEnumerator CreateObjectYield_And_UpdateIfUnchangedYield()
 	{
 		CreateServer();
 		var conn = NewLocalClient();
@@ -219,10 +219,11 @@ public class YieldWrapperTests : ImpunityTestHarness
 		yield return WaitForYield(create, conn);
 		Assert.AreSame(entity, create.Value, "CreateObject keeps the caller's instance as the live one");
 
-		// The creator of a fresh object can exclusively update it (no error), and the echo applies the value.
+		// The creator of a fresh object can update it with UpdateIfUnchanged (no error), and the echo applies the value.
 		entity.Health.Set(20);
-		var excl = entity.UpdateExclusiveYield();
+		var excl = entity.UpdateIfUnchangedYield();
 		yield return WaitForYield(excl, conn);
+		Assert.AreEqual(GuardedResult.Applied, excl.Value);
 		yield return TickUntil(() => entity.Health.Get() == 20, 3f, conn);
 	}
 

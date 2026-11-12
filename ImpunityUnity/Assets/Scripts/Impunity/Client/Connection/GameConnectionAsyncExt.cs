@@ -65,6 +65,8 @@ namespace Impunity.Connection
 
 		// -------- DB actions
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.CompoundDatabaseAction</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<List<ActionResult>> CompoundDatabaseActionAsync(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
 		{
 			var t = new ImpunityTaskCompletionSource<List<ActionResult>>();
@@ -72,6 +74,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.SetGameSummary</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task SetGameSummaryAsync(this BaseGameConnection connection, BsonDocument summary)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -79,6 +83,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.GetGameSummary</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<BsonDocument> GetGameSummaryAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonDocument>();
@@ -155,6 +161,8 @@ namespace Impunity.Connection
 			connection.PendingMigration = null;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.BeginMigration</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task BeginMigrationAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -162,6 +170,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.CommitMigration</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task CommitMigrationAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -169,6 +179,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.AbortMigration</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task AbortMigrationAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -176,6 +188,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.MigrationGetCollections</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<List<string>> MigrationGetCollectionsAsync(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<string>>();
@@ -183,6 +197,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.MigrationScan</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<List<BsonDocument>> MigrationScanAsync(this BaseGameConnection connection, string collectionName, int skip, int limit)
 		{
 			var t = new ImpunityTaskCompletionSource<List<BsonDocument>>();
@@ -190,6 +206,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.MigrationWrite</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> MigrationWriteAsync(this BaseGameConnection connection, string collectionName, MigrationWriteOp op, BsonDocument? doc, BsonValue? id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -197,6 +215,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.InsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<BsonValue> InsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonValue>();
@@ -204,6 +224,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.UpdateDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UpdateDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -211,6 +233,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.UpsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UpsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -218,6 +242,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.MergeIntoDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> MergeIntoDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -225,6 +251,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.MergeInsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> MergeInsertDocumentAsync(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -232,6 +260,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.FindDocumentById</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<BsonDocument?> FindDocumentByIdAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonDocument?>();
@@ -239,6 +269,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.DeleteDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> DeleteDocumentAsync(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -246,6 +278,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.ListDocuments</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<List<BsonDocument>> ListDocumentsAsync(this BaseGameConnection connection, int collectionId)
 		{
 			var t = new ImpunityTaskCompletionSource<List<BsonDocument>>();
@@ -255,6 +289,8 @@ namespace Impunity.Connection
 
 		// -------- Live game
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.TryToLock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> TryToLockAsync(this BaseGameConnection connection, string lockName)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -262,6 +298,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.WaitForLock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<LockWaitResult> WaitForLockAsync(this BaseGameConnection connection, string lockName)
 		{
 			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
@@ -269,6 +307,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.Unlock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UnlockAsync(this BaseGameConnection connection, string lockName)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -276,6 +316,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.CreateChannel</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> CreateChannelAsync(this BaseGameConnection connection, string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -283,6 +325,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.SubcribeToChannel</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<uint> SubcribeToChannelAsync(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
@@ -290,6 +334,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.UnsubscribeFromChannel</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task UnsubscribeFromChannelAsync(this BaseGameConnection connection, uint channelId)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -297,13 +343,17 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0)
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.CreateObject</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
+		public static Task<uint> CreateObjectAsync(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, BsonValue? replaceData = null)
 		{
 			var t = new ImpunityTaskCompletionSource<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete, onCreatedAction, replaceEntityId);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, t.OnComplete, onCreatedAction, replaceEntityId, replaceData);
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.UpdateEntity</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq = 0)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -311,6 +361,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.DeleteEntity</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> DeleteEntityAsync(this BaseGameConnection connection, uint entityId, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -318,6 +370,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.TriggerEntityEvent</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task TriggerEntityEventAsync(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData,
 			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
@@ -326,6 +380,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.TryToLockEntity</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> TryToLockEntityAsync(this BaseGameConnection connection, uint entityId)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -333,6 +389,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>BaseGameConnection.UnlockEntity</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UnlockEntityAsync(this BaseGameConnection connection, uint entityId)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -340,6 +398,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.ListActiveChannels</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static Task<List<string>> ListActiveChannels(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<string>>();
@@ -347,6 +407,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.ListPersistedChannels</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static Task<List<string>> ListPersistedChannels(this BaseGameConnection connection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<string>>();
@@ -360,6 +422,8 @@ namespace Impunity.Connection
 	public static class GameStateDBCollectionAsyncExtensions
 	{
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.InsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<BsonValue> InsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<BsonValue>();
@@ -367,6 +431,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.UpdateDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UpdateDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -374,6 +440,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.UpsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UpsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -381,6 +449,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.MergeIntoDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> MergeIntoDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -388,6 +458,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.MergeInsertDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> MergeInsertDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -395,6 +467,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.FindDocumentById</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<DTYPE?> FindDocumentByIdAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<DTYPE?>();
@@ -402,6 +476,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.DeleteDocument</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> DeleteDocumentAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -409,6 +485,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>GameStateDBCollection{DTYPE}.ListDocuments</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<List<DTYPE>?> ListDocumentsAsync<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
 			var t = new ImpunityTaskCompletionSource<List<DTYPE>?>();
@@ -421,13 +499,17 @@ namespace Impunity.Connection
 	public static class ClientEntityManagerAsyncExtensions
 	{
 
-		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, ulong replaceGuard = 0) where T : class, IDistributedObject
+		/// <summary>Async/await wrapper for <c>ClientEntityManager.CreateObject</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
+		public static Task<T> CreateObjectAsync<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, FieldGuard replaceGuard = default, BsonValue? replaceData = null) where T : class, IDistributedObject
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId, replaceGuard);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId, replaceGuard, replaceData);
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>ClientEntityManager.CreateChannel</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> CreateChannelAsync<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -435,6 +517,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>ClientEntityManager.SubscribeToChannel</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<T> SubscribeToChannelAsync<T>(this ClientEntityManager manager, string channelName, T createIfNeeded) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityTaskCompletionSource<T>();
@@ -442,6 +526,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>ClientEntityManager.UnsubscribeFromChannel</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task UnsubscribeFromChannelAsync(this ClientEntityManager manager, IDistributedChannel channel)
 		{
 			var t = new ImpunityTaskCompletionSource();
@@ -453,6 +539,8 @@ namespace Impunity.Connection
 	/// <summary>Async/await extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityAsyncExtensions
 	{
+		/// <summary>Async/await wrapper for <c>IDistributedEntity.TriggerEvent</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task TriggerEventAsync(this IDistributedEntity entity, int eventType, BsonValue eventData,
 			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
@@ -461,15 +549,19 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. The returned task faults with an
-		/// <see cref="ImpunityErrorResponseException"/> on a stale-data or lock rejection; await it in a try/catch to handle contention.</summary>
-		public static Task UpdateExclusiveAsync(this IDistributedEntity entity, GameStateActionBase? onReplicatedAction = null)
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.UpdateIfUnchanged"/>. Returns
+		/// <see cref="GuardedResult.Applied"/> or <see cref="GuardedResult.Stale"/> (lost the race; nothing applied).
+		/// The task faults with an <see cref="ImpunityErrorResponseException"/> only for
+		/// <see cref="GuardedResult.Failed"/>: locked by another connection, entity gone, connection broken.</summary>
+		public static Task<GuardedResult> UpdateIfUnchangedAsync(this IDistributedEntity entity, GameStateActionBase? onUpdatedAction = null)
 		{
-			var t = new ImpunityTaskCompletionSource();
-			entity.UpdateExclusive(t.OnComplete, onReplicatedAction);
+			var t = new ImpunityTaskCompletionSource<GuardedResult>();
+			entity.UpdateIfUnchanged(t.OnComplete, onUpdatedAction);
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>IDistributedEntity.Delete</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> DeleteAsync(this IDistributedEntity entity, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -477,16 +569,30 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
-		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.DeleteExclusive"/>. The returned task faults with an
-		/// <see cref="ImpunityErrorResponseException"/> on a stale guard (<see cref="ImpunityErrorCode.ActionStaleData"/>),
-		/// and returns false when another client's lock blocked the delete.</summary>
-		public static Task<bool> DeleteExclusiveAsync(this IDistributedEntity entity, ulong guardMask, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.DeleteIfUnchanged"/>. Returns
+		/// <see cref="GuardedResult.Applied"/> (deleted) or <see cref="GuardedResult.Stale"/> (a guarded field changed
+		/// first; nothing deleted). The task faults with an <see cref="ImpunityErrorResponseException"/> only for
+		/// <see cref="GuardedResult.Failed"/>: locked by another connection, entity gone, connection broken.</summary>
+		public static Task<GuardedResult> DeleteIfUnchangedAsync(this IDistributedEntity entity, FieldGuard guard, BsonValue? deleteData, GameStateActionBase? onDeletedAction = null)
 		{
-			var t = new ImpunityTaskCompletionSource<bool>();
-			entity.DeleteExclusive(guardMask, deleteData, t.OnComplete, onDeletedAction);
+			var t = new ImpunityTaskCompletionSource<GuardedResult>();
+			entity.DeleteIfUnchanged(guard, deleteData, t.OnComplete, onDeletedAction);
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <see cref="IDistributedEntity.ReplaceIfUnchanged{T}"/>. Returns
+		/// <see cref="GuardedResult.Applied"/> (replaced; <paramref name="newObject"/> is registered) or
+		/// <see cref="GuardedResult.Stale"/> (a guarded field changed first; nothing replaced). The task faults with an
+		/// <see cref="ImpunityErrorResponseException"/> only for <see cref="GuardedResult.Failed"/>.</summary>
+		public static Task<GuardedResult> ReplaceIfUnchangedAsync<T>(this IDistributedEntity entity, FieldGuard guard, T newObject, BsonValue? replaceData = null, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			var t = new ImpunityTaskCompletionSource<GuardedResult>();
+			entity.ReplaceIfUnchanged(guard, newObject, replaceData, t.OnComplete, onCreatedAction);
+			return t.Task;
+		}
+
+		/// <summary>Async/await wrapper for <c>IDistributedEntity.TryLock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> TryLockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -494,6 +600,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>IDistributedEntity.WaitForLock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<LockWaitResult> WaitForLockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<LockWaitResult>();
@@ -501,6 +609,8 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async/await wrapper for <c>IDistributedEntity.Unlock</c>. The task completes with the request's result and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task<bool> UnlockAsync(this IDistributedEntity entity)
 		{
 			var t = new ImpunityTaskCompletionSource<bool>();
@@ -589,6 +699,8 @@ namespace Impunity.Connection
 	/// <summary>Async/await extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelAsyncExtensions
 	{
+		/// <summary>Async/await wrapper for <c>IDistributedChannel.Unsubscribe</c>. The task completes when the request succeeds and faults with
+		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
 		public static Task UnsubscribeAsync(this IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityTaskCompletionSource();

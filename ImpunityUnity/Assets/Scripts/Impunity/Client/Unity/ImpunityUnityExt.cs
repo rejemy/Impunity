@@ -77,6 +77,7 @@ namespace Impunity.Unity
 	{
 		// ---------- API
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.Connect</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield ConnectYield(this BaseGameConnection connection)
 		{
 			var action = new ImpunityYield();
@@ -87,6 +88,8 @@ namespace Impunity.Unity
 		// -------- DB actions
 
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.CompoundDatabaseAction</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<List<ActionResult>> CompoundDatabaseActionYield(this BaseGameConnection connection, IEnumerable<GameStateActionBase> actions)
 		{
 			var action = new ImpunityYield<List<ActionResult>>();
@@ -94,6 +97,7 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.SetGameSummary</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield SetGameSummaryYield(this BaseGameConnection connection, BsonDocument summary)
 		{
 			var action = new ImpunityYield();
@@ -101,6 +105,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.GetGameSummary</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<BsonDocument> GetGameSummaryYield(this BaseGameConnection connection)
 		{
 			var action = new ImpunityYield<BsonDocument>();
@@ -108,6 +114,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.InsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<BsonValue> InsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var action = new ImpunityYield<BsonValue>();
@@ -115,6 +123,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UpdateDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UpdateDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var action = new ImpunityYield<bool>();
@@ -122,6 +132,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UpsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UpsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc)
 		{
 			var action = new ImpunityYield<bool>();
@@ -129,6 +141,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.MergeIntoDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> MergeIntoDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var action = new ImpunityYield<bool>();
@@ -136,6 +150,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.MergeInsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> MergeInsertDocumentYield(this BaseGameConnection connection, int collectionId, BsonDocument doc, IEnumerable<string>? unsetKeys = null)
 		{
 			var action = new ImpunityYield<bool>();
@@ -143,6 +159,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.FindDocumentById</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<BsonDocument?> FindDocumentByIdYield(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var action = new ImpunityYield<BsonDocument?>();
@@ -150,6 +168,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.DeleteDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> DeleteDocumentYield(this BaseGameConnection connection, int collectionId, BsonValue id)
 		{
 			var action = new ImpunityYield<bool>();
@@ -157,6 +177,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.ListDocuments</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<List<BsonDocument>> ListDocumentsYield(this BaseGameConnection connection, int collectionId)
 		{
 			var action = new ImpunityYield<List<BsonDocument>>();
@@ -166,6 +188,8 @@ namespace Impunity.Unity
 
 		// -------- Live game
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.TryToLock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> TryToLockYield(this BaseGameConnection connection, string lockName)
 		{
 			var action = new ImpunityYield<bool>();
@@ -173,6 +197,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.WaitForLock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<LockWaitResult> WaitForLockYield(this BaseGameConnection connection, string lockName)
 		{
 			var action = new ImpunityYield<LockWaitResult>();
@@ -180,6 +206,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.Unlock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UnlockYield(this BaseGameConnection connection, string lockName)
 		{
 			var action = new ImpunityYield<bool>();
@@ -187,6 +215,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.CreateChannel</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> CreateChannelYield(this BaseGameConnection connection, string channelName, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, bool replace, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var action = new ImpunityYield<bool>();
@@ -194,6 +224,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.SubcribeToChannel</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<uint> SubcribeToChannelYield(this BaseGameConnection connection, string channelName, bool createIfMissing, int entityTypeId, byte instanceFlags, ArraySegment<byte> propBytes, IEnumerable<ObjectCreateData> channelObjects)
 		{
 			var action = new ImpunityYield<uint>();
@@ -201,6 +233,7 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UnsubscribeFromChannel</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield UnsubscribeFromChannelYield(this BaseGameConnection connection, uint channelId)
 		{
 			var action = new ImpunityYield();
@@ -208,13 +241,16 @@ namespace Impunity.Unity
 			return action;
 		}
 
-		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null)
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.CreateObject</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<uint> CreateObjectYield(this BaseGameConnection connection, int entityTypeId, byte instanceFlags, uint channelId, ArraySegment<byte> propBytes, string uniqueName, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, BsonValue? replaceData = null)
 		{
 			var action = new ImpunityYield<uint>();
-			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, action.OnComplete, onCreatedAction);
+			connection.CreateObject(entityTypeId, instanceFlags, channelId, propBytes, uniqueName, replace, action.OnComplete, onCreatedAction, replaceEntityId, replaceData);
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UpdateEntity</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq = 0)
 		{
 			var action = new ImpunityYield();
@@ -222,6 +258,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.DeleteEntity</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> DeleteEntityYield(this BaseGameConnection connection, uint entityId, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var action = new ImpunityYield<bool>();
@@ -229,6 +267,7 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.TriggerEntityEvent</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield TriggerEntityEventYield(this BaseGameConnection connection, uint entityId, int eventType, BsonValue eventData,
 			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
@@ -237,6 +276,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.TryToLockEntity</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> TryToLockEntityYield(this BaseGameConnection connection, uint entityId)
 		{
 			var action = new ImpunityYield<bool>();
@@ -244,6 +285,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UnlockEntity</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UnlockEntityYield(this BaseGameConnection connection, uint entityId)
 		{
 			var action = new ImpunityYield<bool>();
@@ -251,6 +294,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.ListActiveChannels</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<List<string>> ListActiveChannelsYield(this BaseGameConnection connection)
 		{
 			var action = new ImpunityYield<List<string>>();
@@ -258,6 +303,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.ListPersistedChannels</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<List<string>> ListPersistedChannelsYield(this BaseGameConnection connection)
 		{
 			var action = new ImpunityYield<List<string>>();
@@ -270,6 +317,8 @@ namespace Impunity.Unity
 	public static class GameStateDBCollectionYieldExtensions
 	{
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.InsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<BsonValue> InsertDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			ImpunityYield<BsonValue> action = new ImpunityYield<BsonValue>();
@@ -277,6 +326,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.UpdateDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UpdateDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
@@ -284,6 +335,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.UpsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UpsertDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, DTYPE doc)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
@@ -291,6 +344,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.MergeIntoDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> MergeIntoDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
@@ -298,6 +353,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.MergeInsertDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> MergeInsertDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonDocument patch, IEnumerable<string>? unsetKeys = null)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
@@ -305,6 +362,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.FindDocumentById</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<DTYPE?> FindDocumentByIdYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			ImpunityYield<DTYPE?> action = new ImpunityYield<DTYPE?>();
@@ -312,6 +371,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.DeleteDocument</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> DeleteDocumentYield<DTYPE>(this GameStateDBCollection<DTYPE> collection, BsonValue id)
 		{
 			ImpunityYield<bool> action = new ImpunityYield<bool>();
@@ -319,6 +380,8 @@ namespace Impunity.Unity
 			return action;
 		}
 
+		/// <summary>Coroutine wrapper for <c>GameStateDBCollection{DTYPE}.ListDocuments</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<List<DTYPE>?> ListDocumentsYield<DTYPE>(this GameStateDBCollection<DTYPE> collection)
 		{
 			ImpunityYield<List<DTYPE>?> action = new ImpunityYield<List<DTYPE>?>();
@@ -330,13 +393,17 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="ClientEntityManager"/>.</summary>
 	public static class ClientEntityManagerYieldExtensions
 	{
-		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		/// <summary>Coroutine wrapper for <c>ClientEntityManager.CreateObject</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<T> CreateObjectYield<T>(this ClientEntityManager manager, T obj, IDistributedChannel channel, bool replace, GameStateActionBase? onCreatedAction = null, uint replaceEntityId = 0, FieldGuard replaceGuard = default, BsonValue? replaceData = null) where T : class, IDistributedObject
 		{
 			var t = new ImpunityYield<T>();
-			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction);
+			manager.CreateObject<T>(obj, channel, replace, t.OnComplete, onCreatedAction, replaceEntityId, replaceGuard, replaceData);
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>ClientEntityManager.CreateChannel</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> CreateChannelYield<T>(this ClientEntityManager manager, string channelName, T channel, bool replace, IEnumerable<IDistributedObject> channelObjects) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityYield<bool>();
@@ -344,6 +411,8 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>ClientEntityManager.SubscribeToChannel</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<T> SubscribeToChannelYield<T>(this ClientEntityManager manager, string channelName, T createIfNeeded) where T : class, IDistributedChannel
 		{
 			var t = new ImpunityYield<T>();
@@ -351,6 +420,7 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>ClientEntityManager.UnsubscribeFromChannel</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield UnsubscribeFromChannelYield(this ClientEntityManager manager, IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityYield();
@@ -362,6 +432,7 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedEntity"/>.</summary>
 	public static class IDistributedEntityYieldExtensions
 	{
+		/// <summary>Coroutine wrapper for <c>IDistributedEntity.TriggerEvent</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield TriggerEventYield(this IDistributedEntity entity, int eventType, BsonValue eventData,
 			EntityEventEcho echo = EntityEventEcho.IncludeSender)
 		{
@@ -370,15 +441,19 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.UpdateExclusive"/>. Yield until the exclusive update
-		/// completes; inspect the yield's error to detect a stale-data or lock rejection.</summary>
-		public static ImpunityYield UpdateExclusiveYield(this IDistributedEntity entity, GameStateActionBase? onReplicatedAction = null)
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.UpdateIfUnchanged"/>. Yield until the guarded update
+		/// completes, then check the yield's <see cref="ImpunityYield{T}.Value"/>: <see cref="GuardedResult.Applied"/>,
+		/// <see cref="GuardedResult.Stale"/> (lost the race), or <see cref="GuardedResult.Failed"/>, the only outcome
+		/// that sets <see cref="ImpunityYield{T}.Error"/>.</summary>
+		public static ImpunityYield<GuardedResult> UpdateIfUnchangedYield(this IDistributedEntity entity, GameStateActionBase? onUpdatedAction = null)
 		{
-			var t = new ImpunityYield();
-			entity.UpdateExclusive(t.OnComplete, onReplicatedAction);
+			var t = new ImpunityYield<GuardedResult>();
+			entity.UpdateIfUnchanged(t.OnComplete, onUpdatedAction);
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>IDistributedEntity.Delete</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> DeleteYield(this IDistributedEntity entity, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
 		{
 			var t = new ImpunityYield<bool>();
@@ -386,13 +461,30 @@ namespace Impunity.Unity
 			return t;
 		}
 
-		public static ImpunityYield<bool> DeleteExclusiveYield(this IDistributedEntity entity, ulong guardMask, BsonValue deleteData, GameStateActionBase? onDeletedAction = null)
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.DeleteIfUnchanged"/>. Yield until the guarded delete
+		/// completes, then check the yield's <see cref="ImpunityYield{T}.Value"/>: <see cref="GuardedResult.Applied"/>
+		/// (deleted), <see cref="GuardedResult.Stale"/> (a guarded field changed first), or
+		/// <see cref="GuardedResult.Failed"/>, the only outcome that sets <see cref="ImpunityYield{T}.Error"/>.</summary>
+		public static ImpunityYield<GuardedResult> DeleteIfUnchangedYield(this IDistributedEntity entity, FieldGuard guard, BsonValue? deleteData, GameStateActionBase? onDeletedAction = null)
 		{
-			var t = new ImpunityYield<bool>();
-			entity.DeleteExclusive(guardMask, deleteData, t.OnComplete, onDeletedAction);
+			var t = new ImpunityYield<GuardedResult>();
+			entity.DeleteIfUnchanged(guard, deleteData, t.OnComplete, onDeletedAction);
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <see cref="IDistributedEntity.ReplaceIfUnchanged{T}"/>. Yield until the guarded
+		/// replace completes, then check the yield's <see cref="ImpunityYield{T}.Value"/>: <see cref="GuardedResult.Applied"/>
+		/// (replaced), <see cref="GuardedResult.Stale"/> (a guarded field changed first), or
+		/// <see cref="GuardedResult.Failed"/>, the only outcome that sets <see cref="ImpunityYield{T}.Error"/>.</summary>
+		public static ImpunityYield<GuardedResult> ReplaceIfUnchangedYield<T>(this IDistributedEntity entity, FieldGuard guard, T newObject, BsonValue? replaceData = null, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			var t = new ImpunityYield<GuardedResult>();
+			entity.ReplaceIfUnchanged(guard, newObject, replaceData, t.OnComplete, onCreatedAction);
+			return t;
+		}
+
+		/// <summary>Coroutine wrapper for <c>IDistributedEntity.TryLock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> TryLockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<bool>();
@@ -400,6 +492,8 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>IDistributedEntity.WaitForLock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<LockWaitResult> WaitForLockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<LockWaitResult>();
@@ -407,6 +501,8 @@ namespace Impunity.Unity
 			return t;
 		}
 
+		/// <summary>Coroutine wrapper for <c>IDistributedEntity.Unlock</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
 		public static ImpunityYield<bool> UnlockYield(this IDistributedEntity entity)
 		{
 			var t = new ImpunityYield<bool>();
@@ -505,6 +601,7 @@ namespace Impunity.Unity
 	/// <summary>Unity coroutine yield extension methods for <see cref="IDistributedChannel"/>.</summary>
 	public static class IDistributedChannelYieldExtensions
 	{
+		/// <summary>Coroutine wrapper for <c>IDistributedChannel.Unsubscribe</c>. Yield it, then check <c>Error</c> (null on success).</summary>
 		public static ImpunityYield UnsubscribeYield(this IDistributedChannel channel, bool immediate = false)
 		{
 			var t = new ImpunityYield();

@@ -1,7 +1,7 @@
 // ───────── Update notes ─────────
 //
-// Covers entity.SetUpdateNote / tx.Note and how a note is received: it arrives with its update (visible from field
-// OnChanged handlers as CurrentUpdateNote, then in OnUpdateNote), reaches every subscriber and the writer on its echo
+// Covers entity.AddUpdateNote / tx.Note and how a note is received: it arrives with its update (visible from field
+// OnChanged handlers as CurrentUpdateNotes, then in OnUpdateNote), reaches every subscriber and the writer on its echo
 // (marked as its own), carries the sender's send time, is gone once the update has been applied, is never seen by a
 // later subscriber, travels alone on an empty update, replaces an earlier pending note, goes nowhere with a rejected
 // update, rides only a transaction's committed attempt, and is not echoed on a client-authoritative entity.
@@ -65,13 +65,19 @@ namespace Impunity.Tests
 			/// <summary>For each OnUpdateNote, how many Health changes had been seen by then.</summary>
 			public readonly List<int> ChangesBeforeNote = new List<int>();
 
+			/// <summary>The first note on the update being applied to the entity right now, if it has any.</summary>
+			public static UpdateNote? FirstNote(IntegrationTestEntity entity)
+			{
+				return entity.CurrentUpdateNotes.Count > 0 ? entity.CurrentUpdateNotes[0] : (UpdateNote?)null;
+			}
+
 			public static Seen Watch(IntegrationTestEntity entity)
 			{
 				var seen = new Seen();
-				entity.Health.OnChanged += (from, to) => seen.HealthChanges.Add((from, to, entity.CurrentUpdateNote));
+				entity.Health.OnChanged += (from, to) => seen.HealthChanges.Add((from, to, FirstNote(entity)));
 				entity.OnUpdateNoteEvent += note =>
 				{
-					Assert.IsTrue(entity.CurrentUpdateNote.HasValue, "CurrentUpdateNote is not set during OnUpdateNote");
+					Assert.Greater(entity.CurrentUpdateNotes.Count, 0, "CurrentUpdateNotes is empty during OnUpdateNote");
 					seen.Notes.Add(note);
 					seen.ChangesBeforeNote.Add(seen.HealthChanges.Count);
 				};
@@ -126,7 +132,7 @@ namespace Impunity.Tests
 
 			long before = w.ConnA.GetServerTime();
 			w.A.Health.Set(4);
-			w.A.SetUpdateNote(Hit("left"));
+			w.A.AddUpdateNote(Hit("left"));
 
 			await PumpUntil(() => seenA.Notes.Count == 1 && seenB.Notes.Count == 1, AllConnections());
 
@@ -147,8 +153,8 @@ namespace Impunity.Tests
 			Assert.IsTrue(seenA.Notes[0].IsOwn);
 			Assert.AreEqual(seenB.Notes[0].SentServerMs, seenA.Notes[0].SentServerMs);
 
-			Assert.IsNull(w.A.CurrentUpdateNote);
-			Assert.IsNull(w.B.CurrentUpdateNote);
+			Assert.AreEqual(0, w.A.CurrentUpdateNotes.Count);
+			Assert.AreEqual(0, w.B.CurrentUpdateNotes.Count);
 		}
 
 		/// <summary>A note rides one update only: the next plain update arrives with none.</summary>
@@ -159,7 +165,7 @@ namespace Impunity.Tests
 			var seenB = Seen.Watch(w.B);
 
 			w.A.Health.Set(4);
-			w.A.SetUpdateNote(Hit("left"));
+			w.A.AddUpdateNote(Hit("left"));
 			await PumpUntil(() => seenB.Notes.Count == 1, AllConnections());
 
 			w.A.Health.Set(5);
@@ -177,30 +183,47 @@ namespace Impunity.Tests
 			var seenA = Seen.Watch(w.A);
 			var seenB = Seen.Watch(w.B);
 
-			w.A.SetUpdateNote(Hit("miss"));
+			w.A.AddUpdateNote(Hit("miss"));
 			await PumpUntil(() => seenA.Notes.Count == 1 && seenB.Notes.Count == 1, AllConnections());
 			Assert.AreEqual("miss", seenB.Notes[0].Data["hit"].AsString);
 			Assert.AreEqual(0, seenB.HealthChanges.Count);
 			Assert.IsTrue(seenA.Notes[0].IsOwn);
 		}
 
-		/// <summary>Setting a second note before the send replaces the first; clearing it sends nothing.</summary>
+		/// <summary>Notes accumulate: every note added before the send rides the same update, all of them are current
+		/// while its fields are applied, and OnUpdateNote runs once per note, in the order added.</summary>
 		[Test, Category("UpdateNote")]
-		public async Task SecondNoteBeforeTheSend_ReplacesTheFirst()
+		public async Task SeveralNotesBeforeTheSend_AllArriveInOrder()
 		{
-			var w = await Setup("note_replace");
+			var w = await Setup("note_several");
+			var seenA = Seen.Watch(w.A);
 			var seenB = Seen.Watch(w.B);
+			int currentDuringChange = -1;
+			w.B.Health.OnChanged += (_, __) => currentDuringChange = w.B.CurrentUpdateNotes.Count;
 
 			w.A.Health.Set(4);
-			w.A.SetUpdateNote(Hit("left"));
-			w.A.SetUpdateNote(Hit("right"));
-			await PumpUntil(() => seenB.Notes.Count == 1, AllConnections());
-			Assert.AreEqual("right", seenB.Notes[0].Data["hit"].AsString);
+			w.A.AddUpdateNote(Hit("left"));
+			w.A.AddUpdateNote(Hit("right"));
+			await PumpUntil(() => seenA.Notes.Count == 2 && seenB.Notes.Count == 2, AllConnections());
 
-			w.A.SetUpdateNote(Hit("cleared"));
-			w.A.SetUpdateNote(null);
+			Assert.AreEqual(1, seenB.HealthChanges.Count, "The two notes did not ride one update");
+			Assert.AreEqual(2, currentDuringChange, "Both notes should be current while the field changes");
+			Assert.AreEqual("left", seenB.Notes[0].Data["hit"].AsString);
+			Assert.AreEqual("right", seenB.Notes[1].Data["hit"].AsString);
+			Assert.AreEqual(seenB.Notes[0].SentServerMs, seenB.Notes[1].SentServerMs);
+			Assert.IsTrue(seenA.Notes[0].IsOwn && seenA.Notes[1].IsOwn, "The writer's echo was not marked as its own");
+
 			await PumpFor(TimeSpan.FromSeconds(0.1), AllConnections());
-			Assert.AreEqual(1, seenB.Notes.Count, "A cleared note was sent");
+			Assert.AreEqual(2, seenB.Notes.Count, "A note was delivered twice");
+		}
+
+		/// <summary>A note needs a payload: null and BSON null throw rather than silently sending nothing.</summary>
+		[Test, Category("UpdateNote")]
+		public async Task NullNote_Throws()
+		{
+			var w = await Setup("note_null");
+			Assert.Throws<ArgumentNullException>(() => w.A.AddUpdateNote(null));
+			Assert.Throws<ArgumentNullException>(() => w.A.AddUpdateNote(BsonValue.Null));
 		}
 
 		/// <summary>Notes are never stored: a client subscribing after the update sees the state, not the note.</summary>
@@ -210,7 +233,7 @@ namespace Impunity.Tests
 			var w = await Setup("note_late");
 			var seenB = Seen.Watch(w.B);
 			w.A.Health.Set(4);
-			w.A.SetUpdateNote(Hit("left"));
+			w.A.AddUpdateNote(Hit("left"));
 			await PumpUntil(() => seenB.Notes.Count == 1, AllConnections());
 
 			var connC = await ConnectClient("note_late_c");
@@ -222,10 +245,10 @@ namespace Impunity.Tests
 			await PumpFor(TimeSpan.FromSeconds(0.1), AllConnections());
 			Assert.AreEqual(4, c.Health.Get());
 			Assert.AreEqual(0, seenC.Notes.Count);
-			Assert.IsNull(c.CurrentUpdateNote);
+			Assert.AreEqual(0, c.CurrentUpdateNotes.Count);
 		}
 
-		/// <summary>A rejected exclusive update takes its note with it: nobody receives it.</summary>
+		/// <summary>A rejected guarded update takes its note with it: nobody receives it.</summary>
 		[Test, Category("UpdateNote")]
 		public async Task RejectedUpdate_TakesItsNoteWithIt()
 		{
@@ -236,9 +259,8 @@ namespace Impunity.Tests
 			Assert.AreEqual(1, w.B.Health.Get(), "B must still be stale for this test");
 
 			w.B.Health.Set(2);
-			w.B.SetUpdateNote(Hit("stale"));
-			var error = await PumpExpectingError(w.B.UpdateExclusiveAsync(), AllConnections());
-			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, error.ErrorId);
+			w.B.AddUpdateNote(Hit("stale"));
+			Assert.AreEqual(GuardedResult.Stale, await Pump(w.B.UpdateIfUnchangedAsync(), AllConnections()));
 
 			await PumpFor(TimeSpan.FromSeconds(0.1), AllConnections());
 			Assert.AreEqual(0, seenA.Notes.Count, "The rejected update's note was relayed");
@@ -255,7 +277,7 @@ namespace Impunity.Tests
 			w.A.Health.Set(4);
 			Assert.AreEqual(1, seenA.HealthChanges.Count, "Client-authoritative Set applies locally");
 			Assert.IsFalse(seenA.HealthChanges[0].note.HasValue);
-			w.A.SetUpdateNote(Hit("left"));
+			w.A.AddUpdateNote(Hit("left"));
 
 			await PumpUntil(() => seenB.Notes.Count == 1, AllConnections());
 			Assert.IsTrue(seenB.HealthChanges.Single().note.HasValue);
@@ -266,11 +288,11 @@ namespace Impunity.Tests
 
 		/// <summary>Without a connection there is nobody to tell: setting a note does nothing and doesn't throw.</summary>
 		[Test, Category("UpdateNote")]
-		public void Offline_SetUpdateNote_DoesNothing()
+		public void Offline_AddUpdateNote_DoesNothing()
 		{
 			var offline = new IntegrationTestEntity();
-			offline.SetUpdateNote(Hit("left"));
-			Assert.IsNull(offline.CurrentUpdateNote);
+			offline.AddUpdateNote(Hit("left"));
+			Assert.AreEqual(0, offline.CurrentUpdateNotes.Count);
 		}
 
 		// ───────── Transactions ─────────
@@ -321,7 +343,7 @@ namespace Impunity.Tests
 		{
 			var w = await Setup("note_tx_delete");
 
-			var error = await PumpExpectingError(w.B.TransactAsync(tx => { tx.Note(Hit("felled")); tx.Delete(w.B.Health.Mask); return true; }), AllConnections());
+			var error = await PumpExpectingError(w.B.TransactAsync(tx => { tx.Note(Hit("felled")); tx.Delete(w.B.Health.Guard); return true; }), AllConnections());
 			Assert.IsNotNull(error);
 			Assert.AreEqual(ImpunityErrorCode.ActionBadRequest, error.ErrorId);
 			await PumpFor(TimeSpan.FromSeconds(0.1), AllConnections());

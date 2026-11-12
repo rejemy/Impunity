@@ -5,15 +5,17 @@
 // out of step with the state it explains. It rides one update, is relayed to every listener with that update, and is
 // never stored: a later subscriber sees the state, not the note.
 //
-// Sending mirrors replicated actions: SetUpdateNote parks the note on the entity until whichever send path builds the
-// entity's next update takes it (the per-frame sweep, UpdateExclusive, a transaction's update, the flush before an
-// unlock), and queues the entity for the sweep so a note with no field change still goes out, on an empty update. A
-// note forces a reliable send.
+// Sending mirrors conditional actions: AddUpdateNote parks the note on the entity until whichever send path builds the
+// entity's next update takes it (the per-frame sweep, UpdateIfUnchanged, a transaction's update, the flush before an
+// unlock), and queues the entity for the sweep so a note with no field change still goes out, on an empty update.
+// Notes accumulate: every note added before that send travels with it, in order, as a BSON array on the wire (the
+// server relays the value untouched). A note forces a reliable send.
 //
-// Receiving: while a noted update is being applied, CurrentUpdateNote is set for that entity, so field OnChanged
-// handlers can read it; afterwards OnUpdateNote is raised, which is also how a note on an update that changed no field
-// is seen. The writer of a non-client-authoritative entity gets its own note back on the echo, marked as its own. A
-// client-authoritative entity's writer gets no echo, so it presents locally as it already does.
+// Receiving: while a noted update is being applied, CurrentUpdateNotes holds its notes for that entity, so field
+// OnChanged handlers can read them; afterwards OnUpdateNote is raised once per note, in order, which is also how a note
+// on an update that changed no field is seen. The writer of a non-client-authoritative entity gets its own notes back
+// on the echo, marked as its own. A client-authoritative entity's writer gets no echo, so it presents locally as it
+// already does.
 
 using System;
 using System.Collections.Generic;
@@ -22,7 +24,7 @@ using UltraLiteDB;
 
 namespace Impunity.Connection
 {
-	/// <summary>A note on a received update: why it happened (see <see cref="IDistributedEntity.SetUpdateNote"/>).</summary>
+	/// <summary>A note on a received update: why it happened (see <see cref="IDistributedEntity.AddUpdateNote"/>).</summary>
 	public readonly struct UpdateNote
 	{
 		/// <summary>The payload the writer attached. Never null.</summary>
@@ -47,22 +49,23 @@ namespace Impunity.Connection
 
 	public partial class ClientEntityManager
 	{
-		private readonly Dictionary<IDistributedEntity, BsonValue> PendingUpdateNotes = new Dictionary<IDistributedEntity, BsonValue>();
+		private static readonly UpdateNote[] NoUpdateNotes = new UpdateNote[0];
 
-		/// <summary>The entity whose noted update is being applied right now, and its note.</summary>
+		private readonly Dictionary<IDistributedEntity, BsonArray> PendingUpdateNotes = new Dictionary<IDistributedEntity, BsonArray>();
+
+		/// <summary>The entity whose noted update is being applied right now, and its notes.</summary>
 		private IDistributedEntity? NotedEntity;
-		private UpdateNote NotedUpdate;
+		private UpdateNote[] NotedUpdates = NoUpdateNotes;
 
-		/// <summary>Attaches a note to the entity's next update. Backs <see cref="IDistributedEntity.SetUpdateNote"/>; see
+		/// <summary>Adds a note to the entity's next update. Backs <see cref="IDistributedEntity.AddUpdateNote"/>; see
 		/// there for the semantics.</summary>
 		/// <param name="entity">The registered entity whose next update carries the note.</param>
-		/// <param name="note">The note; null (or BSON null) removes a pending one.</param>
-		public void SetUpdateNote(IDistributedEntity entity, BsonValue? note)
+		/// <param name="note">The note. Must not be null or BSON null.</param>
+		public void AddUpdateNote(IDistributedEntity entity, BsonValue note)
 		{
 			if (note == null || note.IsNull)
 			{
-				PendingUpdateNotes.Remove(entity);
-				return;
+				throw new ArgumentNullException(nameof(note), "An update note needs a payload");
 			}
 
 			if (Connection == null || entity.Manager != this || entity.DistributedEntityId == 0 || !DistributedObjects.ContainsKey(entity.DistributedEntityId))
@@ -71,63 +74,89 @@ namespace Impunity.Connection
 				return;
 			}
 
-			PendingUpdateNotes[entity] = note;
+			if (!PendingUpdateNotes.TryGetValue(entity, out BsonArray? pending))
+			{
+				pending = new BsonArray();
+				PendingUpdateNotes[entity] = pending;
+			}
+			pending.Add(note);
 
 			// Make sure the next sweep sends an update for this entity even if no field changes.
 			DirtyObjects.Add(entity);
 		}
 
 		/// <summary>True when the entity has something other than dirty fields waiting to ride its next update: a
-		/// replicated action or a note.</summary>
+		/// conditional action or a note.</summary>
 		private bool HasPendingUpdateExtras(IDistributedEntity entity)
 		{
-			return PendingReplicatedActions.ContainsKey(entity) || PendingUpdateNotes.ContainsKey(entity);
+			return PendingConditionalActions.ContainsKey(entity) || PendingUpdateNotes.ContainsKey(entity);
 		}
 
-		/// <summary>Removes and returns the note that should ride the update being built for this entity, or null.</summary>
-		private BsonValue? TakeUpdateNote(IDistributedEntity entity)
+		/// <summary>Removes and returns the notes that should ride the update being built for this entity (in the order
+		/// they were added), or null.</summary>
+		private BsonArray? TakeUpdateNotes(IDistributedEntity entity)
 		{
-			if (!PendingUpdateNotes.TryGetValue(entity, out BsonValue? note))
+			if (!PendingUpdateNotes.TryGetValue(entity, out BsonArray? notes))
 			{
 				return null;
 			}
 
 			PendingUpdateNotes.Remove(entity);
-			return note;
+			return notes;
 		}
 
-		/// <summary>The note on the update being applied to <paramref name="entity"/> right now, if it has one. Backs
-		/// <see cref="IDistributedEntity.CurrentUpdateNote"/>.</summary>
-		internal UpdateNote? GetCurrentUpdateNote(IDistributedEntity entity)
+		/// <summary>The notes on the update being applied to <paramref name="entity"/> right now; empty when it has
+		/// none. Backs <see cref="IDistributedEntity.CurrentUpdateNotes"/>.</summary>
+		internal IReadOnlyList<UpdateNote> GetCurrentUpdateNotes(IDistributedEntity entity)
 		{
-			return NotedEntity != null && ReferenceEquals(NotedEntity, entity) ? NotedUpdate : (UpdateNote?)null;
+			return NotedEntity != null && ReferenceEquals(NotedEntity, entity) ? NotedUpdates : NoUpdateNotes;
 		}
 
-		/// <summary>Applies a noted update: the note is current for the entity while its fields are applied (so their
-		/// <c>OnChanged</c> handlers can read it) and while <see cref="IDistributedEntity.OnUpdateNote"/> runs afterwards.</summary>
-		private void ApplyNotedUpdate(IDistributedEntity entity, ArraySegment<byte> updateData, ushort seq, UpdateNote note)
+		/// <summary>Applies a noted update: its notes are current for the entity while its fields are applied (so their
+		/// <c>OnChanged</c> handlers can read them) and while <see cref="IDistributedEntity.OnUpdateNote"/> runs
+		/// afterwards, once per note, in the order the writer added them.</summary>
+		private void ApplyNotedUpdate(IDistributedEntity entity, ArraySegment<byte> updateData, ushort seq, BsonValue notes, long sentServerMs, bool isOwn)
 		{
+			// The writer sends an array, one element per AddUpdateNote. Anything else is treated as a single note.
+			UpdateNote[] received;
+			if (notes.IsArray)
+			{
+				BsonArray array = notes.AsArray!;
+				received = new UpdateNote[array.Count];
+				for (int i = 0; i < received.Length; i++)
+				{
+					received[i] = new UpdateNote(array[i], sentServerMs, isOwn);
+				}
+			}
+			else
+			{
+				received = new[] { new UpdateNote(notes, sentServerMs, isOwn) };
+			}
+
 			IDistributedEntity? outerEntity = NotedEntity;
-			UpdateNote outerNote = NotedUpdate;
+			UpdateNote[] outerNotes = NotedUpdates;
 			NotedEntity = entity;
-			NotedUpdate = note;
+			NotedUpdates = received;
 			try
 			{
 				SetPropertyBytes(entity, updateData, false, seq);
 
-				try
+				foreach (UpdateNote note in received)
 				{
-					entity.OnUpdateNote(note);
-				}
-				catch (Exception e)
-				{
-					ImpunityLogger.LogError("Exception in OnUpdateNote: ", e);
+					try
+					{
+						entity.OnUpdateNote(note);
+					}
+					catch (Exception e)
+					{
+						ImpunityLogger.LogError("Exception in OnUpdateNote: ", e);
+					}
 				}
 			}
 			finally
 			{
 				NotedEntity = outerEntity;
-				NotedUpdate = outerNote;
+				NotedUpdates = outerNotes;
 			}
 		}
 	}

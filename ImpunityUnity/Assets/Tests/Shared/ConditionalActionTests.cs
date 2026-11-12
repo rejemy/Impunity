@@ -525,12 +525,12 @@ namespace Impunity.Tests
 			Assert.AreEqual(ImpunityErrorCode.ActionConditionNotMet, insertProbe.Code);
 		}
 
-		// ───────── Update (replicated actions) ─────────
+		// ───────── Update (conditional actions) ─────────
 
 		/// <summary>Potion: a client-authoritative player entity changes and the potion leaves the inventory, both
 		/// riding the ordinary per-frame update.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_ClientAuthoritativeUpdate_RunsActionWithIt()
+		public async Task UpdateAction_ClientAuthoritativeUpdate_RunsActionWithIt()
 		{
 			CreateServer();
 			var owner = await ConnectClient("potion_owner");
@@ -551,20 +551,20 @@ namespace Impunity.Tests
 
 			var drinkProbe = new CallbackProbe<bool>();
 			player.Health.Set(60);
-			player.AddReplicatedAction(new DeleteDocumentAction(ITEMS, "potion_1", drinkProbe.OnComplete));
+			player.AddConditionalAction(new DeleteDocumentAction(ITEMS, "potion_1", drinkProbe.OnComplete));
 
 			await PumpUntil(() => drinkProbe.Fired, AllConnections());
 
-			Assert.IsNull(drinkProbe.Error, "Replicated action failed: " + drinkProbe.Error?.Message);
+			Assert.IsNull(drinkProbe.Error, "Conditional action failed: " + drinkProbe.Error?.Message);
 			Assert.IsTrue(drinkProbe.Value, "The potion should have been removed from the inventory");
 			await PumpUntil(() => watched.Health.Get() == 60, AllConnections());
 			Assert.IsNull(await FindDoc(owner, "potion_1"));
 		}
 
-		/// <summary>Chest: an optimistic exclusive update puts the item in, and the item leaves the inventory only
+		/// <summary>Chest: an optimistic guarded update puts the item in, and the item leaves the inventory only
 		/// because the update was accepted. The update's callback fires before the action's.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_UpdateExclusiveAccepted_RunsAction()
+		public async Task UpdateAction_UpdateIfUnchangedAccepted_RunsAction()
 		{
 			var (conns, items, _) = await SetupWorldItem("chest_ok", 2);
 			await Pump(conns[0].InsertDocumentAsync(ITEMS, InventoryDoc("gem_a", "gem")), AllConnections());
@@ -575,13 +575,13 @@ namespace Impunity.Tests
 			var removeProbe = new CallbackProbe<bool>(log, "remove");
 
 			items[0].DisplayName.Set("gem");
-			items[0].UpdateExclusive(err => { updateDone = true; updateErr = err; log.Add("update"); },
+			items[0].UpdateIfUnchanged((err, _) => { updateDone = true; updateErr = err; log.Add("update"); },
 				new DeleteDocumentAction(ITEMS, "gem_a", removeProbe.OnComplete));
 
 			await PumpUntil(() => updateDone && removeProbe.Fired, AllConnections());
 
-			Assert.IsNull(updateErr, "Exclusive update failed: " + updateErr?.Message);
-			Assert.IsNull(removeProbe.Error, "Replicated action failed: " + removeProbe.Error?.Message);
+			Assert.IsNull(updateErr, "Guarded update failed: " + updateErr?.Message);
+			Assert.IsNull(removeProbe.Error, "Conditional action failed: " + removeProbe.Error?.Message);
 			Assert.IsTrue(removeProbe.Value);
 			CollectionAssert.AreEqual(new[] { "update", "remove" }, log);
 			await PumpUntil(() => items[1].DisplayName.Get() == "gem", AllConnections());
@@ -589,10 +589,10 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>Two players put different items in the same chest slot at once. The live thread accepts one
-		/// exclusive update and rejects the other as stale; only the winner's item leaves its inventory, so the loser
+		/// guarded update and rejects the other as stale; only the winner's item leaves its inventory, so the loser
 		/// keeps theirs rather than losing it.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_UpdateExclusiveRejected_SkipsAction()
+		public async Task UpdateAction_UpdateIfUnchangedRejected_SkipsAction()
 		{
 			var (conns, items, _) = await SetupWorldItem("chest_race", 2);
 			for (int i = 0; i < 2; i++)
@@ -601,7 +601,7 @@ namespace Impunity.Tests
 			}
 
 			var updateDone = new bool[2];
-			var updateErr = new ImpunityErrorResponse[2];
+			var updateResult = new GuardedResult[2];
 			var removes = new[] { new CallbackProbe<bool>(), new CallbackProbe<bool>() };
 
 			// Both sent before either client pumps.
@@ -609,17 +609,16 @@ namespace Impunity.Tests
 			{
 				int idx = i;
 				items[i].DisplayName.Set("gem_" + i);
-				items[i].UpdateExclusive(err => { updateDone[idx] = true; updateErr[idx] = err; },
+				items[i].UpdateIfUnchanged((err, result) => { Assert.IsNull(err); updateDone[idx] = true; updateResult[idx] = result; },
 					new DeleteDocumentAction(ITEMS, "gem_" + i, removes[i].OnComplete));
 			}
 
 			await PumpUntil(() => updateDone[0] && updateDone[1] && removes[0].Fired && removes[1].Fired, AllConnections());
 
-			int winner = updateErr[0] == null ? 0 : 1;
+			int winner = updateResult[0] == GuardedResult.Applied ? 0 : 1;
 			int loser = 1 - winner;
-			Assert.IsNull(updateErr[winner], "Neither exclusive update was accepted");
-			Assert.IsNotNull(updateErr[loser], "Both exclusive updates were accepted");
-			Assert.AreEqual(ImpunityErrorCode.ActionStaleData, updateErr[loser].ErrorCode);
+			Assert.AreEqual(GuardedResult.Applied, updateResult[winner], "Neither guarded update was accepted");
+			Assert.AreEqual(GuardedResult.Stale, updateResult[loser], "Both guarded updates were accepted");
 
 			Assert.IsNull(removes[winner].Error);
 			Assert.IsTrue(removes[winner].Value);
@@ -632,14 +631,14 @@ namespace Impunity.Tests
 		/// <summary>A plain update to an entity another client has locked is dropped by the server without a reply;
 		/// its action is skipped, and that skip is the one signal the client gets.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_PlainUpdateBlockedByLock_SkipsAction()
+		public async Task UpdateAction_PlainUpdateBlockedByLock_SkipsAction()
 		{
 			var (conns, items, _) = await SetupWorldItem("cond_upd_locked", 2);
 			Assert.IsTrue(await Pump(items[1].TryLockAsync(), AllConnections()), "Client 1 should take the lock");
 
 			var probe = new CallbackProbe<BsonValue>();
 			items[0].Health.Set(5);
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_blocked", "x"), probe.OnComplete));
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_blocked", "x"), probe.OnComplete));
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 
@@ -648,16 +647,16 @@ namespace Impunity.Tests
 		}
 
 		/// <summary>An action attached when nothing is dirty — here after a Set that was a no-op — rides an empty
-		/// update rather than waiting for an unrelated change. Same for an exclusive update with nothing to write.</summary>
+		/// update rather than waiting for an unrelated change. Same for a guarded update with nothing to write.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_NothingDirty_SendsEmptyUpdateCarryingAction()
+		public async Task UpdateAction_NothingDirty_SendsEmptyUpdateCarryingAction()
 		{
 			var (conns, items, _) = await SetupWorldItem("cond_upd_empty", 1);
 
 			var sweepProbe = new CallbackProbe<BsonValue>();
 			items[0].Health.Set(items[0].Health.Get());   // unchanged value: not dirty
 			Assert.AreEqual(0UL, items[0].DirtyBits, "Precondition: nothing should be dirty");
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_sweep", "x"), sweepProbe.OnComplete));
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_sweep", "x"), sweepProbe.OnComplete));
 
 			await PumpUntil(() => sweepProbe.Fired, AllConnections());
 			Assert.IsNull(sweepProbe.Error, "Action on the per-frame sweep failed: " + sweepProbe.Error?.Message);
@@ -665,12 +664,12 @@ namespace Impunity.Tests
 			bool exclusiveDone = false;
 			ImpunityErrorResponse exclusiveErr = null;
 			var exclusiveProbe = new CallbackProbe<BsonValue>();
-			items[0].UpdateExclusive(err => { exclusiveDone = true; exclusiveErr = err; },
+			items[0].UpdateIfUnchanged((err, _) => { exclusiveDone = true; exclusiveErr = err; },
 				new InsertDocumentAction(ITEMS, InventoryDoc("inv_excl", "x"), exclusiveProbe.OnComplete));
 
 			await PumpUntil(() => exclusiveDone && exclusiveProbe.Fired, AllConnections());
 			Assert.IsNull(exclusiveErr);
-			Assert.IsNull(exclusiveProbe.Error, "Action on an empty exclusive update failed: " + exclusiveProbe.Error?.Message);
+			Assert.IsNull(exclusiveProbe.Error, "Action on an empty guarded update failed: " + exclusiveProbe.Error?.Message);
 
 			Assert.IsNotNull(await FindDoc(conns[0], "inv_sweep"));
 			Assert.IsNotNull(await FindDoc(conns[0], "inv_excl"));
@@ -679,7 +678,7 @@ namespace Impunity.Tests
 		/// <summary>Several actions attached before one send travel as a single compound, and each still gets its own
 		/// callback with its own result — including one that fails without stopping the others.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_SeveralPending_EachCallbackGetsOwnResult()
+		public async Task UpdateAction_SeveralPending_EachCallbackGetsOwnResult()
 		{
 			var (conns, items, _) = await SetupWorldItem("cond_upd_multi", 1);
 			await Pump(conns[0].InsertDocumentAsync(ITEMS, InventoryDoc("dupe", "x")), AllConnections());
@@ -689,10 +688,10 @@ namespace Impunity.Tests
 			var remove = new CallbackProbe<bool>();
 
 			items[0].Health.Set(3);
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("multi_1", "a"), first.OnComplete));
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("dupe", "b"), duplicate.OnComplete));   // duplicate _id: fails
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("multi_3", "c")));                       // no callback
-			items[0].AddReplicatedAction(new DeleteDocumentAction(ITEMS, "dupe", remove.OnComplete));
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("multi_1", "a"), first.OnComplete));
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("dupe", "b"), duplicate.OnComplete));   // duplicate _id: fails
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("multi_3", "c")));                       // no callback
+			items[0].AddConditionalAction(new DeleteDocumentAction(ITEMS, "dupe", remove.OnComplete));
 
 			await PumpUntil(() => first.Fired && duplicate.Fired && remove.Fired, AllConnections());
 
@@ -712,7 +711,7 @@ namespace Impunity.Tests
 
 		/// <summary>An action attached inside a RunExclusive scope rides the flush sent just before the unlock.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_InsideRunExclusive_RidesUnlockFlush()
+		public async Task UpdateAction_InsideRunExclusive_RidesUnlockFlush()
 		{
 			var (conns, items, channel) = await SetupWorldItem("cond_upd_scope", 1);
 
@@ -720,7 +719,7 @@ namespace Impunity.Tests
 			var result = await Pump(items[0].RunExclusiveAsync(() =>
 			{
 				items[0].Health.Set(9);
-				items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_scope", "x"), probe.OnComplete));
+				items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_scope", "x"), probe.OnComplete));
 			}, 5f), AllConnections());
 
 			Assert.AreEqual(RunExclusiveResult.Ran, result);
@@ -732,13 +731,13 @@ namespace Impunity.Tests
 		/// <summary>An entity that goes away with an action still pending resolves that action locally, so its callback
 		/// never waits forever; the action is not sent.</summary>
 		[Test, Category("Conditional")]
-		public async Task Replicated_EntityRemovedWithActionPending_FailsLocally()
+		public async Task UpdateAction_EntityRemovedWithActionPending_FailsLocally()
 		{
 			var (conns, items, channel) = await SetupWorldItem("cond_upd_gone", 1);
 
 			var probe = new CallbackProbe<BsonValue>();
 			items[0].Health.Set(4);
-			items[0].AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_gone", "x"), probe.OnComplete));
+			items[0].AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_gone", "x"), probe.OnComplete));
 
 			// Immediate mode unregisters the channel's entities synchronously, before any Update() can send.
 			conns[0].EntityManager.UnsubscribeFromChannel(channel, null, immediate: true);
@@ -749,16 +748,16 @@ namespace Impunity.Tests
 		}
 
 		[Test, Category("Conditional")]
-		public async Task Replicated_InvalidAttachments_FailFast()
+		public async Task UpdateAction_InvalidAttachments_FailFast()
 		{
 			var (conns, items, _) = await SetupWorldItem("cond_upd_invalid", 1);
 
-			Assert.Throws<ArgumentNullException>(() => items[0].AddReplicatedAction(null));
-			Assert.Throws<ArgumentException>(() => items[0].AddReplicatedAction(new LockEntityAction(items[0].DistributedEntityId)),
+			Assert.Throws<ArgumentNullException>(() => items[0].AddConditionalAction(null));
+			Assert.Throws<ArgumentException>(() => items[0].AddConditionalAction(new LockEntityAction(items[0].DistributedEntityId)),
 				"A live action must be refused up front, before it can sink the update it rides");
 
 			var loose = new IntegrationTestEntity();   // never registered with a connection
-			Assert.Throws<InvalidOperationException>(() => loose.AddReplicatedAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_loose", "x"))));
+			Assert.Throws<InvalidOperationException>(() => loose.AddConditionalAction(new InsertDocumentAction(ITEMS, InventoryDoc("inv_loose", "x"))));
 
 			await PumpFor(TimeSpan.FromMilliseconds(50), AllConnections());
 			Assert.IsNull(await FindDoc(conns[0], "inv_loose"));
@@ -808,7 +807,7 @@ namespace Impunity.Tests
 
 			entity.Delete(null, (err, deleted) => Record("delete", err),
 				new InsertDocumentAction(ITEMS, InventoryDoc("inv_unsent_a", "x"), (err, id) => Record("delete-conditional", err)));
-			entity.UpdateExclusive(err => Record("update", err),
+			entity.UpdateIfUnchanged((err, _) => Record("update", err),
 				new InsertDocumentAction(ITEMS, InventoryDoc("inv_unsent_b", "x"), (err, id) => Record("update-conditional", err)));
 			entity.TryLock((err, locked) => Record("trylock", err));
 			entity.Unlock((err, unlocked) => Record("unlock", err));

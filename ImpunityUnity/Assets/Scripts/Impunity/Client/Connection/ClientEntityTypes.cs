@@ -243,65 +243,79 @@ namespace Impunity.Connection
 		/// <param name="echo">Whether the sending connection receives its own event.</param>
 		/// <param name="onComplete">Invoked once the server has accepted the request, or with a non-null error if it failed. May be null.</param>
 		void TriggerEvent(int eventType, BsonValue eventData, EntityEventEcho echo, ImpunityCallback? onComplete);
-		/// <summary>Immediately flushes this entity's pending dirty fields to the server as an exclusive (optimistic-concurrency)
+		/// <summary>Immediately flushes this entity's pending dirty fields to the server as a guarded (optimistic-concurrency)
 		/// update, instead of waiting for the per-frame dirty sweep. The server applies and relays the update only if this
 		/// client has seen the latest change to every field being written; otherwise the whole update is rejected (nothing
-		/// applied) and <paramref name="onComplete"/> receives an <see cref="ImpunityErrorCode.ActionStaleData"/> error — use
-		/// this to resolve races (e.g. two players picking the same berry: both write, only the winner's callback has no error).
-		/// Holding this entity's lock bypasses the check. On both success and rejection the winning field values are already
-		/// applied locally by the time the callback runs, so it is safe to read the entity's current values in the callback;
-		/// wait for the callback before issuing another exclusive update to the same field.</summary>
-		/// <param name="onComplete">Invoked with a null error on success, or a non-null error on rejection (stale data, or the
-		/// entity is locked by another client). Delivered on a later <c>Update()</c>, never reentrantly. May be null.</param>
-		/// <param name="onReplicatedAction">Optional database action to ride this update (shorthand for
-		/// <see cref="AddReplicatedAction"/> followed by the flush). It runs only if the update is accepted; on rejection it
+		/// applied) and <paramref name="onComplete"/> receives <see cref="GuardedResult.Stale"/> — use this to resolve
+		/// races (e.g. two players picking the same berry: both write, only the winner gets
+		/// <see cref="GuardedResult.Applied"/>). On both outcomes the winning field values are already applied locally by
+		/// the time the callback runs, so it is safe to read the entity's current values in the callback.</summary>
+		/// <remarks>
+		/// <para>This is the low-level primitive. Prefer <see cref="Transact"/> (with <c>maxAttempts: 1</c> when losing
+		/// means "don't"): it waits for this connection's own writes to the entity to be confirmed first. A bare
+		/// <c>UpdateIfUnchanged</c> does not, so a second one to the same field sent before the first one's callback is
+		/// stale against yourself.</para>
+		/// <para>Locks: holding this entity's lock bypasses the staleness check. If another connection holds it, the
+		/// update fails (<see cref="GuardedResult.Failed"/>, <see cref="ImpunityErrorCode.ActionBlockedByLock"/>); an
+		/// explicit lock always wins over an optimistic write and there is nothing to retry until it is released.</para>
+		/// </remarks>
+		/// <param name="onComplete">Receives <see cref="GuardedResult.Applied"/>, <see cref="GuardedResult.Stale"/>
+		/// (both with a null error), or <see cref="GuardedResult.Failed"/> with the error (locked by another connection,
+		/// entity gone, connection broken). Delivered on a later <c>Update()</c>, never reentrantly. May be null.</param>
+		/// <param name="onUpdatedAction">Optional database action to ride this update (shorthand for
+		/// <see cref="AddConditionalAction"/> followed by the flush). It runs only if the update is accepted; on rejection it
 		/// is skipped, so a retry must pass it again.</param>
-		void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null);
+		void UpdateIfUnchanged(ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onUpdatedAction = null);
 		/// <summary>
 		/// Attaches a database action that rides this entity's next update to the server, in the same message, and runs
 		/// only if the server applies that update — e.g. applying a potion's effect to the player entity and removing the
 		/// potion from the inventory, or putting an item in a chest and removing it from the inventory.
 		/// <para>
 		/// "Next update" is whichever send happens first: the per-frame sweep in <c>Update()</c>, an
-		/// <see cref="UpdateExclusive"/>, or the flush before an <see cref="Unlock"/>. Field changes made before that send
+		/// <see cref="UpdateIfUnchanged"/>, or the flush before an <see cref="Unlock"/>. Field changes made before that send
 		/// travel with the action. If no field is dirty (say the <c>Set</c> was a no-op) an empty update is sent just to
 		/// carry it. An update carrying an action is always sent reliably.
 		/// </para>
 		/// <para>
 		/// The action's own callback fires after the update is processed: with its own result, or with
 		/// <see cref="ImpunityErrorCode.ActionConditionNotMet"/> if it was not run — the update was rejected (stale
-		/// exclusive update, entity locked by another client, entity gone) or the entity was removed before it was sent.
+		/// guarded update, entity locked by another client, entity gone) or the entity was removed before it was sent.
 		/// Several actions attached before one send travel together and each still gets its own callback. Not a
 		/// transaction: a failed action does not undo the update. See docs/guides/DistributedEntities.md, "Conditional actions".
 		/// </para>
 		/// </summary>
 		/// <param name="action">A document action (insert, update, upsert, merge, delete, find, list) or a
 		/// <see cref="CompoundDatabaseAction"/>. Anything else throws <see cref="System.ArgumentException"/>.</param>
-		void AddReplicatedAction(GameStateActionBase action);
+		void AddConditionalAction(GameStateActionBase action);
 		/// <summary>
-		/// Attaches a note to this entity's next update: why it changed (who hit it, from which side, with what). The
-		/// note is relayed with that update to every subscriber, this client included on the echo, and is never stored;
-		/// a later subscriber sees the state, not the note. Receivers read it as <see cref="CurrentUpdateNote"/> from field
-		/// <c>OnChanged</c> handlers while the update is applied, and in <see cref="OnUpdateNote"/> afterwards.
+		/// Adds a note to this entity's next update: why it changed (who hit it, from which side, with what). The note is
+		/// relayed with that update to every subscriber, this client included on the echo, and is never stored; a later
+		/// subscriber sees the state, not the note. Receivers read the update's notes as <see cref="CurrentUpdateNotes"/>
+		/// from field <c>OnChanged</c> handlers while the update is applied, and get <see cref="OnUpdateNote"/> once per
+		/// note afterwards.
 		/// </summary>
 		/// <remarks>
-		/// <para>"Next update" is whichever send happens first, as for <see cref="AddReplicatedAction"/>: the per-frame
-		/// sweep, an <see cref="UpdateExclusive"/>, a transaction's update, or the flush before an <see cref="Unlock"/>.
+		/// <para>"Next update" is whichever send happens first, as for <see cref="AddConditionalAction"/>: the per-frame
+		/// sweep, an <see cref="UpdateIfUnchanged"/>, a transaction's update, or the flush before an <see cref="Unlock"/>.
 		/// Field changes made before that send travel with it; with none, an empty update is sent just to carry the note.
 		/// An update carrying a note is always sent reliably.</para>
-		/// <para>One note per update: setting another before the send replaces it. Put several causes in one document if
-		/// you need them. A rejected or dropped update (stale exclusive update, locked by another client) takes its note
-		/// with it.</para>
-		/// <para>On a client-authoritative entity the writer gets no echo, so it never sees its own note: present the
-		/// change locally, as for any client-authoritative <c>Set</c>.</para>
+		/// <para>Notes accumulate, like conditional actions: every note added before the send travels with it and is
+		/// delivered in the order added, so two systems noting the same entity in one frame never overwrite each other.
+		/// A note belongs to the update, not to a field: every field changed by that update sees all of its notes, so
+		/// make a note say what it is about (a <c>"kind"</c> key, say) and have handlers pick out their own.</para>
+		/// <para>A rejected or dropped update (stale guarded update, locked by another client) takes its notes with it.
+		/// On a client-authoritative entity the writer gets no echo, so it never sees its own notes: present the change
+		/// locally, as for any client-authoritative <c>Set</c>.</para>
 		/// <para>Does nothing on an entity that is not registered with a connection.</para>
 		/// </remarks>
-		/// <param name="note">The note; null (or BSON null) removes a pending one.</param>
-		void SetUpdateNote(BsonValue? note);
-		/// <summary>The note on the update being applied to this entity right now, or null: set only while a noted update
-		/// is applied (its fields' <c>OnChanged</c> handlers) and during <see cref="OnUpdateNote"/>. Never set for local
-		/// <c>Set</c>s, including on a client-authoritative entity.</summary>
-		UpdateNote? CurrentUpdateNote { get; }
+		/// <param name="note">The note. Must not be null or BSON null.</param>
+		/// <exception cref="System.ArgumentNullException"><paramref name="note"/> is null or BSON null.</exception>
+		void AddUpdateNote(BsonValue note);
+		/// <summary>The notes on the update being applied to this entity right now, in the order the writer added them;
+		/// empty otherwise. Non-empty only while a noted update is applied (its fields' <c>OnChanged</c> handlers) and
+		/// during <see cref="OnUpdateNote"/>. Always empty for local <c>Set</c>s, including on a client-authoritative
+		/// entity.</summary>
+		IReadOnlyList<UpdateNote> CurrentUpdateNotes { get; }
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
 		/// channel also removes all of its objects.</summary>
@@ -313,35 +327,72 @@ namespace Impunity.Connection
 		/// fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.</param>
 		void Delete(BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null);
 		/// <summary>Deletes this entity only if the fields the delete depends on are unchanged since this client last
-		/// received them: the optimistic, guarded form of <see cref="Delete"/>, as <see cref="UpdateExclusive"/> is of an
+		/// received them: the optimistic, guarded form of <see cref="Delete"/>, as <see cref="UpdateIfUnchanged"/> is of an
 		/// update. Kill a creature only if its health is still what you saw; take a stack only if its count hasn't moved.
 		/// </summary>
 		/// <remarks>
-		/// <para>Name the guarded fields with their <c>Mask</c> values, OR-ed together (<c>Health.Mask | Owner.Mask</c>).
+		/// <para>Name the guarded fields with their <c>Guard</c> properties, combined with <c>|</c> (<c>Health.Guard | Owner.Guard</c>).
 		/// Guard what the decision read, not every field: a wandering creature's position changes constantly, and guarding
-		/// it would make the delete fail for no reason. An empty mask throws; use <see cref="Delete"/> for an unguarded
+		/// it would make the delete fail for no reason. An empty guard throws; use <see cref="Delete"/> for an unguarded
 		/// delete.</para>
 		/// <para>If a guarded field changed first, nothing happens: <paramref name="onComplete"/> gets
-		/// <see cref="ImpunityErrorCode.ActionStaleData"/> and <paramref name="onDeletedAction"/> is skipped
+		/// <see cref="GuardedResult.Stale"/> and <paramref name="onDeletedAction"/> is skipped
 		/// (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>), exactly as for any delete that didn't happen. When it
-		/// fires, the winner's values are already applied locally. A lock holder bypasses the guard.</para>
+		/// fires, the winner's values are already applied locally.</para>
+		/// <para>Locks: a lock holder bypasses the guard. If another connection holds the lock the delete fails
+		/// (<see cref="GuardedResult.Failed"/>, <see cref="ImpunityErrorCode.ActionBlockedByLock"/>), as a guarded
+		/// update does; an explicit lock always wins over an optimistic write.</para>
 		/// <para>The guard is this client's last-received view, so this connection's own writes still awaiting their
 		/// echo count as changes it hasn't seen: guard a field you just wrote and the delete is stale against yourself.
-		/// <c>Transact</c> queues behind your own writes; a bare <c>DeleteExclusive</c> does not.</para>
+		/// <c>Transact</c> queues behind your own writes; a bare <c>DeleteIfUnchanged</c> does not, so prefer
+		/// <c>tx.Delete</c> inside a <see cref="Transact"/> unless you know nothing of yours is in flight.</para>
 		/// </remarks>
-		/// <param name="guardMask">The fields the delete depends on: OR of their <c>Mask</c> values. Must be non-empty and
+		/// <param name="guard">The fields the delete depends on: their <c>Guard</c>s combined with <c>|</c>. Must be non-empty and
 		/// name only this entity's distributed fields.</param>
 		/// <param name="deleteData">Optional BSON payload relayed to subscribers via <see cref="OnDeleted"/>.</param>
-		/// <param name="onComplete">Receives <c>true</c> if the entity was deleted, <c>false</c> if another client's lock
-		/// blocked it, or an error (<see cref="ImpunityErrorCode.ActionStaleData"/>, <see cref="ImpunityErrorCode.ActionNotFound"/>).
-		/// May be null.</param>
+		/// <param name="onComplete">Receives <see cref="GuardedResult.Applied"/> if the entity was deleted,
+		/// <see cref="GuardedResult.Stale"/> if a guarded field changed first (both with a null error), or
+		/// <see cref="GuardedResult.Failed"/> with the error (<see cref="ImpunityErrorCode.ActionBlockedByLock"/>,
+		/// <see cref="ImpunityErrorCode.ActionNotFound"/>, connection broken). May be null.</param>
 		/// <param name="onDeletedAction">Optional database action run by the server only if this request deleted the
 		/// entity; its callback fires after <paramref name="onComplete"/>. See <see cref="BaseGameConnection.DeleteEntity"/>.
 		/// If the entity has no connection, both callbacks fire immediately, in that order, with
 		/// <see cref="ImpunityErrorCode.ActionBadRequest"/>.</param>
-		/// <exception cref="System.ArgumentException">The mask is empty or names bits that are not this entity's fields.
+		/// <exception cref="System.ArgumentException">The guard is empty or names fields of a different entity.
 		/// Nothing was sent, and <paramref name="onDeletedAction"/> is still the caller's to resolve.</exception>
-		void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null);
+		void DeleteIfUnchanged(FieldGuard guard, BsonValue? deleteData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onDeletedAction = null);
+		/// <summary>Replaces this object with <paramref name="newObject"/> only if the fields the decision depends on are
+		/// unchanged since this client last received them: the guarded replace, as <see cref="DeleteIfUnchanged"/> is the
+		/// guarded delete. A hole becomes the crop planted in it, only if it is still an empty hole.</summary>
+		/// <remarks>
+		/// <para>The replacement is created in this object's channel under its unique name (given to
+		/// <paramref name="newObject"/> if it has none), and replaces exactly this entity or nothing. Subscribers see this
+		/// object's <see cref="OnDeleted"/>, carrying <paramref name="replaceData"/>, then the new object.</para>
+		/// <para>This is the low-level primitive, with the same caveat as <see cref="DeleteIfUnchanged"/>: this
+		/// connection's own writes still awaiting their echo count as changes it hasn't seen. Prefer
+		/// <c>tx.ReplaceWith</c> inside a <see cref="Transact"/>, which queues behind them and reruns on staleness.</para>
+		/// <para>Locks: a lock holder bypasses the guard; another connection's lock fails the replace
+		/// (<see cref="GuardedResult.Failed"/>, <see cref="ImpunityErrorCode.ActionBlockedByLock"/>).</para>
+		/// </remarks>
+		/// <param name="guard">The fields the replace depends on: their <c>Guard</c>s combined with <c>|</c>. Must be
+		/// non-empty and name only this entity's fields.</param>
+		/// <param name="newObject">The replacement. A unique name different from this object's is an error.</param>
+		/// <param name="replaceData">Optional BSON payload saying why, relayed to subscribers in this object's
+		/// <see cref="OnDeleted"/> (<see cref="EntityDeletion.Data"/>).</param>
+		/// <param name="onComplete">Receives <see cref="GuardedResult.Applied"/> once <paramref name="newObject"/> is
+		/// registered, <see cref="GuardedResult.Stale"/> if a guarded field changed first (both with a null error), or
+		/// <see cref="GuardedResult.Failed"/> with the error (<see cref="ImpunityErrorCode.ActionBlockedByLock"/>;
+		/// <see cref="ImpunityErrorCode.ActionNotFound"/> or <see cref="ImpunityErrorCode.ActionUniqueNameExists"/> when
+		/// the entity was already deleted or replaced; connection broken). May be null.</param>
+		/// <param name="onCreatedAction">Optional database action run by the server only if the replace goes through; its
+		/// callback fires after <paramref name="onComplete"/>. If the entity has no connection, both callbacks fire
+		/// immediately, in that order, with <see cref="ImpunityErrorCode.ActionBadRequest"/>.</param>
+		/// <exception cref="System.ArgumentException">The guard is empty or names fields of a different entity, or
+		/// <paramref name="newObject"/> has a different unique name. Nothing was sent, and
+		/// <paramref name="onCreatedAction"/> is still the caller's to resolve.</exception>
+		/// <exception cref="System.InvalidOperationException">This entity is not an object with a unique name in a
+		/// channel.</exception>
+		void ReplaceIfUnchanged<T>(FieldGuard guard, T newObject, BsonValue? replaceData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject;
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
 		/// updates and deletes are rejected by the server. Release with <see cref="Unlock"/>.</summary>
 		/// <param name="onComplete">Receives <c>true</c> if the lock was acquired (or this client already holds it),
@@ -383,46 +434,49 @@ namespace Impunity.Connection
 		/// immediately when the lock is held by someone else.</param>
 		void RunExclusive(Action body, ImpunityCallback<RunExclusiveResult>? onComplete, float timeoutSeconds = -1f);
 		/// <summary>
-		/// Runs a read-modify-write on this entity and commits it as an exclusive update (see
-		/// <see cref="UpdateExclusive"/>), running the body again if another client changed the written fields first.
-		/// The optimistic sibling of <see cref="RunExclusive"/>: no lock, so nobody waits, but the body may run more than
-		/// once and must have no side effects outside the entity.
+		/// Runs a read-modify-write on this entity and commits it as one guarded write, running the body again if
+		/// another client changed the fields it depends on first. This is the default way to make a contended change:
+		/// no lock, so nobody waits, and this connection's own earlier writes are always confirmed before the body runs.
 		/// </summary>
 		/// <remarks>
-		/// <para><paramref name="body"/> reads the entity's values, sets fields, and returns true to commit or false to
-		/// send nothing. It runs on the main thread when none of this connection's writes to the entity are awaiting a
-		/// reply, so <c>Get()</c> returns confirmed values, this connection's own writes included. If nothing is in
-		/// flight, the first run happens inside this call.</para>
-		/// <para>Changes already pending on the entity when a run is due (plain <c>Set</c>s not yet flushed) are sent
-		/// first as an ordinary update, and the body runs once that update's reply arrives. They are never discarded by a
-		/// decline, and never counted as the body's.</para>
-		/// <para>Commit: every field the body set, plus any replicated action it attached (see
-		/// <see cref="AddReplicatedAction"/>), is sent as one exclusive update. If the server rejects it as stale, the
-		/// winner's values are already applied locally; the body runs again against them and the result is sent again,
-		/// up to <paramref name="maxAttempts"/> runs in total. A rejected update skips its replicated actions, so a body
-		/// that attaches one must attach it on every run (it naturally does). A rerun waits until the rejected attempt's
-		/// replicated actions have reported (their callbacks have run), so state the application keeps for them, such
-		/// as a reserved inventory slot, is already released when the body runs again. The same holds for every
-		/// tracked write: the next body never runs between an update's reply and its actions' replies. A body that
-		/// sets nothing and attaches nothing commits without sending.</para>
-		/// <para>Decline (false), or a body that throws: nothing is sent. The fields the body set are discarded and its
-		/// replicated actions are resolved with <see cref="ImpunityErrorCode.ActionConditionNotMet"/>. Exception: on a
+		/// <para><b>Rules for the body.</b> It may run more than once, so it must have no side effects outside this
+		/// entity: no writes to other entities, no database calls, no sounds or UI. Read with <c>Get()</c>, write with
+		/// <c>Set</c>, return true to commit or false to send nothing. Database work that must happen with the commit
+		/// is attached with <c>tx.AddAction</c> (or passed to <c>tx.Delete</c> / <c>tx.ReplaceWith</c>),
+		/// created fresh on every run; everything else belongs in <paramref name="onComplete"/>. A transaction covers
+		/// exactly one entity. Calling <see cref="Delete"/>, <see cref="DeleteIfUnchanged"/> or
+		/// <see cref="UpdateIfUnchanged"/> on the entity from inside its own body throws (the transaction then reports
+		/// <see cref="TransactResult.Failed"/>): use the scope.</para>
+		/// <para><b>What gets guarded.</b> Every field the body set, plus any it names with <c>tx.DependsOn(fields)</c>
+		/// (fields it read but did not write). If any of them changed since this client last received it, the server
+		/// rejects the write, the winner's values are applied locally, and the body runs again against them, up to
+		/// <paramref name="maxAttempts"/> runs in total. Pass <c>maxAttempts: 1</c> for a one-shot claim where losing
+		/// means "don't" (the result is then <see cref="TransactResult.Conflict"/>).</para>
+		/// <para><b>Locks.</b> An explicit lock always wins. If another connection holds this entity's lock
+		/// (<see cref="TryLock"/>, <see cref="RunExclusive"/>), the transaction is not retried and does not wait: it
+		/// reports <see cref="TransactResult.Failed"/> with <see cref="ImpunityErrorCode.ActionBlockedByLock"/>. A lock
+		/// is held on purpose and possibly for a long time (a player rearranging an open chest), so treat this as
+		/// "busy", the same as any other write refused by the lock. If this connection holds the lock, the staleness
+		/// check is bypassed and the transaction commits on its first run.</para>
+		/// <para><b>Decline or throw.</b> Nothing is sent. The fields the body set are discarded and its replicated
+		/// actions are resolved with <see cref="ImpunityErrorCode.ActionConditionNotMet"/>. Exception: on a
 		/// client-authoritative entity <c>Set</c> has already applied locally and the server must hear about it, so the
 		/// fields are still sent by the next flush. On such entities decide before you set.</para>
-		/// <para>Transactions on the same entity from this connection run one at a time, in call order; each starts after
-		/// the previous one has resolved, so it sees that one's committed values. A plain <see cref="UpdateExclusive"/>
-		/// on the entity still awaiting its reply also holds the next body back. A plain <c>UpdateExclusive</c> issued
-		/// while a transaction is active is sent at once, as usual, and may make that transaction rerun.</para>
-		/// <para>The body's <see cref="TransactScope"/> widens what a transaction can write. <c>tx.DependsOn(mask)</c>
-		/// adds fields the body only read to the guard, so a change to them also makes the write stale.
-		/// <c>tx.Delete(guardMask, ...)</c> and <c>tx.ReplaceWith(guardMask, newObject, ...)</c> make the write a guarded
-		/// delete or replace of this entity (see <see cref="DeleteExclusive"/>) instead of an update: the mask is
-		/// required, rejection reruns the body the same way, and transactions queued behind a successful one fail
-		/// because the entity is gone. Such a body must not also set fields or attach replicated actions (the
-		/// transaction fails); a database action goes in the delete's or replace's own conditional argument, which the
-		/// transaction resolves as skipped if the write is never sent.</para>
-		/// <para>If the entity has no connection, <c>Set</c> applies locally, so the body runs at once and its return
-		/// value is the outcome; <paramref name="onComplete"/> then fires immediately. A delete or replace fails there.</para>
+		/// <para><b>Delete or replace.</b> <c>tx.Delete(guard, ...)</c> and <c>tx.ReplaceWith(guard, newObject, ...)</c>
+		/// make the write a guarded delete or replace of this entity instead of an update: the guard is required,
+		/// rejection reruns the body the same way, and transactions queued behind a successful one fail because the
+		/// entity is gone. Such a body must not also set fields, attach conditional actions or set a note (the
+		/// transaction fails).</para>
+		/// <para><b>Ordering.</b> Transactions on the same entity from this connection run one at a time, in call order.
+		/// A body runs only when none of this connection's writes to the entity are awaiting a reply (changes already
+		/// pending are flushed first, as an ordinary update, and are never discarded by a decline), so <c>Get()</c>
+		/// returns confirmed values, this connection's own included. A rerun also waits until the rejected attempt's
+		/// conditional actions have reported, so state the application keeps for them (a reserved inventory slot) is
+		/// already released. If nothing is in flight, the first run happens inside this call. A body that sets nothing
+		/// and attaches nothing commits without sending. See docs/guides/DistributedEntities.md, "Transactions", for
+		/// the full mechanism.</para>
+		/// <para><b>No connection.</b> <c>Set</c> applies locally, so the body runs at once and its return value is the
+		/// outcome; <paramref name="onComplete"/> then fires immediately. A delete or replace fails there.</para>
 		/// </remarks>
 		/// <param name="body">Reads and sets this entity's fields, or deletes or replaces it through the scope; returns
 		/// true to commit, false to send nothing.</param>
@@ -450,9 +504,9 @@ namespace Impunity.Connection
 		/// <summary>Raised by <see cref="OnEventTriggered"/> when an event is received for this entity.</summary>
 		event Action<EntityEvent>? OnEventTriggeredEvent;
 
-		/// <summary>Called after an update carrying a note (see <see cref="SetUpdateNote"/>) has been applied to this
-		/// entity, its fields' <c>OnChanged</c> handlers included. Also called for a note on an update that changed no
-		/// field. <see cref="CurrentUpdateNote"/> is still set.</summary>
+		/// <summary>Called once per note (see <see cref="AddUpdateNote"/>), in the order added, after the update carrying
+		/// it has been applied to this entity, its fields' <c>OnChanged</c> handlers included. Also called for a note on
+		/// an update that changed no field. <see cref="CurrentUpdateNotes"/> still holds all of the update's notes.</summary>
 		/// <param name="note">The note, its send time, and whether this connection sent it.</param>
 		void OnUpdateNote(UpdateNote note);
 		/// <summary>Raised by <see cref="OnUpdateNote"/>.</summary>
@@ -461,10 +515,11 @@ namespace Impunity.Connection
 		// When an object is specifically deleted
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
-		/// <param name="deleteData">Optional BSON payload supplied to <see cref="Delete"/> by the deleter, or null.</param>
-		void OnDeleted(BsonValue? deleteData);
+		/// <param name="deletion">The deleter's cause payload (<c>deleteData</c> / <c>replaceData</c>), when it was sent, and whether this
+		/// connection did it.</param>
+		void OnDeleted(EntityDeletion deletion);
 		/// <summary>Raised by <see cref="OnDeleted"/> when the entity is deleted.</summary>
-		event Action<BsonValue?>? OnDeletedEvent;
+		event Action<EntityDeletion>? OnDeletedEvent;
 
 		/// <summary>Called when the entity becomes locked on the server, by any client. <see cref="IsLocked"/> is set
 		/// true before this fires.</summary>
@@ -663,38 +718,43 @@ namespace Impunity.Connection
 		}
 
 		/// <inheritdoc/>
-		public void UpdateExclusive(ImpunityCallback onComplete, GameStateActionBase? onReplicatedAction = null)
+		public void UpdateIfUnchanged(ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onUpdatedAction = null)
 		{
 			if (Manager == null)
 			{
 				// No manager means the entity was never registered with a connection; there is no queue to defer through.
-				onComplete?.Invoke(NotRegisteredError());
-				onReplicatedAction?.FailLocally(NotRegisteredError());
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
+				onUpdatedAction?.FailLocally(NotRegisteredError());
 				return;
 			}
 
-			Manager.SendEntityUpdatesExclusive(this, onComplete, onReplicatedAction);
+			Manager.SendEntityUpdatesIfUnchanged(this, onComplete, onUpdatedAction);
 		}
 
 		/// <inheritdoc/>
-		public void AddReplicatedAction(GameStateActionBase action)
+		public void AddConditionalAction(GameStateActionBase action)
 		{
 			if (Manager == null)
 			{
 				throw new InvalidOperationException("Entity is not registered with a connection");
 			}
 
-			Manager.AddReplicatedAction(this, action);
+			Manager.AddConditionalAction(this, action);
 		}
 
 		/// <inheritdoc/>
-		public void SetUpdateNote(BsonValue? note)
+		public void AddUpdateNote(BsonValue note)
 		{
-			Manager?.SetUpdateNote(this, note);
+			if (note == null || note.IsNull)
+			{
+				throw new ArgumentNullException(nameof(note), "An update note needs a payload");
+			}
+
+			Manager?.AddUpdateNote(this, note);
 		}
 
 		/// <inheritdoc/>
-		public UpdateNote? CurrentUpdateNote => Manager?.GetCurrentUpdateNote(this);
+		public IReadOnlyList<UpdateNote> CurrentUpdateNotes => Manager?.GetCurrentUpdateNotes(this) ?? Array.Empty<UpdateNote>();
 
 		/// <summary>Requests that the server delete this entity. On success the entity is removed and all subscribers
 		/// (including this client) receive <see cref="OnDeleted"/> followed by <see cref="OnUndistributed"/>. Deleting a
@@ -717,22 +777,37 @@ namespace Impunity.Connection
 				return;
 			}
 
+			Manager!.ThrowIfInTransactBody(this, nameof(Delete));
 			connection.DeleteEntity(DistributedEntityId, deleteData, onComplete, onDeletedAction);
 		}
 
-		/// <summary>Deletes this entity only if the fields in <paramref name="guardMask"/> are unchanged since this client
-		/// last received them. See <see cref="IDistributedEntity.DeleteExclusive"/>.</summary>
-		public void DeleteExclusive(ulong guardMask, BsonValue deleteData, ImpunityCallback<bool> onComplete, GameStateActionBase? onDeletedAction = null)
+		/// <summary>Deletes this entity only if the fields in <paramref name="guard"/> are unchanged since this client
+		/// last received them. See <see cref="IDistributedEntity.DeleteIfUnchanged"/>.</summary>
+		public void DeleteIfUnchanged(FieldGuard guard, BsonValue? deleteData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onDeletedAction = null)
 		{
 			ClientEntityManager? manager = Manager;
 			if (manager == null || manager.Connection == null)
 			{
-				onComplete?.Invoke(NotRegisteredError(), false);
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
 				onDeletedAction?.FailLocally(NotRegisteredError());
 				return;
 			}
 
-			manager.DeleteEntityExclusive(this, guardMask, deleteData, onComplete, onDeletedAction);
+			manager.DeleteEntityIfUnchanged(this, guard, deleteData, onComplete, onDeletedAction);
+		}
+
+		/// <inheritdoc/>
+		public void ReplaceIfUnchanged<T>(FieldGuard guard, T newObject, BsonValue? replaceData, ImpunityCallback<GuardedResult>? onComplete, GameStateActionBase? onCreatedAction = null) where T : class, IDistributedObject
+		{
+			ClientEntityManager? manager = Manager;
+			if (manager == null || manager.Connection == null)
+			{
+				onComplete?.Invoke(NotRegisteredError(), GuardedResult.Failed);
+				onCreatedAction?.FailLocally(NotRegisteredError());
+				return;
+			}
+
+			manager.ReplaceEntityIfUnchanged(this, guard, newObject, replaceData, onComplete, onCreatedAction);
 		}
 
 		/// <summary>Attempts to acquire the server-side exclusive lock on this entity. While locked, other clients'
@@ -888,13 +963,14 @@ namespace Impunity.Connection
 
 		/// <summary>Called when this entity has been deleted on the server. Always followed by
 		/// <see cref="OnUndistributed"/>. (Objects of a deleted channel instead receive only <see cref="OnUndistributed"/>.)</summary>
-		/// <param name="deleteData">Optional BSON payload supplied to <see cref="Delete"/> by the deleter, or null.</param>
-		public virtual void OnDeleted(BsonValue? deleteData)
+		/// <param name="deletion">The deleter's cause payload (<c>deleteData</c> / <c>replaceData</c>), when it was sent, and whether this
+		/// connection did it.</param>
+		public virtual void OnDeleted(EntityDeletion deletion)
 		{
-			OnDeletedEvent?.Invoke(deleteData);
+			OnDeletedEvent?.Invoke(deletion);
 		}
 		/// <summary>Raised by <see cref="OnDeleted"/> when the entity is deleted.</summary>
-		public event Action<BsonValue?>? OnDeletedEvent;
+		public event Action<EntityDeletion>? OnDeletedEvent;
 
 		/// <summary>Called when the entity stops being replicated to this client and its local reference is released by
 		/// the manager. Fires when the client unsubscribes from the channel, when the channel is deleted, or after the

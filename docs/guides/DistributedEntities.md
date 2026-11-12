@@ -22,7 +22,7 @@ This document covers the essentials. It assumes you already have a working `Game
 10. [Locks](#10-locks)
 11. [Conditional actions](#11-conditional-actions) — moving items between the world (create, delete, update) and the database without duplicates
 12. [Events](#12-events) — one-shot signals, and notes that say why an update happened
-13. [Niche topics](#13-niche-topics) — exclusive updates, transactions, temporal fields, local-only setters, unguaranteed sends
+13. [Niche topics](#13-niche-topics) — guarded updates, transactions, temporal fields, local-only setters, unguaranteed sends
 14. [Quick reference](#14-quick-reference)
 15. [Known caveats](#15-known-caveats)
 
@@ -373,7 +373,7 @@ Key points:
 - **Sequence numbers guard against staleness.** Each entity has an outgoing `SendSeq`; the server tracks a per-field received-sequence, plus which connection sent it, and ignores out-of-order updates from that same connection (each client numbers its updates with its own counter, so seqs from different writers are never compared — between writers, arrival order is the order; a connection's entry is forgotten when it re-subscribes, since its new entity objects restart at zero); the server stamps relays with an `OutSeq`; each client tracks a per-field `FieldRecvSeq` and ignores stale inbound updates. This matters because updates can be sent unguaranteed (best-effort) and arrive out of order — see [§13](#13-niche-topics).
 - **Guaranteed vs. unguaranteed.** `Set` flags the update **guaranteed** (reliable delivery). `SetUnguaranteed` flags it best-effort. If any dirty field on an entity in a frame is guaranteed, that frame's update for the entity is sent reliably.
 - **The writer's echo is what updates its own `Get()`** for non-authoritative entities. For client-authoritative entities the server deliberately does *not* echo to the writer (it already applied locally), avoiding a redundant round trip.
-- **`UpdateExclusive` short-circuits the batch and adds an optimistic-concurrency guard.** It flushes one entity's dirty fields immediately (not on the next `SendUpdates()`) and carries the client's known per-field seqs; the server applies and relays the update only if the client has seen the latest change to every written field, else it rejects the whole update (`ActionStaleData`) with nothing applied. See [§13](#13-niche-topics).
+- **`UpdateIfUnchanged` short-circuits the batch and adds an optimistic-concurrency guard.** It flushes one entity's dirty fields immediately (not on the next `SendUpdates()`) and carries the client's known per-field seqs; the server applies and relays the update only if the client has seen the latest change to every written field, else it rejects the whole update with nothing applied (`GuardedResult.Stale`). See [§13](#13-niche-topics).
 
 Everything inbound — creates, updates, events, locks, deletes — is dispatched on the thread that calls `connection.Update()` (the main/Unity thread), so your callbacks run where you can safely touch game state and UI.
 
@@ -406,7 +406,7 @@ Every entity (override the method, or subscribe to the paired `…Event`) receiv
 | `OnObjectRemoved(obj)` *(channels)* | An object leaves the channel. *(See [§15](#15-known-caveats).)* |
 | `OnEventTriggered(e)` | A one-shot [event](#12-events) is fired on the entity (`EntityEvent`: type, data, send time). |
 | `OnLocked` / `OnUnlocked` | The entity's [lock](#10-locks) is taken / released (by anyone). |
-| `OnDeleted(deleteData)` | The entity is deleted on the server. Always followed by `OnUndistributed`. |
+| `OnDeleted(deletion)` | The entity is deleted (or replaced) on the server. `EntityDeletion`: the deleter's cause `Data`, `SentServerMs`, `IsOwn`. Always followed by `OnUndistributed`. |
 | `OnUndistributed` | The entity stops being replicated to you — you unsubscribed, the channel was deleted, or the entity was deleted. Release any references here. |
 
 ### Unsubscribing
@@ -437,7 +437,7 @@ connection.EntityManager.CreateObject(player, zone, replace: false, (err, create
 ```
 
 - **Initial state.** A create carries the instance's **full** field state, not just its dirty fields: whatever you `Set` on the instance before `CreateObject`/`CreateChannel` (or the `createIfNeeded` instance of `SubscribeToChannel`), plus anything it already held. Fields still at their default (and collections never initialized) are left out, since the receiver's default says the same. This is what makes an instance reusable across a delete: an object deleted from one channel and created again in another (e.g. a character moving between areas) arrives complete, although its first create already flushed its dirty state.
-- **`UniqueName`.** An object may have a `UniqueName` that is unique within its channel (it may not contain `/`). `replace: true` replaces an existing same-named object (the old one's delete reaches every subscriber, the creator included). A **conditional replace** passes `replaceEntityId` (the trailing parameter of `CreateObject`): the create replaces exactly that entity or nothing — `ActionNotFound` when nothing holds the name any more, `ActionUniqueNameExists` when another entity does — and its conditional action is skipped on failure. Of two clients replacing the same entity, only the first succeeds; e.g. a hole becoming the crop planted in it, with the seed spent as the conditional. A **guarded replace** adds `replaceGuard`, so the replace also fails (`ActionStaleData`) if fields of the replaced entity changed since this client saw them (see [Guarded delete and replace](#guarded-delete-and-replace-deleteexclusive-replaceguard)). For persisted objects the unique name doubles as the database key (a GUID is generated if you leave it null).
+- **`UniqueName`.** An object may have a `UniqueName` that is unique within its channel (it may not contain `/`). `replace: true` replaces an existing same-named object (the old one's delete reaches every subscriber, the creator included). A **conditional replace** passes `replaceEntityId` (the trailing parameter of `CreateObject`): the create replaces exactly that entity or nothing — `ActionNotFound` when nothing holds the name any more, `ActionUniqueNameExists` when another entity does — and its conditional action is skipped on failure. Of two clients replacing the same entity, only the first succeeds; e.g. a hole becoming the crop planted in it, with the seed spent as the conditional. A **guarded replace** adds `replaceGuard`, so the replace also fails (`ActionStaleData`) if fields of the replaced entity changed since this client saw them (see [Guarded delete and replace](#guarded-delete-and-replace-deleteifunchanged-replaceifunchanged)). For persisted objects the unique name doubles as the database key (a GUID is generated if you leave it null).
 - **Channels can be created pre-populated** by passing `channelObjects` to `CreateChannel`.
 - **The creating client gets the same creation callbacks as everyone else.** When `CreateObject` succeeds, the creator raises `OnDistributedObjectCreated`, the channel's `OnObjectAdded(obj, newlyCreated: true)`, and the object's `OnFullyInitialized` — the same notifications a subscriber receives for a replicated object — *before* your `onComplete` fires. (The server does not echo the create back to its originator; the client raises these locally to close that gap, so the object also lands in the channel's object collection.) Your seeded field values are kept as-is rather than re-applied from the wire, so they are already readable in these callbacks. This means an object you create is delivered through both `onComplete` **and** `OnObjectAdded`/`OnDistributedObjectCreated`; if a handler must not double-process your own creations, use `onComplete` for the creator-specific path and treat the shared callbacks as idempotent.
 
@@ -548,7 +548,9 @@ entity.Unlock((err, released) => { });
 
 Client-authoritative objects are simply locked to their creator from the moment they are created.
 
-A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `UpdateExclusive` ([§13](#13-niche-topics)) handles that case optimistically: everyone just writes, and the server lets exactly one win. (A lock holder's `UpdateExclusive` bypasses the staleness check — the lock is the stronger guarantee.) When the write is a read-modify-write that should be retried rather than dropped on a conflict — add to a counter, take one from a stack — use `Transact` ([§13](#transactions-transact)), which reruns your logic against the winner's values; keep `RunExclusive` for when the logic can't be run twice or must span frames.
+A lock is the right tool when a client needs *exclusive* access across several operations or some time. For the common case of a one-shot contended write — two players grabbing the same item, flipping the same switch — an explicit lock/unlock round trip is heavy boilerplate for a contention that is rare in practice. `Transact` ([§13](#transactions-transact)) handles that case optimistically: everyone just writes, the server lets exactly one win, and the losers' logic reruns against the winner's values (or, with `maxAttempts: 1`, simply reports that it lost). Keep `RunExclusive` for when the logic can't be run twice, must span frames, or should hold the entity for a while.
+
+Locks and optimistic writes don't negotiate: while you hold a lock, everyone else's `Transact`, `UpdateIfUnchanged` and `DeleteIfUnchanged` on that entity fail with `ActionBlockedByLock` instead of waiting or retrying, and your own bypass the staleness check (the lock is the stronger guarantee). See [Optimistic writes and locks](#optimistic-writes-and-locks).
 
 ### `RunExclusive` — the scoped form
 
@@ -617,26 +619,26 @@ manager.CreateObject(dropped, zone, false,
 
 The raw connection methods take the same parameter: `connection.CreateObject(…, onComplete, onCreatedAction)` and `connection.DeleteEntity(…, onComplete, onDeletedAction)`, as do the `…Async` and `…Yield` wrappers.
 
-### Updates: replicated actions
+### On updates: `AddConditionalAction`
 
-For an entity whose *fields* change — a potion's effect on the player, an item going into a chest — attach the action to the entity with `AddReplicatedAction`. It rides the entity's next update:
+For an entity whose *fields* change — a potion's effect on the player, an item going into a chest — attach the action to the entity with `AddConditionalAction`. It rides the entity's next update:
 
 ```csharp
 // Potion: the effect lands on my (client-authoritative) player, and the potion leaves my inventory with it.
 player.Health.Set(player.Health.Get() + 50);
-player.AddReplicatedAction(inventory.MakeDeleteAction(potion.Id, (err, removed) => { }));
+player.AddConditionalAction(inventory.MakeDeleteAction(potion.Id, (err, removed) => { }));
 
-// Chest: put the item in with an optimistic exclusive update; it leaves my inventory only if the update is accepted.
+// Chest: put the item in with an optimistic guarded update; it leaves my inventory only if the update is accepted.
 chest.Contents.Add(item.Kind);
-chest.UpdateExclusive(err => { /* ActionStaleData: someone else changed the chest; retry */ },
+chest.UpdateIfUnchanged((err, result) => { /* GuardedResult.Stale: someone else changed the chest; decide again */ },
     inventory.MakeDeleteAction(item.Id, (err, removed) => { }));
 ```
 
-- **"Next update" is whichever send comes first:** the per-frame sweep in `Update()`, an `UpdateExclusive`, or the flush before `Unlock` (so an action attached inside `RunExclusive` rides the update sent under the lock). The field changes pending at that moment travel with it. `UpdateExclusive(onComplete, action)` is shorthand for attaching and flushing in one call.
+- **"Next update" is whichever send comes first:** the per-frame sweep in `Update()`, an `UpdateIfUnchanged`, or the flush before `Unlock` (so an action attached inside `RunExclusive` rides the update sent under the lock). The field changes pending at that moment travel with it. `UpdateIfUnchanged(onComplete, action)` is shorthand for attaching and flushing in one call.
 - **Nothing needs to be dirty.** If no field changed (a `Set` to the same value is a no-op), an empty update is sent just to carry the action. It still gets the server's verdict: a foreign lock rejects it.
 - **Always reliable.** An update carrying an action is sent over TCP, even if its only dirty fields were written with `SetUnguaranteed`.
 - **Several actions attached before one send** travel together as a single `CompoundDatabaseAction`, and each action's own callback still fires with its own result. They all run even if one fails.
-- **A rejected update skips its actions.** That covers a stale `UpdateExclusive`, an entity locked by another client, and an entity that is gone. The skip is reported as `ActionConditionNotMet`. The actions are used up, so **a retry must attach them again** (passing the action to `UpdateExclusive` makes a retry loop do that naturally). For a plain update, which has no callback of its own, the skip is the only sign that the server dropped it.
+- **A rejected update skips its actions.** That covers a stale `UpdateIfUnchanged`, an entity locked by another client, and an entity that is gone. The skip is reported as `ActionConditionNotMet`. The actions are used up, so **a retry must attach them again** (passing the action to `UpdateIfUnchanged` makes a retry loop do that naturally). For a plain update, which has no callback of its own, the skip is the only sign that the server dropped it.
 - **The entity going away** (deleted, unsubscribed) before its next update is sent fails its pending actions locally with `ActionConditionNotMet`; they are never sent.
 - **Entities owned by another client.** You can't update another player's client-authoritative entity — an NPC they control, say. Their lock refuses the update, so the action is skipped: safe, but it won't happen.
 
@@ -675,7 +677,7 @@ The conditional is an ordinary action with its own callback, and it gets its own
 
 - **The entity operation's callback always fires first**, then the conditional's. With `manager.CreateObject`, the new object is already registered by the time the conditional's callback runs. This holds for local (in-process) connections as well as remote ones, and also when both requests time out.
 - **A skipped conditional still gets a callback.** If the entity operation did not succeed, the conditional is not run and its callback receives `ActionConditionNotMet`. Every conditional callback fires exactly once.
-- **A request that never leaves the client still resolves its conditional.** On an entity with no manager or connection, `Delete`, `UpdateExclusive` and the other entity methods fire their own callback immediately with `ActionBadRequest`, then the conditional's. On a remote connection that has been disposed, both fail with `ClientConnectionBrokenError` on the next `Update()`. Methods that *throw* are the exception: `manager.CreateObject` throws on misuse (no connection, a bad unique name, inconsistent flags), and `AddReplicatedAction` throws on an invalid action. A method that throws never took the action, so it is not resolved, and the caller still owns it.
+- **A request that never leaves the client still resolves its conditional.** On an entity with no manager or connection, `Delete`, `UpdateIfUnchanged` and the other entity methods fire their own callback immediately with `ActionBadRequest`, then the conditional's. On a remote connection that has been disposed, both fail with `ClientConnectionBrokenError` on the next `Update()`. Methods that *throw* are the exception: `manager.CreateObject` throws on misuse (no connection, a bad unique name, inconsistent flags), and `AddConditionalAction` throws on an invalid action. A method that throws never took the action, so it is not resolved, and the caller still owns it.
 - **A conditional without a callback still runs.** If it fails, the server logs a warning.
 - **A `TimeoutError` on the conditional does not mean it didn't run.** It can just mean the database queue was slow.
 
@@ -736,7 +738,7 @@ var empty = inventory.MakeMergeIntoAction(new BsonDocument { ["_id"] = playerId 
 
 For several actions, wrap them in a `CompoundDatabaseAction`. It is not atomic: it runs every sub-action even if an earlier one fails, and a delete that finds nothing returns `false` rather than an error.
 
-Anything else (live actions, migration actions) is rejected: the whole request fails with `ActionBadRequest`, and the entity operation is not performed. `AddReplicatedAction` refuses such an action up front instead, throwing `ArgumentException`, because the plain update it would ride has no callback to report the rejection, and its field changes would be dropped silently.
+Anything else (live actions, migration actions) is rejected: the whole request fails with `ActionBadRequest`, and the entity operation is not performed. `AddConditionalAction` refuses such an action up front instead, throwing `ArgumentException`, because the plain update it would ride has no callback to report the rejection, and its field changes would be dropped silently.
 
 ### What it does not guarantee
 
@@ -769,13 +771,13 @@ entity.TriggerEvent(1, data, EntityEventEcho.ExcludeSender, onComplete);
 // receive (override or subscribe to OnEventTriggeredEvent)
 public override void OnEventTriggered(EntityEvent e)
 {
-    // e.Type, e.Data, and e.SentServerMs: when the sender fired it, in server time
+    // e.Type, e.Data, e.SentServerMs (when the sender fired it, in server time), e.IsOwn (this connection fired it)
     long lateMs = Manager.Connection.GetServerTime() - e.SentServerMs;
 }
 ```
 
-- **`EntityEventEcho.ExcludeSender`** leaves out the sending *connection* (the server already knows it), so a client that presents its own events immediately has no echo to recognize and skip. Every other subscriber, on any transport, still gets it.
-- **`SentServerMs`** is stamped by the sender (`GetServerTime()` at the send), so receivers can tell how late an event arrived, e.g. to start a timed effect that far in. An event from a sender that didn't stamp one (an older client) carries the server's clock at relay time.
+- **Your own events.** By default the sender gets its event back with `IsOwn` set, the cue to skip presentation it already played. **`EntityEventEcho.ExcludeSender`** leaves the sending *connection* out altogether (the server already knows it), saving the round trip when the sender never needs the echo. Every other subscriber, on any transport, still gets it.
+- **`SentServerMs`** is stamped by the sender (`GetServerTime()` at the send), so receivers can tell how late an event arrived, e.g. to start a timed effect that far in.
 - Events are guaranteed (reliable, ordered per connection) like guaranteed field updates, but they're sent at once, while field changes wait for the next update sweep. So an event fired right after a `Set` can arrive before the new value does. Put everything the receiver needs in the payload.
 - Late subscribers never see past events: anything that must be seen later belongs in a field.
 
@@ -786,9 +788,9 @@ Use events for transient signals — a hit, a sound cue, a one-off notification 
 When an action changes state, the state change should be the message. An event sent next to an update arrives separately from it (often first), so a receiver ends up guessing which change an event explains, or the sender has to predict the outcome. A note travels *on* the update instead: receivers get the old value, the new value and the cause together.
 
 ```csharp
-// send: rides the entity's next update (the per-frame sweep, UpdateExclusive, a transaction, the flush before Unlock)
+// send: rides the entity's next update (the per-frame sweep, UpdateIfUnchanged, a transaction, the flush before Unlock)
 tree.Damage.Set(tree.Damage.Get() + hit);
-tree.SetUpdateNote(new BsonDocument { ["hit"] = hit, ["side"] = "left" });
+tree.AddUpdateNote(new BsonDocument { ["kind"] = "hit", ["hit"] = hit, ["side"] = "left" });
 
 // inside a transaction
 tree.Transact(tx => { tree.Damage.Set(tree.Damage.Get() + hit); tx.Note(cause); return true; }, onComplete);
@@ -796,77 +798,102 @@ tree.Transact(tx => { tree.Damage.Set(tree.Damage.Get() + hit); tx.Note(cause); 
 // receive: from a field handler while the update is applied...
 tree.Damage.OnChanged += (from, to) =>
 {
-    UpdateNote? note = tree.CurrentUpdateNote;   // null for un-noted updates and local Sets
-    if (note is UpdateNote n && !n.IsOwn)
-        PlayHit(from, to, n.Data["side"].AsString);
+    foreach (UpdateNote n in tree.CurrentUpdateNotes)   // empty for un-noted updates and local Sets
+        if (!n.IsOwn && n.Data["kind"] == "hit")
+            PlayHit(from, to, n.Data["side"].AsString);
 };
 // ...or once it has been applied (override OnUpdateNote, or subscribe to OnUpdateNoteEvent)
 public override void OnUpdateNote(UpdateNote note) { /* note.Data, note.SentServerMs, note.IsOwn */ }
 ```
 
 - **Who gets it.** Every subscriber, with the update. The writer gets it too, on the echo of its own write, with `IsOwn` set, which is usually the cue to skip presentation it already played. On a client-authoritative entity the writer gets no echo and never sees its own note; it presents locally, as for any of its `Set`s.
-- **When it's readable.** `CurrentUpdateNote` is set only while a noted update is being applied (every field's `OnChanged`) and during `OnUpdateNote`, which runs after the fields. A note on an update that changed no field (a miss) still arrives, on an empty update, and is seen in `OnUpdateNote` only.
-- **One note per update.** Setting another before the send replaces it; null clears a pending one. If one frame's update has several causes, put them in one document.
-- **Never stored.** Not persisted, not replayed: a later subscriber sees the state, not the note. A rejected or dropped update (stale `UpdateExclusive`, entity locked by another client) takes its note with it; in a transaction only the committed attempt's note goes out, and a declined body's note is dropped.
+- **When it's readable.** `CurrentUpdateNotes` is non-empty only while a noted update is being applied (every field's `OnChanged`) and during `OnUpdateNote`, which runs after the fields, once per note. A note on an update that changed no field (a miss) still arrives, on an empty update, and is seen in `OnUpdateNote` only.
+- **Notes accumulate, and belong to the update.** Every note added before the send rides the same update and is delivered in the order added, so two systems noting one entity in the same frame never overwrite each other. But a note is not tied to a field: every field that update changed sees all of its notes, including ones about something else (a position change swept up with a hit). Give notes a `kind` and have each handler pick out its own. A null note throws.
+- **Never stored.** Not persisted, not replayed: a later subscriber sees the state, not the note. A rejected or dropped update (stale `UpdateIfUnchanged`, entity locked by another client) takes its note with it; in a transaction only the committed attempt's note goes out, and a declined body's note is dropped.
 - **`SentServerMs`** is the writer's server-time stamp at the send, as for events.
 - **Who sent it** is reported only as "this connection or not". If presentation needs to know which player, put that in the note. It is the sender's own claim, which is fine for presentation.
 - A note forces a reliable send. It costs one extra encode on the server (the writer's copy is marked as its own; everyone else shares one).
-- **Not for deletes.** A transaction that deletes or replaces can't also set a note (it fails); a delete carries its cause as `deleteData`.
+- **Not for deletes.** A transaction that deletes or replaces can't also set a note (it fails). A delete carries its cause as `deleteData` and a replace as `replaceData`; both arrive in the removed entity's `OnDeleted` (below).
+
+### One shape for every cause
+
+Events, update notes and deletions all tell receivers the same three things, under the same names:
+
+| Received as | Sent with | `Data` | `SentServerMs` | `IsOwn` |
+|---|---|---|---|---|
+| `EntityEvent` in `OnEventTriggered` | `TriggerEvent(type, data)` | the event payload (plus `Type`) | sender's stamp | this connection fired it |
+| `UpdateNote` in `OnUpdateNote` / `CurrentUpdateNotes` | `AddUpdateNote(note)`, `tx.Note(note)` | the note | writer's stamp | this connection wrote the update |
+| `EntityDeletion` in `OnDeleted` | `Delete(deleteData)`, `DeleteIfUnchanged`, `tx.Delete`; `replaceData` on `ReplaceIfUnchanged` / `tx.ReplaceWith` / `CreateObject` | the cause, or null | deleter's stamp | this connection's request removed it |
+
+```csharp
+public override void OnDeleted(EntityDeletion deletion)
+{
+    if (!deletion.IsOwn)                       // the deleter already played its own effect
+        PlayDeath(deletion.Data, lateMs: Manager.Connection.GetServerTime() - deletion.SentServerMs);
+}
+```
+
+- `IsOwn` is the only sender identity Impunity reports. If presentation needs to know which player, put that in the payload.
+- A removal the server makes itself (delete-on-disconnect, a deleted channel's cleanup) has null `Data`, the server's clock as `SentServerMs`, and `IsOwn` false.
+- A replaced entity gets an ordinary `OnDeleted`, carrying the replace's `replaceData`; the replacement then arrives as a normal new object.
+- Only events let the sender opt out of its own copy (`ExcludeSender`). The writer of a client-authoritative entity gets no echo of its updates, so it sees no note of its own.
 
 ---
 
 ## 13. Niche topics
 
-### Optimistic exclusive updates (`UpdateExclusive`)
+### Optimistic guarded updates (`UpdateIfUnchanged`)
 
 The problem: two players pick the same berry. Each sets `bush.HasBerry = false` and the update replicates — both writes "succeed" and both players get a berry. A lock ([§10](#10-locks)) fixes it but is heavy boilerplate for a contention that is rare 99% of the time.
 
-`UpdateExclusive` solves it optimistically. Set your fields as usual, then flush them with a callback instead of waiting for the per-frame sweep:
+`UpdateIfUnchanged` solves it optimistically. Set your fields as usual, then flush them with a callback instead of waiting for the per-frame sweep:
 
 ```csharp
 bush.HasBerry.Set(false);
-bush.UpdateExclusive(err =>
+bush.UpdateIfUnchanged((err, result) =>
 {
-    if (err == null)
+    if (result == GuardedResult.Applied)
         player.Inventory.Add(berry);          // we won — the berry is ours
-    // else: someone beat us to it (err.ErrorCode == ActionStaleData); do nothing
+    // GuardedResult.Stale: someone beat us to it; do nothing (err is null — losing is not an error)
+    // GuardedResult.Failed: err says why (locked by another connection, entity gone, connection broken)
 });
 ```
 
-How it works: the update carries the client's known per-field sequence numbers. The server applies and relays it **only if this client has seen the latest change to every field being written**; otherwise it rejects the *whole* update (nothing is applied) and the callback receives an `ActionStaleData` error. Because the loser's write never applies, exactly one of the racing players wins.
+How it works: the update carries the client's known per-field sequence numbers. The server applies and relays it **only if this client has seen the latest change to every field being written**; otherwise it rejects the *whole* update (nothing is applied) and the callback receives `GuardedResult.Stale`. Because the loser's write never applies, exactly one of the racing players wins. Losing is an expected outcome, so it is a result value with a null error; the error is set only for `GuardedResult.Failed`.
 
 Details worth knowing:
 
 - **Written fields only.** Staleness is checked only for the fields in this update. A concurrent change to some *other* field (a constantly-updated position, say) never causes a false conflict.
 - **All-or-nothing.** If any written field is stale, the entire update is dropped — batched sibling fields included. There is no partial apply.
-- **The winning value is already local when your callback runs.** On both success and rejection, any winning broadcast has been applied before the callback fires, so it is safe to read the entity's current values inside the callback. Wait for the callback before issuing another exclusive update to the *same* field (your own echo hasn't advanced your known seq until then).
-- **Locks and client-authoritative entities bypass the check.** If you hold the entity's lock the update always applies (the lock is the stronger guarantee). Client-authoritative entities are auto-locked to their creator, so their creator's exclusive updates always pass.
-- **Locked by another connection** yields an `ActionBlockedByLock` error in the callback (unlike ordinary updates, which the server drops silently).
-- **Reliable delivery.** Exclusive updates are always sent guaranteed (over TCP), even if the fields were set with `SetUnguaranteed`.
-- Yield/async wrappers: `entity.UpdateExclusiveYield()` (coroutine) and `entity.UpdateExclusiveAsync()` (faults on rejection).
+- **The winning value is already local when your callback runs.** On both `Applied` and `Stale`, any winning broadcast has been applied before the callback fires, so it is safe to read the entity's current values inside the callback.
+- **Your own unechoed writes count against you.** A second `UpdateIfUnchanged` to the *same* field sent before the first one's callback is `Stale` against your own write (your echo hasn't advanced your known seq yet). This is the main reason to prefer `Transact`, which queues behind your own writes; pass `maxAttempts: 1` when losing means "don't".
+- **Locks and client-authoritative entities bypass the check.** If you hold the entity's lock the update always applies (the lock is the stronger guarantee). Client-authoritative entities are auto-locked to their creator, so their creator's guarded updates always pass.
+- **Locked by another connection** is `GuardedResult.Failed` with `ActionBlockedByLock` (unlike ordinary updates, which the server drops silently). An explicit lock always wins over an optimistic write; see [Optimistic writes and locks](#optimistic-writes-and-locks).
+- **Reliable delivery.** Guarded updates are always sent guaranteed (over TCP), even if the fields were set with `SetUnguaranteed`.
+- Yield/async wrappers: `entity.UpdateIfUnchangedYield()` (coroutine; `Value` is the result) and `entity.UpdateIfUnchangedAsync()` (returns the result; faults only on `Failed`).
 
-### Guarded delete and replace (`DeleteExclusive`, `replaceGuard`)
+### Guarded delete and replace (`DeleteIfUnchanged`, `ReplaceIfUnchanged`)
 
-`UpdateExclusive` guards an update; deletes and replaces need the same thing. Two players hit a creature with one health left, and both delete it: both deletes "succeed" from each player's point of view, and both drop loot. The fix is to delete only if the state the decision was based on is still what you saw:
+`UpdateIfUnchanged` guards an update; deletes and replaces need the same thing. Two players hit a creature with one health left, and both delete it: both deletes "succeed" from each player's point of view, and both drop loot. The fix is to delete only if the state the decision was based on is still what you saw:
 
 ```csharp
 // Delete only if health is still what this client last saw; drop the loot only if this request deleted it.
-creature.DeleteExclusive(creature.Health.Mask, "killed", (err, deleted) =>
+creature.DeleteIfUnchanged(creature.Health.Guard, "killed", (err, result) =>
 {
-    // err.ErrorCode == ActionStaleData: someone changed Health first. Nothing happened; re-read and decide again.
+    // GuardedResult.Stale: someone changed Health first. Nothing happened; re-read and decide again.
 }, lootInsert);
 ```
 
-- **Name the fields the decision read.** Every distributed field has a read-only `Mask`, its bit in the entity's field mask; OR them together (`Health.Mask | Owner.Mask`). Guard what you read, not everything: a wandering creature's position changes constantly, and guarding it would make every kill fail. An empty mask, or bits that aren't the entity's fields, throws `ArgumentException` before anything is sent (and leaves the conditional to you). Use plain `Delete` for an unguarded delete.
-- **Stale means nothing happened.** The callback gets `ActionStaleData`, the entity stays, and the conditional action is skipped (`ActionConditionNotMet`), exactly as for any delete that didn't happen. As with `UpdateExclusive`, the winning values are already applied locally when the callback runs.
-- **Locks.** A lock holder bypasses the guard. Another client's lock makes it return `false`, as a plain `Delete` does.
-- **Your own unechoed writes count.** The guard is this client's last-received view, so guarding a field you just wrote (and whose echo hasn't arrived) is stale against yourself. `Transact` queues behind your own writes; a bare `DeleteExclusive` does not. Inside a transaction, use `tx.Delete` (below).
-- **Replace.** `manager.CreateObject(obj, channel, replace, onComplete, onCreatedAction, replaceEntityId, replaceGuard)` guards the entity being replaced the same way: `ActionStaleData`, nothing replaced, conditional skipped, if a guarded field changed. It needs `replaceEntityId`, and that entity must be one this client has registered (the guard is its view of it); otherwise it throws `ArgumentException`.
-- Yield/async wrappers: `entity.DeleteExclusiveYield(mask, data)` and `entity.DeleteExclusiveAsync(mask, data)` (faults on a stale guard); `CreateObjectAsync` takes `replaceGuard` too.
+- **Name the fields the decision read.** Every distributed field has a `Guard` property; combine several with `|` (`Health.Guard | Owner.Guard`) into a `FieldGuard`. Guard what you read, not everything: a wandering creature's position changes constantly, and guarding it would make every kill fail. A guard remembers which entity its fields belong to, so an empty guard, a guard built from another entity's fields, or one mixing two entities throws `ArgumentException` before anything is sent (and leaves the conditional to you) instead of silently guarding the wrong fields. Use plain `Delete` for an unguarded delete. A guard covers a whole field: on a collection field (array, queue, dictionary) any element changing makes it stale.
+- **Stale means nothing happened.** The callback gets `GuardedResult.Stale` (null error), the entity stays, and the conditional action is skipped (`ActionConditionNotMet`), exactly as for any delete that didn't happen. As with `UpdateIfUnchanged`, the winning values are already applied locally when the callback runs.
+- **Locks.** A lock holder bypasses the guard. Another client's lock makes it `GuardedResult.Failed` with `ActionBlockedByLock`, as for `UpdateIfUnchanged`. (A plain `Delete` still reports a foreign lock as `false`.)
+- **Your own unechoed writes count.** The guard is this client's last-received view, so guarding a field you just wrote (and whose echo hasn't arrived) is stale against yourself. `Transact` queues behind your own writes; a bare `DeleteIfUnchanged` does not. Inside a transaction, use `tx.Delete` (below).
+- **Replace.** `entity.ReplaceIfUnchanged(guard, newObject, replaceData, onComplete, onCreatedAction)` is the same thing for a replace: `newObject` is created in the entity's channel under its unique name (given to it if it has none), replacing exactly this entity, only if the guarded fields are unchanged. It reports `GuardedResult` like `DeleteIfUnchanged` (`Applied` once the replacement is registered, `Stale`, or `Failed` — a foreign lock, or `ActionNotFound` / `ActionUniqueNameExists` when the entity was already deleted or replaced), skips the conditional when it doesn't happen, and delivers `replaceData` in the replaced entity's `OnDeleted`. Only an object with a unique name can be replaced. Underneath it is `manager.CreateObject(obj, channel, replace, onComplete, onCreatedAction, replaceEntityId, replaceGuard, replaceData)`, which you can call directly (it reports through `CreateObject`'s error instead: `ActionStaleData`, `ActionBlockedByLock`); the guard says which entity it is about, so `replaceEntityId` can be left 0, and the entity must be one this client has registered.
+- Yield/async wrappers: `entity.DeleteIfUnchangedYield(guard, data)` / `entity.ReplaceIfUnchangedYield(guard, newObject)` (`Value` is the result) and `entity.DeleteIfUnchangedAsync(guard, data)` / `entity.ReplaceIfUnchangedAsync(guard, newObject)` (return `Applied` or `Stale`; fault only on `Failed`); `CreateObjectAsync` takes `replaceGuard` too.
 
 ### Transactions (`Transact`)
 
-`UpdateExclusive` tells you that you lost; it doesn't try again. For a read-modify-write (add to a counter, take one item from a stack, move a value between two fields), losing usually means "read the new value and do it again", and doing that by hand has two traps: the retry has to wait for the winner's value to arrive, and your *own* writes race each other, because on an entity that is not client-authoritative a `Set` isn't readable until the server echoes it and a second exclusive update sent before the first one's reply is rejected as stale. `Transact` handles both:
+`UpdateIfUnchanged` tells you that you lost; it doesn't try again. For a read-modify-write (add to a counter, take one item from a stack, move a value between two fields), losing usually means "read the new value and do it again", and doing that by hand has two traps: the retry has to wait for the winner's value to arrive, and your *own* writes race each other, because on an entity that is not client-authoritative a `Set` isn't readable until the server echoes it and a second guarded update sent before the first one's reply is rejected as stale. `Transact` handles both:
 
 ```csharp
 counter.Transact(tx =>
@@ -875,7 +902,7 @@ counter.Transact(tx =>
     if (counter.Value.Get() >= counter.Max.Get())
         return false;                       // Declined: nothing is sent
     counter.Value.Set(counter.Value.Get() + 1);
-    return true;                            // commit: sent as an exclusive update
+    return true;                            // commit: sent as a guarded update
 },
 (err, result) =>
 {
@@ -885,15 +912,15 @@ counter.Transact(tx =>
 
 What it does:
 
-- **Commit.** When the body returns true, everything it set — plus any replicated action it attached ([§11](#11-conditional-actions)) — goes out as one exclusive update. Accepted: `Committed`, and the new values are already local when the callback runs. A body that sets nothing commits without sending.
-- **Rerun on staleness.** If another client changed a written field first, the update is rejected with nothing applied, the winner's values are already local, and the body runs again against them. After `maxAttempts` runs in total (default `ClientEntityManager.DefaultTransactMaxAttempts`, 5; minimum 1) it gives up with `Conflict`. **The body may run more than once**, so it must not have side effects outside the entity: no inventory writes, no sounds, no UI. Put those in the callback, or attach them as a replicated action: a rejected update skips its actions, and the body attaches a fresh one on every run, so the action runs exactly once, with the update that was accepted. A rerun starts only after the rejected attempt's actions have reported (their callbacks have run), so anything your callback releases on a skip, such as a reserved inventory slot, is already free when the body runs again.
-- **Decline.** Return false and nothing is sent: the fields the body set are discarded (no later flush sends them) and its replicated actions are resolved with `ActionConditionNotMet`, the same code a server-side skip uses.
+- **Commit.** When the body returns true, everything it set — plus any conditional action it attached with `tx.AddAction` ([§11](#11-conditional-actions)) — goes out as one guarded update. Accepted: `Committed`, and the new values are already local when the callback runs. A body that sets nothing commits without sending.
+- **Rerun on staleness.** If another client changed a written field first, the update is rejected with nothing applied, the winner's values are already local, and the body runs again against them. After `maxAttempts` runs in total (default `ClientEntityManager.DefaultTransactMaxAttempts`, 5; minimum 1) it gives up with `Conflict`. `maxAttempts: 1` is the one-shot claim: run once, and `Conflict` means you lost. **The body may run more than once**, so it must not have side effects outside the entity: no inventory writes, no sounds, no UI. Put those in the callback, or attach them with `tx.AddAction(action)`: a rejected update skips its actions, and the body attaches a fresh one on every run, so the action runs exactly once, with the update that was accepted. A rerun starts only after the rejected attempt's actions have reported (their callbacks have run), so anything your callback releases on a skip, such as a reserved inventory slot, is already free when the body runs again.
+- **Decline.** Return false and nothing is sent: the fields the body set are discarded (no later flush sends them) and its conditional actions are resolved with `ActionConditionNotMet`, the same code a server-side skip uses.
 - **One at a time per entity.** Transactions from one connection on one entity run in call order, each starting after the previous one has resolved, so it sees that one's committed value. Firing ten increments in one frame gives ten, with no reruns. Transactions on different entities don't wait for each other.
-- **Waits for your own writes.** A body runs only when none of this connection's writes to the entity are awaiting a reply: a plain `UpdateExclusive` you sent earlier holds it back until that update's reply has arrived, and until the replies of any replicated actions it carried (those arrive after the update's own). A plain `UpdateExclusive` issued *while* a transaction is active is still sent at once, as before, and may make the transaction rerun.
+- **Waits for your own writes.** A body runs only when none of this connection's writes to the entity are awaiting a reply: a plain `UpdateIfUnchanged` you sent earlier holds it back until that update's reply has arrived, and until the replies of any conditional actions it carried (those arrive after the update's own). A plain `UpdateIfUnchanged` issued *while* a transaction is active is still sent at once, as before, and may make the transaction rerun.
 - **Changes already pending go first.** If the entity has unflushed `Set`s when a body is due to run, they are sent as an ordinary update and the body waits for its reply. So `x.Name.Set("a"); x.Transact(...)` runs the body with `"a"` already confirmed, the body's changes are exactly its own (a decline never throws away your earlier `Set`s), and mixing plain `Set`s with transactions on the same field costs no rerun. While a transaction is waiting on an entity, the per-frame sweep's reliable sends of that entity are waited for too. The one case that can still cost a rerun is a plain update the sweep already sent before the transaction was called; that's correct, just one extra round trip.
 - **The first run may happen inside the call**, when nothing is in flight. Reruns run from reply dispatch in `Update()`. The callback is always delivered on a later `Update()`, never inside `Transact`.
-- **Failures.** A body that throws reports `Failed` with the message (its changes are discarded as for a decline, and the next transaction on the entity still runs). Any other rejection — locked by another connection (`ActionBlockedByLock`), entity gone, connection broken — reports `Failed` with that error. If the entity is deleted, unsubscribed or otherwise unregistered while a transaction is queued or awaiting its reply, that transaction and every one behind it report `Failed` and their bodies don't run (again).
-- **Client-authoritative entities.** `Set` applies locally at once and the creator's exclusive updates always pass, so a transaction commits on its first run. A declined body's `Set`s can't be undone, though — they are already local, and dropping the send would leave you disagreeing with the server — so they are still sent by the next flush. On these entities, decide before you set.
+- **Failures.** A body that throws reports `Failed` with the message (its changes are discarded as for a decline, and the next transaction on the entity still runs). Any other rejection — locked by another connection (`ActionBlockedByLock`, see [below](#optimistic-writes-and-locks)), entity gone, connection broken — reports `Failed` with that error. If the entity is deleted, unsubscribed or otherwise unregistered while a transaction is queued or awaiting its reply, that transaction and every one behind it report `Failed` and their bodies don't run (again).
+- **Client-authoritative entities.** `Set` applies locally at once and the creator's guarded updates always pass, so a transaction commits on its first run. A declined body's `Set`s can't be undone, though — they are already local, and dropping the send would leave you disagreeing with the server — so they are still sent by the next flush. On these entities, decide before you set.
 - **No connection.** On an entity with no manager or connection (an offline or editor instance), `Set` applies locally, so the body runs at once and its return value is the outcome (`Committed` or `Declined`; `Failed` if it throws). With no queue to defer through, the callback fires immediately, as other no-connection requests do.
 - **Unguaranteed writes** (`SetUnguaranteed`) sent by the per-frame sweep are not waited for, the same exclusion as `RunExclusive`'s handoff guarantee.
 - Yield/async wrappers: `entity.TransactYield(body)` (coroutine; `Value` is the result) and `entity.TransactAsync(body)` (faults only on `Failed`).
@@ -907,19 +934,21 @@ tree.Transact(tx =>
 {
     int damage = tree.Damage.Get() + hit;
     if (damage >= tree.Health.Get())
-        tx.Delete(tree.Damage.Mask, cause, giveLogs);    // or tx.ReplaceWith(tree.Damage.Mask, stump, giveLogs)
+        tx.Delete(tree.Damage.Guard, cause, giveLogs);    // or tx.ReplaceWith(tree.Damage.Guard, stump, cause, giveLogs)
     else
         tree.Damage.Set(damage);
     return true;
 }, onComplete);
 ```
 
-- **`tx.Delete(guardMask, deleteData, onDeletedAction)`** sends a guarded delete ([above](#guarded-delete-and-replace-deleteexclusive-replaceguard)) instead of an update. **`tx.ReplaceWith(guardMask, newObject, onCreatedAction)`** sends a guarded replace: `newObject` is created in the entity's channel under its unique name (given to `newObject` if it has none; a different name fails), replacing exactly this entity, and is registered by the time the transaction reports `Committed`. Only an object with a unique name can be replaced.
-- **The guard is required.** A delete or replace writes no fields, so nothing is guarded automatically; an empty mask throws inside the body and the transaction reports `Failed`. There is no unguarded delete through a transaction.
+- **`tx.Delete(guard, deleteData, onDeletedAction)`** sends a guarded delete ([above](#guarded-delete-and-replace-deleteifunchanged-replaceifunchanged)) instead of an update. **`tx.ReplaceWith(guard, newObject, replaceData, onCreatedAction)`** sends a guarded replace (`replaceData` is the cause, delivered in the replaced entity's `OnDeleted` like `deleteData`): `newObject` is created in the entity's channel under its unique name (given to `newObject` if it has none; a different name fails), replacing exactly this entity, and is registered by the time the transaction reports `Committed`. Only an object with a unique name can be replaced.
+- **The guard is required.** A delete or replace writes no fields, so nothing is guarded automatically; an empty guard (or one naming another entity's fields) throws inside the body and the transaction reports `Failed`. There is no unguarded delete through a transaction.
 - **Same queue, same rerun rule.** A stale guard reruns the body against the winner's values, after the rejected attempt's conditional has reported its skip. A delete queued behind an update on the same connection sees that update's result. A transaction queued behind a successful delete or replace reports `Failed` (`ActionNotFound`) without running: the entity is gone. A foreign lock reports `Failed` with `ActionBlockedByLock`.
-- **Delete or replace is the whole write.** A body that also sets fields or attaches replicated actions fails, and those changes are discarded as for a decline. Put the database work in the delete's or replace's own conditional argument. Create that action inside the body, since a rerun needs a fresh one; once handed to the scope, the transaction resolves it: skipped (`ActionConditionNotMet`) if the body declines or throws afterwards, or if the write is rejected.
-- **`tx.DependsOn(mask)`** adds fields the body only read to the guard, for any of the three writes. "Set the price from the stock level" depends on the stock level; without `DependsOn` a change to it doesn't rerun the body, because only written fields are guarded. A body with dependencies that sets nothing and attaches nothing still commits without sending, so a dependency on its own checks nothing; with a replicated action attached, it guards that action ("buy, if the price is still what I read").
+- **Delete or replace is the whole write.** A body that also sets fields or attaches conditional actions fails, and those changes are discarded as for a decline. Put the database work in the delete's or replace's own conditional argument. Create that action inside the body, since a rerun needs a fresh one; once handed to the scope, the transaction resolves it: skipped (`ActionConditionNotMet`) if the body declines or throws afterwards, or if the write is rejected.
+- **`tx.AddAction(action)`** attaches a conditional database action to the transaction's update (the same thing as `entity.AddConditionalAction`, which also still works inside a body). Create it inside the body, since each run needs a fresh one; the transaction resolves it as skipped if the body declines or throws or the attempt is rejected.
+- **`tx.DependsOn(fields)`** (a `FieldGuard`, e.g. `shop.Stock.Guard`) adds fields the body only read to the guard, for any of the three writes. "Set the price from the stock level" depends on the stock level; without `DependsOn` a change to it doesn't rerun the body, because only written fields are guarded. A body with dependencies that sets nothing and attaches nothing still commits without sending, so a dependency on its own checks nothing; with a conditional action attached, it guards that action ("buy, if the price is still what I read").
 - **`tx.Note(bson)`** attaches a note to the transaction's update ([§12](#update-notes-why-a-change-happened)); only the committed attempt's note goes out.
+- **Go through the scope.** Calling `Delete`, `DeleteIfUnchanged` or `UpdateIfUnchanged` on the entity from inside its own body throws `InvalidOperationException`, so the transaction reports `Failed` and nothing is sent: such a call would go out at once, on every run, outside the guard and the decline/rerun handling. Writes to *other* entities from a body are not caught, and are not rolled back; don't make them.
 - `tx.Attempt` is the run number (1 for the first). The scope is only usable while its body runs.
 - No connection: a delete or replace reports `Failed`, and its conditional is failed too.
 
@@ -927,11 +956,25 @@ tree.Transact(tx =>
 
 | | Use it when | On contention |
 |---|---|---|
-| `UpdateExclusive` | A one-shot claim where losing means "don't": pick the berry, take the last seat. | You get `ActionStaleData`; nothing applied. |
-| `Transact` | A read-modify-write that should still happen against the newer value: counters, stacks, moving a value. | The body reruns against the winner's values. |
-| `RunExclusive` ([§10](#runexclusive--the-scoped-form)) | The logic can't be run twice (side effects), spans frames (awaits, coroutines), or touches several fields for a long time. | You wait in the server's lock queue; the body runs once. |
+| `Transact` | The default for any contended change: read-modify-write that should still happen against the newer value (counters, stacks, moving a value), and, with `maxAttempts: 1`, one-shot claims where losing means "don't" (pick the berry, take the last seat). | The body reruns against the winner's values; out of attempts is `Conflict`. |
+| `RunExclusive` ([§10](#runexclusive--the-scoped-form)) | The logic can't be run twice (side effects), spans frames (awaits, coroutines), or holds the entity for a while (a player rearranging an open chest). | You wait in the server's lock queue; the body runs once. |
+| `UpdateIfUnchanged` / `DeleteIfUnchanged` / `ReplaceIfUnchanged` | You want the bare primitive and know none of your own writes to the entity are in flight. | `GuardedResult.Stale`; nothing applied. |
 
-`Transact` costs one round trip when uncontended and never blocks anyone; `RunExclusive` costs a lock round trip plus the unlock, and everyone else waits while you hold it.
+`Transact` costs one round trip when uncontended and never blocks anyone; `RunExclusive` costs a lock round trip plus the unlock, and everyone else waits while you hold it. `Transact` covers one entity: a change that must be atomic across two entities needs a lock on both, or a design where one entity's write carries the other side as a conditional action ([§11](#11-conditional-actions)).
+
+#### Optimistic writes and locks
+
+An explicit lock always wins. While another connection holds an entity's lock (`TryLock`, `WaitForLock`, `RunExclusive`), every optimistic write to it from anyone else is refused, and none of them waits or retries:
+
+| Write | Result against another connection's lock |
+|---|---|
+| `Transact` (update, `tx.Delete`, `tx.ReplaceWith`) | `TransactResult.Failed`, `ActionBlockedByLock`; the body is not rerun |
+| `UpdateIfUnchanged`, `DeleteIfUnchanged`, `ReplaceIfUnchanged` | `GuardedResult.Failed`, `ActionBlockedByLock` |
+| Guarded replace via raw `CreateObject` | error `ActionBlockedByLock` |
+| Plain `Delete` | `false`, no error |
+| Plain update (per-frame sweep) | dropped silently |
+
+This is deliberate. A lock is held on purpose and often for a long time (a chest stays locked while a player has it open), so there is nothing useful to retry against; treat `ActionBlockedByLock` as "busy" and tell the player, or queue for the lock yourself with `RunExclusive` if the work must happen. Most entities should never be locked at all: use transactions everywhere, and keep locks for the few long, exclusive interactions. The holder's own optimistic writes bypass the staleness check, so code written with `Transact` keeps working unchanged inside a lock.
 
 ### Temporal fields (`DistributedTemporalValue<T,S>`)
 
@@ -944,7 +987,7 @@ public DistributedTemporalValue<MovementState, MovementSerializer> Movement;
 Movement.OnInitialized += (value, age) => { /* extrapolate `value` forward by `age` */ };
 ```
 
-One capability over a plain `DistributedValue`: **age on load.** When the field's initial state arrives, `OnInitialized(value, age)` reports how long ago (server time) the value was last modified — so a late joiner can extrapolate or interpolate rather than snapping to a stale value. The field also exposes `LastModifiedTime`. (For shared write access to one value without an owner, use `UpdateExclusive` above.)
+One capability over a plain `DistributedValue`: **age on load.** When the field's initial state arrives, `OnInitialized(value, age)` reports how long ago (server time) the value was last modified — so a late joiner can extrapolate or interpolate rather than snapping to a stale value. The field also exposes `LastModifiedTime`. (For shared write access to one value without an owner, use `UpdateIfUnchanged` above.)
 
 ### Local-only setters (`SetLocalOnly`)
 
@@ -987,13 +1030,13 @@ public partial class Foo : DistributedObjectBase   // or DistributedChannelBase,
 | `SetUnguaranteed(v)` | yes | only if client-authoritative / offline | best-effort |
 | `SetLocalOnly(v)` | no | always | — |
 
-Flush a set of writes immediately with an optimistic-concurrency guard via `entity.UpdateExclusive(onComplete)` — the server rejects the whole update (`ActionStaleData`) if any written field changed since this client last saw it. For a read-modify-write that should be redone on a conflict, `entity.Transact(body, onComplete)` runs the body against confirmed values and reruns it on staleness (`Committed` / `Declined` / `Conflict` / `Failed`). See [§13](#13-niche-topics).
+For a contended change use `entity.Transact(body, onComplete)`: the body runs against confirmed values, the write is guarded, and it reruns on staleness (`Committed` / `Declined` / `Conflict` / `Failed`). The bare primitives are `entity.UpdateIfUnchanged(onComplete)`, `entity.DeleteIfUnchanged(guard, data, onComplete)` and `entity.ReplaceIfUnchanged(guard, newObject, data, onComplete)`, which report `GuardedResult` (`Applied` / `Stale` / `Failed`). Another connection's lock fails all of them with `ActionBlockedByLock`. See [§13](#13-niche-topics).
 
 ### Operations (on `IDistributedEntity`)
 
-`TriggerEvent` · `SetUpdateNote` · `UpdateExclusive` · `Transact` · `Delete` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+`TriggerEvent` · `AddUpdateNote` · `UpdateIfUnchanged` · `Transact` · `Delete` · `DeleteIfUnchanged` · `ReplaceIfUnchanged` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
 
-`Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddReplicatedAction(action)` attaches one to an entity's next update (`UpdateExclusive(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
+`Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddConditionalAction(action)` attaches one to an entity's next update (`UpdateIfUnchanged(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
 
 ### Per-frame
 

@@ -85,7 +85,7 @@ namespace Impunity.GameState
 
 		/// <summary>Client-side continuation run after this action's own callback, on every path that resolves it (a
 		/// reply, a local failure, a broken connection). Impunity-internal: the entity manager uses it to learn when a
-		/// replicated action riding a tracked write has reported (see ClientEntityTransact.cs). Setting it makes
+		/// conditional action riding a tracked write has reported (see ClientEntityTransact.cs). Setting it makes
 		/// <see cref="HasCallback"/> true on client actions, so the server sends the reply it needs.</summary>
 		[BsonIgnore]
 		internal Action? AfterCallback;
@@ -107,7 +107,7 @@ namespace Impunity.GameState
 		}
 
 		/// <summary>Copies one result from a <see cref="CompoundDatabaseAction"/> reply into this action, so its own
-		/// callback can be invoked as if it had been sent alone. Client-side; used when several replicated actions ride
+		/// callback can be invoked as if it had been sent alone. Client-side; used when several conditional actions ride
 		/// one entity update as a single compound.</summary>
 		internal virtual void ApplyResult(ActionResult result)
 		{

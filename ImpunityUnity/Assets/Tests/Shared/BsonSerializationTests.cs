@@ -486,7 +486,7 @@ namespace Impunity.Tests
 			StringAssert.Contains("PersistAs", ex.Message);
 		}
 
-		// ───────── Exclusive-update wire fields (xs on UpdateEntityAction, sq on create messages) ─────────
+		// ───────── Guarded-update wire fields (xs on UpdateEntityAction, sq on create messages) ─────────
 
 		static T WireRoundTrip<T>(T obj) where T : class
 		{
@@ -495,7 +495,7 @@ namespace Impunity.Tests
 			return mapper.DeserializeFromBytes<T>(new ArraySegment<byte>(bytes));
 		}
 
-		[Test, Category("ExclusiveUpdateWire")]
+		[Test, Category("GuardedUpdateWire")]
 		public void UpdateEntityAction_WithoutKnownSeqs_RoundTrips()
 		{
 			var action = new UpdateEntityAction(42u, new ArraySegment<byte>(new byte[] { 1, 5, 0 }), 7);
@@ -504,11 +504,11 @@ namespace Impunity.Tests
 			Assert.AreEqual(42u, back.EntityId);
 			Assert.AreEqual(7, back.Seq);
 			Assert.AreEqual(new byte[] { 1, 5, 0 }, back.UpdateBytes.ToArray());
-			// Absent xs must deserialize to a null-array segment (⇒ ordinary, non-exclusive update).
+			// Absent xs must deserialize to a null-array segment (⇒ ordinary, non-guarded update).
 			Assert.IsNull(back.KnownFieldSeqs.Array, "Absent xs should round-trip as a null-array segment");
 		}
 
-		[Test, Category("ExclusiveUpdateWire")]
+		[Test, Category("GuardedUpdateWire")]
 		public void UpdateEntityAction_WithKnownSeqs_RoundTrips()
 		{
 			// Blob: field 1 known seq 0x0102, field 3 known seq 0x00FF, terminator 0.
@@ -520,7 +520,7 @@ namespace Impunity.Tests
 			Assert.AreEqual(xs, back.KnownFieldSeqs.ToArray());
 		}
 
-		[Test, Category("ExclusiveUpdateWire")]
+		[Test, Category("GuardedUpdateWire")]
 		public void ChannelCreateMessage_SeqRoundTrips()
 		{
 			var msg = new ChannelCreateMessageAction { ChannelId = 3u, ChannelName = "room", ChannelType = 1, Seq = 12345 };
@@ -528,7 +528,7 @@ namespace Impunity.Tests
 			Assert.AreEqual((ushort)12345, back.Seq);
 		}
 
-		[Test, Category("ExclusiveUpdateWire")]
+		[Test, Category("GuardedUpdateWire")]
 		public void ObjectCreateMessage_SeqRoundTrips_AndDefaultsToZero()
 		{
 			var withSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1, Seq = 999 });

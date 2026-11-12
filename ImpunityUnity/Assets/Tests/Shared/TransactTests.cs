@@ -1,8 +1,8 @@
 // ───────── Transact Tests ─────────
 //
-// Covers entity.Transact: commit, decline (nothing sent, the body's Sets and replicated actions dropped), reruns on
+// Covers entity.Transact: commit, decline (nothing sent, the body's Sets and conditional actions dropped), reruns on
 // staleness against the winner's values, the attempt limit, no lost updates between two contending clients, per-entity
-// FIFO on one connection (no self-races), waiting for this connection's in-flight UpdateExclusive and for the replicated
+// FIFO on one connection (no self-races), waiting for this connection's in-flight UpdateIfUnchanged and for the replicated
 // actions of in-flight and rejected attempts, changes pending from
 // before the transaction, client-authoritative entities, failure on delete/unsubscribe and on a throwing body, and the
 // never-reentrant completion.
@@ -185,7 +185,7 @@ namespace Impunity.Tests
 			a.Transact(_ =>
 			{
 				a.Health.Set(99);
-				a.AddReplicatedAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "declined" }, actionProbe.OnComplete));
+				a.AddConditionalAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "declined" }, actionProbe.OnComplete));
 				return false;
 			}, probe.OnComplete);
 
@@ -334,9 +334,9 @@ namespace Impunity.Tests
 			await PumpUntil(() => b.Health.Get() == N, AllConnections());
 		}
 
-		/// <summary>The body does not run while this connection's plain UpdateExclusive is awaiting its reply.</summary>
+		/// <summary>The body does not run while this connection's plain UpdateIfUnchanged is awaiting its reply.</summary>
 		[Test, Category("Transact")]
-		public async Task Transact_WaitsForInFlightUpdateExclusive()
+		public async Task Transact_WaitsForInFlightUpdateIfUnchanged()
 		{
 			var (conns, entities, _) = await Setup("tx_wait_excl", 1);
 			var a = entities[0];
@@ -344,7 +344,7 @@ namespace Impunity.Tests
 			bool exclusiveDone = false;
 			bool exclusiveDoneWhenBodyRan = false;
 			a.Health.Set(5);
-			a.UpdateExclusive(err =>
+			a.UpdateIfUnchanged((err, _) =>
 			{
 				Assert.IsNull(err);
 				exclusiveDone = true;
@@ -362,12 +362,12 @@ namespace Impunity.Tests
 				return true;
 			}, probe.OnComplete, 1);
 
-			Assert.AreEqual(0, runs, "The body ran while the UpdateExclusive was in flight");
+			Assert.AreEqual(0, runs, "The body ran while the UpdateIfUnchanged was in flight");
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Committed, probe.Result, "With maxAttempts 1, any self-race would be a Conflict");
-			Assert.IsTrue(exclusiveDoneWhenBodyRan, "The UpdateExclusive's own callback should run before the waiting body");
-			Assert.AreEqual(5, seen, "The body should see the UpdateExclusive's value confirmed");
+			Assert.IsTrue(exclusiveDoneWhenBodyRan, "The UpdateIfUnchanged's own callback should run before the waiting body");
+			Assert.AreEqual(5, seen, "The body should see the UpdateIfUnchanged's value confirmed");
 			Assert.AreEqual(6, a.Health.Get());
 		}
 
@@ -430,10 +430,10 @@ namespace Impunity.Tests
 			Assert.AreEqual(7, b.Health.Get());
 		}
 
-		/// <summary>A replicated action attached in the body is skipped on the stale run and runs exactly once, on the
+		/// <summary>A conditional action attached in the body is skipped on the stale run and runs exactly once, on the
 		/// committed one.</summary>
 		[Test, Category("Transact")]
-		public async Task Transact_ReplicatedAction_RunsOnceAfterRerun()
+		public async Task Transact_ConditionalAction_RunsOnceAfterRerun()
 		{
 			var (conns, entities, _) = await Setup("tx_action", 2);
 			var a = entities[0];
@@ -446,14 +446,14 @@ namespace Impunity.Tests
 
 			var actionProbes = new List<CallbackProbe<BsonValue>>();
 			var bProbe = new TxProbe();
-			b.Transact(_ =>
+			b.Transact(tx =>
 			{
 				int next = b.Health.Get() + 1;
 				b.Health.Set(next);
 				var actionProbe = new CallbackProbe<BsonValue>();
 				actionProbes.Add(actionProbe);
 				// The same _id each run: a second successful insert would fail, so "ran once" is checked twice over.
-				b.AddReplicatedAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "once", ["n"] = next }, actionProbe.OnComplete));
+				tx.AddAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "once", ["n"] = next }, actionProbe.OnComplete));
 				return true;
 			}, bProbe.OnComplete);
 
@@ -468,7 +468,7 @@ namespace Impunity.Tests
 			Assert.AreEqual(2, doc["n"].AsInt32, "The action that ran should be the committed run's");
 		}
 
-		/// <summary>The application keeps state for an attempt's replicated action (here, a reserved inventory slot that
+		/// <summary>The application keeps state for an attempt's conditional action (here, a reserved inventory slot that
 		/// the action's callback releases if the insert did not run). A rerun after a stale rejection must not start
 		/// until that callback has run: the action's reply arrives after the update's, and a body run in between would
 		/// see the slot still reserved.</summary>
@@ -496,7 +496,7 @@ namespace Impunity.Tests
 
 				b.Health.Set(b.Health.Get() + 1);
 				reserved++;
-				b.AddReplicatedAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "slot", ["run"] = run }, (err, _) =>
+				b.AddConditionalAction(new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "slot", ["run"] = run }, (err, _) =>
 				{
 					order.Add("action" + run);
 					if (err != null)
@@ -515,22 +515,22 @@ namespace Impunity.Tests
 			Assert.AreEqual(1, reserved, "Only the committed attempt's slot stays reserved");
 		}
 
-		/// <summary>A transaction queued behind this connection's plain UpdateExclusive waits for that update's replicated
+		/// <summary>A transaction queued behind this connection's plain UpdateIfUnchanged waits for that update's replicated
 		/// action to report, not just for the update's own reply. A callback-less action is waited for too.</summary>
 		[Test, Category("Transact")]
-		public async Task Transact_WaitsForInFlightUpdateExclusivesAction()
+		public async Task Transact_WaitsForInFlightUpdateIfUnchangedsAction()
 		{
 			var (conns, entities, _) = await Setup("tx_wait_excl_action", 1);
 			var a = entities[0];
 
 			bool actionDone = false;
 			a.Health.Set(5);
-			a.UpdateExclusive(err => Assert.IsNull(err),
+			a.UpdateIfUnchanged((err, result) => Assert.AreEqual(GuardedResult.Applied, result),
 				new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "excl_action" }, (err, _) => actionDone = true));
 			// Callback-less: Impunity still asks the server for its reply so it knows when the action has resolved.
-			// A different field, so the second exclusive update isn't stale against this client's own first one.
+			// A different field, so the second guarded update isn't stale against this client's own first one.
 			a.DisplayName.Set("silent");
-			a.UpdateExclusive(null, new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "excl_action_silent" }, null));
+			a.UpdateIfUnchanged(null, new InsertDocumentAction(ITEMS, new BsonDocument { ["_id"] = "excl_action_silent" }, null));
 
 			bool actionDoneWhenBodyRan = false;
 			var probe = new TxProbe();
@@ -543,7 +543,7 @@ namespace Impunity.Tests
 
 			await PumpUntil(() => probe.Fired, AllConnections());
 			Assert.AreEqual(TransactResult.Committed, probe.Result);
-			Assert.IsTrue(actionDoneWhenBodyRan, "The body ran before the UpdateExclusive's replicated action reported");
+			Assert.IsTrue(actionDoneWhenBodyRan, "The body ran before the UpdateIfUnchanged's conditional action reported");
 			Assert.AreEqual(6, a.Health.Get());
 			Assert.IsNotNull(await FindDoc(conns[0], "excl_action_silent"));
 		}
@@ -587,12 +587,12 @@ namespace Impunity.Tests
 			// B deletes it; only B is pumped, so A hasn't heard yet — the delete push sits in A's queue.
 			Assert.IsTrue(await Pump(b.DeleteAsync(BsonValue.Null), conns[1]));
 
-			// A's UpdateExclusive goes out (and will be answered ActionNotFound, after the delete push). The
+			// A's UpdateIfUnchanged goes out (and will be answered ActionNotFound, after the delete push). The
 			// transactions queue behind it.
 			ImpunityErrorResponse exclusiveErr = null;
 			bool exclusiveDone = false;
 			a.Health.Set(1);
-			a.UpdateExclusive(err => { exclusiveErr = err; exclusiveDone = true; });
+			a.UpdateIfUnchanged((err, _) => { exclusiveErr = err; exclusiveDone = true; });
 
 			int runs = 0;
 			var probes = new[] { new TxProbe(), new TxProbe(), new TxProbe() };
@@ -610,7 +610,7 @@ namespace Impunity.Tests
 				Assert.IsNotNull(p.Error);
 				Assert.AreEqual(1, p.FireCount);
 			}
-			Assert.IsNotNull(exclusiveErr, "The UpdateExclusive should fail against the deleted entity");
+			Assert.IsNotNull(exclusiveErr, "The UpdateIfUnchanged should fail against the deleted entity");
 
 			// Afterwards the entity is unregistered, so a new transaction fails straight away.
 			var late = new TxProbe();
@@ -652,10 +652,10 @@ namespace Impunity.Tests
 			var a = entities[0];
 			var b = entities[1];
 
-			// Hold the queue behind an in-flight UpdateExclusive, so the second transaction is genuinely queued
+			// Hold the queue behind an in-flight UpdateIfUnchanged, so the second transaction is genuinely queued
 			// behind the throwing one.
 			a.DisplayName.Set("held");
-			a.UpdateExclusive(null);
+			a.UpdateIfUnchanged(null);
 
 			var throwing = new TxProbe();
 			var next = new TxProbe();

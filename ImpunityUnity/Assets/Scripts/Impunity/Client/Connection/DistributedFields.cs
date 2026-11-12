@@ -8,6 +8,69 @@ using UltraLiteDB;
 namespace Impunity.Connection
 {
 
+	/// <summary>
+	/// A set of fields of one entity that an operation depends on: "do this only if these are unchanged since this client
+	/// last received them". Get one from a field's <c>Guard</c> property and combine several with <c>|</c>
+	/// (<c>creature.Health.Guard | creature.Owner.Guard</c>). A guard remembers which entity its fields belong to, so
+	/// passing one entity's guard to an operation on another is an error rather than a silent guard on the wrong fields.
+	/// The default value is the empty guard.
+	/// </summary>
+	public readonly struct FieldGuard
+	{
+		internal readonly IDistributedEntity? Entity;
+		internal readonly ulong Mask;
+
+		internal FieldGuard(IDistributedEntity? entity, ulong mask)
+		{
+			Entity = mask == 0 ? null : entity;
+			Mask = mask;
+		}
+
+		/// <summary>True when the guard names no field (the default value, or a field of an entity that has not been
+		/// initialized).</summary>
+		public bool IsEmpty => Mask == 0;
+
+		/// <summary>The fields of both guards. Either may be empty.</summary>
+		/// <exception cref="ArgumentException">The two guards name fields of different entities.</exception>
+		public static FieldGuard operator |(FieldGuard a, FieldGuard b)
+		{
+			if (a.Mask == 0)
+			{
+				return b;
+			}
+			if (b.Mask == 0)
+			{
+				return a;
+			}
+			if (!ReferenceEquals(a.Entity, b.Entity))
+			{
+				throw new ArgumentException("A guard can only combine fields of one entity");
+			}
+			return new FieldGuard(a.Entity, a.Mask | b.Mask);
+		}
+
+		/// <summary>The guard's field mask, checked for use on <paramref name="entity"/>.</summary>
+		/// <exception cref="ArgumentException">The guard is empty and <paramref name="required"/> is set, or it names
+		/// fields of an entity other than <paramref name="entity"/>.</exception>
+		internal ulong MaskFor(IDistributedEntity entity, string paramName, bool required)
+		{
+			if (Mask == 0)
+			{
+				if (required)
+				{
+					throw new ArgumentException("A guard must name at least one field (use a field's Guard property, combining several with |)", paramName);
+				}
+				return 0;
+			}
+			if (!ReferenceEquals(Entity, entity))
+			{
+				throw new ArgumentException("The guard names fields of a different entity (" + (Entity?.GetType().Name ?? "none") + " "
+					+ (Entity?.DistributedEntityId ?? 0) + ") than the one it is used on", paramName);
+			}
+			return Mask;
+		}
+	}
+
 	/// <summary>Base interface for all client-side distributed field types. Provides binary serialization for wire protocol and read/write lifecycle.</summary>
 	public interface IDistributedField
 	{
@@ -33,9 +96,9 @@ namespace Impunity.Connection
 		/// <summary>Reads and discards field data from the stream, advancing the reader position without applying changes. Used to skip stale out-of-order updates.</summary>
 		void SkipFrom(BinaryReader r);
 
-		/// <summary>This field's bit in its entity's field mask, <c>1UL &lt;&lt; (fieldId - 1)</c>. Used to name fields in a
-		/// guard (see <see cref="IDistributedEntity.DeleteExclusive"/>). 0 until the entity has initialized its fields.</summary>
-		ulong Mask { get; }
+		/// <summary>Names this field in a guard: the fields a guarded delete, replace or transaction depends on (see
+		/// <see cref="FieldGuard"/>). Empty until the entity has initialized its fields.</summary>
+		FieldGuard Guard { get; }
 
 		/// <summary>The wire-protocol category of this field (value, array, queue, dictionary).</summary>
 		GameStateEntityFieldType FieldType { get; }
@@ -109,10 +172,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		T CurrentValue;
 		T? PendingValue;
@@ -320,10 +383,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		T CurrentValue;
 		T? PendingValue;
@@ -559,10 +622,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		/// <summary>The length of the array, or 0 if it has not been initialized.</summary>
 		public readonly int Length => CurrentValue?.Length ?? 0;
@@ -925,10 +988,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		/// <summary>The number of elements currently in the queue, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
@@ -1310,10 +1373,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		/// <summary>The number of values currently on the stack.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
@@ -1838,10 +1901,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }
@@ -2194,10 +2257,10 @@ namespace Impunity.Connection
 		IDistributedEntity Entity;
 		ulong FieldBitmask;
 
-		/// <summary>This field's bit in its entity's field mask. Names the field in a guard: OR the masks of the fields
-		/// an operation depends on (<c>a.Health.Mask | a.Name.Mask</c>) and pass them to
-		/// <see cref="IDistributedEntity.DeleteExclusive"/> or as a replace guard. Set when the entity is constructed.</summary>
-		public readonly ulong Mask => FieldBitmask;
+		/// <summary>Names this field in a guard. Combine the fields an operation depends on with <c>|</c>
+		/// (<c>a.Health.Guard | a.Name.Guard</c>) and pass the result to <see cref="IDistributedEntity.DeleteIfUnchanged"/>,
+		/// <c>tx.Delete</c>, <c>tx.ReplaceWith</c>, <c>tx.DependsOn</c> or as a replace guard. See <see cref="FieldGuard"/>.</summary>
+		public readonly FieldGuard Guard => new FieldGuard(Entity, FieldBitmask);
 
 		/// <summary>The number of entries currently in the dictionary, or 0 if it has not been initialized.</summary>
 		public readonly int Count { get => CurrentValue?.Count ?? 0; }

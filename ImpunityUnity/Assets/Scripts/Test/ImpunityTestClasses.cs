@@ -202,9 +202,9 @@ public partial class TestPlayer : TestDistObj, IEquatable<TestPlayer>
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	public override void OnDeleted(BsonValue deleteData)
+	public override void OnDeleted(EntityDeletion deletion)
 	{
-		ImpunityLogger.LogInformation("Player deleted: " + deleteData?.ToString());
+		ImpunityLogger.LogInformation("Player deleted: " + deletion.Data?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
@@ -368,9 +368,9 @@ public partial class ZonePersistedObject : DistributedObjectBase
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 
-	public override void OnDeleted(BsonValue deleteData)
+	public override void OnDeleted(EntityDeletion deletion)
 	{
-		ImpunityLogger.LogInformation("ZonePersistedObject deleted: " + deleteData.ToString());
+		ImpunityLogger.LogInformation("ZonePersistedObject deleted: " + deletion.Data?.ToString());
 		ImpunityTestComponent.WaitingForCount -= 1;
 	}
 }
