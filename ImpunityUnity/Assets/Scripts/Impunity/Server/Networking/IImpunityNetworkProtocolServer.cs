@@ -16,7 +16,8 @@ namespace Impunity.Networking
 	/// Send threading, as <see cref="ServerSideNetworkConnectionProxy"/> uses it: at most one
 	/// <see cref="SendGuaranteedMessageAsync"/> is in flight at a time, and the next is started from the previous one's
 	/// completion, so an implementation may return a task that stays pending while the peer isn't reading.
-	/// <see cref="SendUnguaranteedMessageAsync"/> is only called when <see cref="SupportsUnguaranteed"/> is true, never
+	/// <see cref="SendUnguaranteedMessageAsync"/> is only called when <see cref="SupportsUnguaranteed"/> is true and the
+	/// message is no larger than <see cref="MaxUnguaranteedMessageBytes"/>, never
 	/// concurrently with itself, but possibly while a guaranteed send is in flight.
 	/// </remarks>
 	public interface IImpunityNetworkServerClientContext : IDisposable
@@ -34,6 +35,9 @@ namespace Impunity.Networking
 		string RemoteAddress { get; }
 		/// <summary>Whether this transport supports unguaranteed (UDP-like) delivery.</summary>
 		bool SupportsUnguaranteed { get; }
+		/// <summary>Largest message, in bytes, that <see cref="SendUnguaranteedMessageAsync"/> accepts. A larger
+		/// unguaranteed message is sent with <see cref="SendGuaranteedMessageAsync"/> instead.</summary>
+		int MaxUnguaranteedMessageBytes { get; }
 
 		/// <summary>Sends reliably (TCP/WebSocket). <paramref name="messageBytes"/> holds one or more complete
 		/// length-prefixed messages back to back; a transport that needs per-message boundaries (WebSocket) splits them on

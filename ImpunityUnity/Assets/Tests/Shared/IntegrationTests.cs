@@ -1127,7 +1127,7 @@ namespace Impunity.Tests
 
 			var (c1Entity, c2Entity) = await SetupTwoClientEntity("excl5");
 
-			ushort seqBefore = c2Entity.SendSeq;
+			uint seqBefore = c2Entity.SendSeq;
 			bool done = false; ImpunityErrorResponse err = null; GuardedResult result = GuardedResult.Failed;
 			c2Entity.UpdateIfUnchanged((e, r) => { done = true; err = e; result = r; });
 
@@ -1346,8 +1346,7 @@ namespace Impunity.Tests
 		//
 		// Each client numbers its updates to an entity with its own SendSeq, so the server's per-field
 		// out-of-order guard must only compare seqs from the same writer. The checks read the SERVER's value
-		// through a fresh re-subscribe: a write the server skipped is still relayed, so live listeners
-		// cannot tell.
+		// through a fresh re-subscribe as well as the live listeners' copies.
 
 		// Re-subscribes C2 to the channel and returns its fresh channel + the server's current copy of the entity.
 		async Task<(IntegrationTestChannel channel, IntegrationTestEntity entity)> ResubscribeRemote(IntegrationTestChannel c2Channel, string channelName)
@@ -1371,6 +1370,81 @@ namespace Impunity.Tests
 			await PumpUntil(() => c2Channel.DistributedObjects.Count > 0, TimeSpan.FromSeconds(3), AllConnections());
 
 			return (c1Entity, c2Channel, FirstEntity(c2Channel));
+		}
+
+		// ═══════════════════════════════════════════════════════════
+		// 8c. Out-of-order and long-running sequences
+		// ═══════════════════════════════════════════════════════════
+		//
+		// The tests move a client's SendSeq by hand: backwards to make its next update look like one that
+		// arrived late, forwards to stand in for tens of thousands of updates to other fields.
+
+		/// <summary>A field left alone while its entity sends far more than 65,536 other updates still accepts its next
+		/// write. With 16-bit sequences the write was rejected as stale once the counter was half a lap ahead.</summary>
+		[Test, Category("Sequence")]
+		public async Task Sequence_FieldDormantForManyUpdates_StillApplies()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var (c1Entity, c2Channel, c2Entity) = await SetupMultiWriter("seq1");
+
+			c1Entity.Health.Set(1);
+			await PumpUntil(() => c2Entity.Health.Get() == 1, TimeSpan.FromSeconds(3), AllConnections());
+
+			foreach (uint jump in new uint[] { 40000, 100000 })
+			{
+				c1Entity.SendSeq += jump;
+				int value = (int)jump;
+				c1Entity.Health.Set(value);
+				await PumpUntil(() => c2Entity.Health.Get() == value, TimeSpan.FromSeconds(3), AllConnections());
+				Assert.AreEqual(value, c1Entity.Health.Get(), "The writer never got its own update back");
+			}
+
+			var (_, serverCopy) = await ResubscribeRemote(c2Channel, "seq1");
+			Assert.AreEqual(100000, serverCopy.Health.Get());
+		}
+
+		/// <summary>An update that arrives after a later one from the same writer: the server drops the fields it has
+		/// newer values for, and relays only the rest. Listeners used to be sent the stale bytes too.</summary>
+		[Test, Category("Sequence")]
+		public async Task Sequence_LateUpdate_RelaysOnlyItsFreshFields()
+		{
+			CreateServer();
+			await ConnectLocal();
+			await StartTCPAndConnectRemote();
+
+			var (c1Entity, c2Channel, c2Entity) = await SetupMultiWriter("seq2");
+
+			c1Entity.SendSeq = 9;
+			c1Entity.Health.Set(5); // seq 10
+			await PumpUntil(() => c2Entity.Health.Get() == 5 && c1Entity.Health.Get() == 5, TimeSpan.FromSeconds(3), AllConnections());
+
+			// "Late" update numbered 5: its Health is older than what the server has, its DisplayName is news.
+			c1Entity.SendSeq = 4;
+			c1Entity.Health.Set(3);
+			c1Entity.DisplayName.Set("fresh");
+			await PumpUntil(() => c2Entity.DisplayName.Get() == "fresh" && c1Entity.DisplayName.Get() == "fresh", TimeSpan.FromSeconds(3), AllConnections());
+
+			Assert.AreEqual(5, c2Entity.Health.Get(), "A listener was sent a value the server rejected as stale");
+			Assert.AreEqual(5, c1Entity.Health.Get(), "The writer was echoed a value the server rejected as stale");
+
+			// A late update with nothing fresh in it is not relayed at all.
+			c1Entity.SendSeq = 5;
+			c1Entity.Health.Set(4); // seq 6
+			await PumpFor(TimeSpan.FromMilliseconds(300), AllConnections());
+			Assert.AreEqual(5, c2Entity.Health.Get(), "A wholly stale update reached a listener");
+			Assert.AreEqual(5, c1Entity.Health.Get());
+
+			// Guards still line up with what listeners were told: the rejected fields did not count as changes.
+			c2Entity.Health.Set(8);
+			GuardedResult result = await Pump(c2Entity.UpdateIfUnchangedAsync(), AllConnections());
+			Assert.AreEqual(GuardedResult.Applied, result);
+
+			var (_, serverCopy) = await ResubscribeRemote(c2Channel, "seq2");
+			Assert.AreEqual(8, serverCopy.Health.Get());
+			Assert.AreEqual("fresh", serverCopy.DisplayName.Get());
 		}
 
 		[Test, Category("MultiWriter")]

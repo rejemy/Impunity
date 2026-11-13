@@ -24,12 +24,15 @@ namespace Impunity
 		/// connect handshake, which refuses a client whose version differs with
 		/// <see cref="ImpunityErrorCode.ServerProtocolIncompatible"/>. Bump it whenever the wire protocol or server
 		/// behaviour changes once anything is live.</summary>
-		public const string ImpunityVersion = "1";
+		public const string ImpunityVersion = "2";
 		public const ushort DefaultServerHttpPort = 29653;
 		public const ushort DefaultServerPort = 29654;
 		public const ushort DefaultClientPort = 29655;
 		public const int MinMessageSize = 4096;
 		public const int MaxMessageSize = 65000;
+		/// <summary>Largest message sent over an unguaranteed (datagram) path. Chosen to fit one packet on common
+		/// networks without fragmenting; anything bigger is sent reliably instead.</summary>
+		public const int MaxUnguaranteedMessageSize = 1200;
 		public const string ServerSearchPacketHeader = "SRCH_IMP" + ImpunityVersion + ":";
 		public const string ServerAnnouncePacketHeader = "ANNC_IMP" + ImpunityVersion + ":";
 		public const string ServerSessionDataPacketHeader = "DATA_IMP" + ImpunityVersion + ":";

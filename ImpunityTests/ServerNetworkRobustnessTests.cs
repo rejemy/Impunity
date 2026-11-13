@@ -76,6 +76,7 @@ namespace Impunity.Tests
 		public string ConnectionId => "fake";
 		public string RemoteAddress => "fake";
 		public bool SupportsUnguaranteed => false;
+		public int MaxUnguaranteedMessageBytes => ImpunityConstants.MaxUnguaranteedMessageSize;
 
 		public bool StreamDisposed;
 		public int Sends;

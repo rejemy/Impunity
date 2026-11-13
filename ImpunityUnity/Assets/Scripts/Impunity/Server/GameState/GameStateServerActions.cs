@@ -113,7 +113,7 @@ namespace Impunity.GameState
 		/// <summary>The channel entity's current <c>OutSeq</c> at snapshot time. The client seeds every field's received-seq
 		/// with it so guarded updates are not falsely rejected against modifications made before this client subscribed.</summary>
 		[BsonField("sq")]
-		public ushort Seq;
+		public uint Seq;
 
 		[BsonField("obs")]
 		public ObjectCreateMessageAction[] ObjectsInChannel = Array.Empty<ObjectCreateMessageAction>();
@@ -158,7 +158,7 @@ namespace Impunity.GameState
 
 		/// <summary>The object entity's current <c>OutSeq</c> at snapshot time. See <see cref="ChannelCreateMessageAction.Seq"/>.</summary>
 		[BsonField("sq")]
-		public ushort Seq;
+		public uint Seq;
 
 		public override ushort GetActionType() { return (ushort)ServerActionType.OBJECT_CREATE_MESSAGE; }
 
@@ -179,7 +179,7 @@ namespace Impunity.GameState
 		public ArraySegment<byte> UpdateBytes;
 
 		[BsonField("sq")]
-		public ushort Seq;
+		public uint Seq;
 
 		/// <summary>The sender's note on this update: why it happened. Relayed with the update, never stored. Null (or BSON
 		/// null) for none.</summary>

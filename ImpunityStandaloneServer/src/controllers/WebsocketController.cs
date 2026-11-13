@@ -28,6 +28,7 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 	private readonly byte[] ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 
 	public bool SupportsUnguaranteed { get => false; }
+	public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 	public string RemoteAddress { get => RemoteIPAddress.ToString(); }
 
 	public string ConnectionId { get; private set; } = "";

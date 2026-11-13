@@ -31,6 +31,8 @@ namespace Impunity.Networking
 
 		/// <summary>Set to true when the client responds to a UDP ping, indicating UDP delivery is available.</summary>
 		public bool SupportsUnguaranteed { get; set; } = false;
+		/// <inheritdoc/>
+		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 		private const int ConnectEstablishTimeout = 1000;
 

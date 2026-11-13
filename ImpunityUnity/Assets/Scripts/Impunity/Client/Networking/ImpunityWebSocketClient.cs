@@ -23,6 +23,8 @@ namespace Impunity.Networking
 
 		/// <inheritdoc/>
 		public bool SupportsUnguaranteed { get; private set; } = false;
+		/// <inheritdoc/>
+		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 		private string Url;
 		private int InstanceId = -1;
@@ -285,6 +287,8 @@ namespace Impunity.Networking
 
 		/// <inheritdoc/>
 		public bool SupportsUnguaranteed { get; private set; } = false;
+		/// <inheritdoc/>
+		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 		private string Url;
 		private ImpunityOptions Options;

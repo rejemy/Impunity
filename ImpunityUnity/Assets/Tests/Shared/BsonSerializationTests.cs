@@ -525,18 +525,18 @@ namespace Impunity.Tests
 		{
 			var msg = new ChannelCreateMessageAction { ChannelId = 3u, ChannelName = "room", ChannelType = 1, Seq = 12345 };
 			var back = WireRoundTrip(msg);
-			Assert.AreEqual((ushort)12345, back.Seq);
+			Assert.AreEqual((uint)12345, back.Seq);
 		}
 
 		[Test, Category("GuardedUpdateWire")]
 		public void ObjectCreateMessage_SeqRoundTrips_AndDefaultsToZero()
 		{
 			var withSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1, Seq = 999 });
-			Assert.AreEqual((ushort)999, withSeq.Seq);
+			Assert.AreEqual((uint)999, withSeq.Seq);
 
 			// A message serialized without ever setting Seq must default to 0 (back-compat with old producers).
 			var noSeq = WireRoundTrip(new ObjectCreateMessageAction { ObjectId = 5u, ChannelId = 3u, ObjectType = 1 });
-			Assert.AreEqual((ushort)0, noSeq.Seq);
+			Assert.AreEqual((uint)0, noSeq.Seq);
 		}
 
 		// ───────── Type allow list (_type names in untrusted data) ─────────

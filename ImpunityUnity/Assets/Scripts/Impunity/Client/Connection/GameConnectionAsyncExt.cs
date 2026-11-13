@@ -354,7 +354,7 @@ namespace Impunity.Connection
 
 		/// <summary>Async/await wrapper for <c>BaseGameConnection.UpdateEntity</c>. The task completes when the request succeeds and faults with
 		/// <see cref="ImpunityErrorResponseException"/> if it fails.</summary>
-		public static Task UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq = 0)
+		public static Task UpdateEntityAsync(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, uint seq = 0)
 		{
 			var t = new ImpunityTaskCompletionSource();
 			connection.UpdateEntity(entityId, updateData, guaranteed, seq, t.OnComplete);

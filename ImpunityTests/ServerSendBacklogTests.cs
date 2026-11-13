@@ -40,6 +40,7 @@ namespace Impunity.Tests
 		public string ConnectionId { get; }
 		public string RemoteAddress => ConnectionId;
 		public bool SupportsUnguaranteed => Udp;
+		public int MaxUnguaranteedMessageBytes => ImpunityConstants.MaxUnguaranteedMessageSize;
 
 		public volatile bool Stalled;
 		/// <summary>Whether the client has negotiated UDP.</summary>

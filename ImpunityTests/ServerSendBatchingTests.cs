@@ -192,6 +192,22 @@ namespace Impunity.Tests
 			CollectionAssert.AreEqual(new[] { 1, 2 }, client.StartedMessages);
 		}
 
+		/// <summary>An unguaranteed message too big for one packet is sent reliably even to a client with UDP.</summary>
+		[Test]
+		public void Unguaranteed_OverTheSizeLimit_IsSentReliably()
+		{
+			CreateUnstartedServer();
+			var client = AddClient("client");
+			client.Udp = true;
+
+			client.Proxy.SendMessage((ushort)ServerActionType.BROADCAST_MESSAGE, 0, false, Broadcast(1));
+			client.Proxy.SendMessage((ushort)ServerActionType.BROADCAST_MESSAGE, 0, false, Broadcast(2, ImpunityConstants.MaxUnguaranteedMessageSize));
+			TcpServer.StartScheduledWrites();
+
+			CollectionAssert.AreEqual(new[] { 1 }, client.UnguaranteedMessages);
+			CollectionAssert.AreEqual(new[] { 2 }, client.StartedMessages);
+		}
+
 		/// <summary>Without UDP, an unguaranteed message is sent reliably, in order with everything else.</summary>
 		[Test]
 		public void Unguaranteed_WithoutUdp_IsQueuedInOrder()

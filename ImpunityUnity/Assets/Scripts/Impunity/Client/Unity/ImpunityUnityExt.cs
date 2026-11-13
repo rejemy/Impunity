@@ -251,7 +251,7 @@ namespace Impunity.Unity
 		}
 
 		/// <summary>Coroutine wrapper for <c>BaseGameConnection.UpdateEntity</c>. Yield it, then check <c>Error</c> (null on success).</summary>
-		public static ImpunityYield UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq = 0)
+		public static ImpunityYield UpdateEntityYield(this BaseGameConnection connection, uint entityId, ArraySegment<byte> updateData, bool guaranteed, uint seq = 0)
 		{
 			var action = new ImpunityYield();
 			connection.UpdateEntity(entityId, updateData, guaranteed, seq, action.OnComplete);

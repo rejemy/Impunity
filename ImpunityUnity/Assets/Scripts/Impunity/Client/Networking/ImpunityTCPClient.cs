@@ -24,6 +24,8 @@ namespace Impunity.Networking
 
 		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
 		public bool SupportsUnguaranteed { get; private set; } = false;
+		/// <inheritdoc/>
+		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 		private string? ServerHost;
 		private int ServerPort;
@@ -362,8 +364,12 @@ namespace Impunity.Networking
 			return endpoint.Address.IsIPv4MappedToIPv6 ? new IPEndPoint(endpoint.Address.MapToIPv4(), endpoint.Port) : endpoint;
 		}
 
+		/// <summary>How many messages have arrived over UDP. For tests.</summary>
+		internal int UnguaranteedReceived;
+
 		private void OnSessionDataPacket(ArraySegment<byte> data)
 		{
+			System.Threading.Interlocked.Increment(ref UnguaranteedReceived);
 			try
 			{
 				OnMessageRecieved?.Invoke(data);
@@ -471,6 +477,8 @@ namespace Impunity.Networking
 
 		/// <summary>True after a successful UDP ping/pong exchange with the server.</summary>
 		public bool SupportsUnguaranteed { get; private set; } = false;
+		/// <inheritdoc/>
+		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 
 		/// <summary>Creates a TCP client that connects to a server at the given IP endpoint.</summary>

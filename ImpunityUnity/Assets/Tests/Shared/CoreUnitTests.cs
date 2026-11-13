@@ -550,6 +550,19 @@ namespace Impunity.Tests
 		// ───────── 3. Utility Functions ─────────
 
 		[Test, Category("Utilities")]
+		public void Seq_NextSkipsZeroAndComparesAcrossTheWrap()
+		{
+			Assert.AreEqual(1u, ImpunityUtil.NextSeq(0));
+			Assert.AreEqual(70000u, ImpunityUtil.NextSeq(69999));
+			Assert.AreEqual(1u, ImpunityUtil.NextSeq(uint.MaxValue), "0 means 'no sequence' and must never be handed out");
+
+			Assert.IsTrue(ImpunityUtil.SeqIsNewer(100000, 1));
+			Assert.IsFalse(ImpunityUtil.SeqIsNewer(1, 100000));
+			Assert.IsFalse(ImpunityUtil.SeqIsNewer(7, 7));
+			Assert.IsTrue(ImpunityUtil.SeqIsNewer(1, uint.MaxValue), "just past the wrap is still newer");
+		}
+
+		[Test, Category("Utilities")]
 		public void CompareArraySegments_Equal()
 		{
 			var a = new ArraySegment<byte>(new byte[] { 1, 2, 3 });

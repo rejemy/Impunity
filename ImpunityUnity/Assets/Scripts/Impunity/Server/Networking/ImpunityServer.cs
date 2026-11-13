@@ -166,6 +166,13 @@ namespace Impunity.Networking
 			// Remember the request's correlation id so the reply can echo it back for id-based matching.
 			action.MessageId = msg.MessageId;
 
+			// The sender's delivery class isn't part of the body. Only a plain entity update may be unguaranteed: one
+			// that expects a reply, carries a guard, a conditional action or a note has to arrive, and so does its relay.
+			if ((msg.Flags & ImpunityMessageFlags.UNGUARANTEED) != 0 && action is UpdateEntityAction update && update.MayBeUnguaranteed())
+			{
+				update.SetGuaranteed(false);
+			}
+
 			// Special handling for first request. If an error happens here, we report the result inline and disconnect,
 			// since the GameServer doesn't even know about this connection yet.
 			if (GameServer == null)
@@ -259,7 +266,7 @@ namespace Impunity.Networking
 				return;
 			}
 
-			if (!guaranteed && ClientContext.SupportsUnguaranteed)
+			if (!guaranteed && ClientContext.SupportsUnguaranteed && message.Length <= ClientContext.MaxUnguaranteedMessageBytes)
 			{
 				SendUnguaranteedNow(message);
 				return;

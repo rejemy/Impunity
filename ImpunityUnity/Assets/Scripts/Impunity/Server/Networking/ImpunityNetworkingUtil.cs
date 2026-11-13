@@ -23,6 +23,9 @@ namespace Impunity.Networking
 	{
 		/// <summary>Indicates the sender does not expect a reply to this message.</summary>
 		public const ushort NO_REPLY = 1;
+		/// <summary>The sender chose unguaranteed delivery for this message, whichever path ended up carrying it. The
+		/// server reads it on entity updates so that it relays them unguaranteed too.</summary>
+		public const ushort UNGUARANTEED = 2;
 	}
 
 	/// <summary>BSON-serialized body of a UDP server announce broadcast packet.</summary>

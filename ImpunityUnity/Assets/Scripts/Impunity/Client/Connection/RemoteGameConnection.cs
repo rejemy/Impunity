@@ -584,6 +584,10 @@ namespace Impunity.Connection
 		{
 			ushort flags = 0;
 			ushort messageId = 0;
+			if (!action.Guaranteed)
+			{
+				flags |= ImpunityMessageFlags.UNGUARANTEED;
+			}
 			if (!action.HasCallback())
 			{
 				flags |= ImpunityMessageFlags.NO_REPLY;
@@ -618,7 +622,9 @@ namespace Impunity.Connection
 
 			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, flags, action.GetActionType(), action);
 
-			if (action.Guaranteed)
+			// An unguaranteed message too big for one packet goes the reliable way instead. It keeps its UNGUARANTEED
+			// flag, so the server still relays it unguaranteed to listeners it fits for.
+			if (action.Guaranteed || encodedMessage.Count > NetworkClient.MaxUnguaranteedMessageBytes)
 			{
 				NetworkClient.SendGuaranteedMessage(encodedMessage);
 			}

@@ -1046,7 +1046,7 @@ namespace Impunity.Connection
 		/// <param name="propData">The serialized initial property values for the channel.</param>
 		/// <param name="seq">The channel's current broadcast seq at snapshot time; seeds all per-field received-seqs so
 		/// optimistic guarded updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, uint seq)
 		{
 			// A fresh channel-create means the client has re-subscribed to this id; clear any
 			// lingering suppression so the re-established channel and its objects flow normally.
@@ -1117,7 +1117,7 @@ namespace Impunity.Connection
 		/// initial snapshot delivered when the channel was first received.</param>
 		/// <param name="seq">The object's current broadcast seq at snapshot time; seeds all per-field received-seqs so
 		/// optimistic guarded updates from this fresh subscriber aren't rejected against pre-subscribe modifications.</param>
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, uint seq)
 		{
 			// In-flight create on a channel being immediately-unsubscribed. Drop it, and also
 			// suppress this brand-new object id so its later updates drop quietly rather than
@@ -1199,7 +1199,7 @@ namespace Impunity.Connection
 			DistributedTypeInfo typeInfo = DistributedTypes[entity.DistributedEntityType];
 			if (typeInfo.DistributedFields != null)
 			{
-				entity.FieldRecvSeq = new ushort[typeInfo.DistributedFields.Length];
+				entity.FieldRecvSeq = new uint[typeInfo.DistributedFields.Length];
 			}
 
 			DistributedObjects[entity.DistributedEntityId] = entity;
@@ -1219,7 +1219,7 @@ namespace Impunity.Connection
 		/// entity's current server broadcast seq (from its create message). Without this, a new subscriber's zero-valued
 		/// received-seqs would be behind the server's per-field last-modified seq for any field changed before this client
 		/// subscribed, causing its optimistic guarded updates to be rejected forever with no broadcast to correct them.</summary>
-		private static void SeedFieldRecvSeq(IDistributedEntity entity, ushort seq)
+		private static void SeedFieldRecvSeq(IDistributedEntity entity, uint seq)
 		{
 			if (seq != 0 && entity.FieldRecvSeq != null)
 			{
@@ -1251,7 +1251,7 @@ namespace Impunity.Connection
 		/// <see cref="IDistributedEntity.AddUpdateNote"/>).</param>
 		/// <param name="noteSentMs">The writer's server-time stamp for <paramref name="note"/>.</param>
 		/// <param name="noteIsOwn">True when this connection wrote the update.</param>
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq, BsonValue? note = null, long noteSentMs = 0, bool noteIsOwn = false)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, uint seq, BsonValue? note = null, long noteSentMs = 0, bool noteIsOwn = false)
 		{
 			if (SuppressedEntities.ContainsKey(entityId)) return;
 
@@ -1521,7 +1521,7 @@ namespace Impunity.Connection
 		/// <param name="propertyBytes">The serialized property bytes (full values or a delta).</param>
 		/// <param name="initialRead">True to read full initial values; false to apply a delta update.</param>
 		/// <param name="seq">The update's sequence number for stale-update detection on delta reads; ignored (use 0) for initial reads.</param>
-		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead, ushort seq = 0)
+		public void SetPropertyBytes(IDistributedEntity entity, ArraySegment<byte> propertyBytes, bool initialRead, uint seq = 0)
 		{
 			if (propertyBytes == null || propertyBytes.Count == 0)
 			{
@@ -1558,7 +1558,7 @@ namespace Impunity.Connection
 				{
 					fieldInfo.InitMethod.Invoke(entity, UpdateMethodArgs);
 				}
-				else if (seq == 0 || entity.FieldRecvSeq == null || (short)(seq - entity.FieldRecvSeq[propId]) > 0)
+				else if (seq == 0 || entity.FieldRecvSeq == null || ImpunityUtil.SeqIsNewer(seq, entity.FieldRecvSeq[propId]))
 				{
 					fieldInfo.UpdateMethod.Invoke(entity, UpdateMethodArgs);
 					if (entity.FieldRecvSeq != null)
@@ -1618,7 +1618,7 @@ namespace Impunity.Connection
 				updateDatabuffer = new ArraySegment<byte>(copy);
 			}
 
-			entity.SendSeq++;
+			entity.SendSeq = ImpunityUtil.NextSeq(entity.SendSeq);
 			Connection.UpdateEntity(entity.DistributedEntityId, updateDatabuffer, guaranteedSend, entity.SendSeq, onReply, conditionalAction, note);
 
 		}
@@ -1735,12 +1735,12 @@ namespace Impunity.Connection
 			GameStateActionBase? conditionalAction = TakeConditionalAction(entity);
 			TrackConditionalAction(entity, conditionalAction);
 
-			entity.SendSeq++;
+			entity.SendSeq = ImpunityUtil.NextSeq(entity.SendSeq);
 			Connection!.UpdateEntityIfUnchanged(entity.DistributedEntityId, updateCopy, seqBlob, entity.SendSeq, onComplete, conditionalAction, TakeUpdateNotes(entity));
 		}
 
 		/// <summary>Builds the known-field-seq blob a guarded update or a guarded delete/replace carries:
-		/// <c>[fieldId][seq lo][seq hi]...[0]</c> for each field in <paramref name="mask"/>, using this client's
+		/// <c>[fieldId][seq: uint little-endian]...[0]</c> for each field in <paramref name="mask"/>, using this client's
 		/// last-received seq per field (0 if never received). The server rejects the operation as stale if any listed
 		/// field changed since.</summary>
 		private byte[] BuildKnownSeqBlob(IDistributedEntity entity, ulong mask)
@@ -1756,7 +1756,7 @@ namespace Impunity.Connection
 				}
 			}
 
-			byte[] seqBlob = new byte[count * 3 + 1];
+			byte[] seqBlob = new byte[count * 5 + 1];
 			int pos = 0;
 			foreach (var fieldInfo in typeInfo.DistributedFields)
 			{
@@ -1765,10 +1765,12 @@ namespace Impunity.Connection
 					continue;
 				}
 
-				ushort known = entity.FieldRecvSeq != null ? entity.FieldRecvSeq[fieldInfo.FieldId] : (ushort)0;
+				uint known = entity.FieldRecvSeq != null ? entity.FieldRecvSeq[fieldInfo.FieldId] : 0u;
 				seqBlob[pos++] = fieldInfo.FieldId;
-				seqBlob[pos++] = (byte)(known & 0xFF);
-				seqBlob[pos++] = (byte)((known >> 8) & 0xFF);
+				seqBlob[pos++] = (byte)known;
+				seqBlob[pos++] = (byte)(known >> 8);
+				seqBlob[pos++] = (byte)(known >> 16);
+				seqBlob[pos++] = (byte)(known >> 24);
 			}
 			seqBlob[pos] = 0;
 			return seqBlob;

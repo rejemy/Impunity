@@ -290,19 +290,19 @@ namespace Impunity.Connection
 		// docs/guides/DistributedEntities.md for what each does to entity state.
 
 		/// <inheritdoc/>
-		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq)
+		public void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, uint seq)
 		{
 			EntityManager.HandleCreateChannel(channelId, channelName, channelType, isLocked, instanceFlags, propData, seq);
 		}
 
 		/// <inheritdoc/>
-		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq)
+		public void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, uint seq)
 		{
 			EntityManager.HandleCreateObject(objectId, channelId, objectType, isLocked, instanceFlags, propData, uniqueName, newlyCreated, seq);
 		}
 
 		/// <inheritdoc/>
-		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, ushort seq, BsonValue? note, long noteSentMs, bool noteIsOwn)
+		public void HandleEntityUpdate(uint entityId, ArraySegment<byte> updateData, uint seq, BsonValue? note, long noteSentMs, bool noteIsOwn)
 		{
 			EntityManager.HandleEntityUpdate(entityId, updateData, seq, note, noteSentMs, noteIsOwn);
 		}
@@ -739,7 +739,7 @@ namespace Impunity.Connection
 		/// <see cref="IDistributedEntity.AddConditionalAction"/> rather than calling this directly.</param>
 		/// <param name="note">Optional note relayed with the update (see <see cref="IDistributedEntity.AddUpdateNote"/>),
 		/// stamped with <see cref="GetServerTime"/>. Forces the update to be sent reliably.</param>
-		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
+		public void UpdateEntity(uint entityId, ArraySegment<byte> updateData, bool guaranteed, uint seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
 			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, onComplete);
@@ -767,14 +767,14 @@ namespace Impunity.Connection
 		/// the ordered stream.</summary>
 		/// <param name="entityId">The entity to update.</param>
 		/// <param name="updateData">The serialized changed-fields blob.</param>
-		/// <param name="knownFieldSeqs">The client's known per-field seqs blob, format <c>[fieldId:byte][seq:ushort LE]...[0]</c>.</param>
+		/// <param name="knownFieldSeqs">The client's known per-field seqs blob, format <c>[fieldId:byte][seq:uint LE]...[0]</c>.</param>
 		/// <param name="seq">Per-entity sequence number used to discard stale/out-of-order updates.</param>
 		/// <param name="onComplete">Completion callback; receives an error on rejection (stale data or lock held by another).</param>
 		/// <param name="onUpdatedAction">Optional database action sent in the same message and run only if the update is
 		/// accepted; on rejection it is skipped (<see cref="ImpunityErrorCode.ActionConditionNotMet"/>).</param>
 		/// <param name="note">Optional note relayed with the update if it is accepted (see
 		/// <see cref="IDistributedEntity.AddUpdateNote"/>).</param>
-		public void UpdateEntityIfUnchanged(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, ushort seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
+		public void UpdateEntityIfUnchanged(uint entityId, ArraySegment<byte> updateData, ArraySegment<byte> knownFieldSeqs, uint seq, ImpunityCallback? onComplete, GameStateActionBase? onUpdatedAction = null,
 			BsonValue? note = null)
 		{
 			var action = new UpdateEntityAction(entityId, updateData, seq, knownFieldSeqs, onComplete);

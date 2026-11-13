@@ -54,6 +54,21 @@ namespace Impunity
 	/// <summary>Shared utilities: buffer pooling, BSON mapper setup, hashing, and byte comparison helpers.</summary>
 	public static class ImpunityUtil
 	{
+		/// <summary>The sequence number after <paramref name="seq"/> for an entity's update counters. Never returns 0,
+		/// which means "no sequence" everywhere a seq is carried.</summary>
+		public static uint NextSeq(uint seq)
+		{
+			seq++;
+			return seq == 0 ? 1 : seq;
+		}
+
+		/// <summary>Whether <paramref name="seq"/> is later than <paramref name="than"/>, allowing for wraparound: true
+		/// when it is ahead by less than 2^31.</summary>
+		public static bool SeqIsNewer(uint seq, uint than)
+		{
+			return (int)(seq - than) > 0;
+		}
+
 		private const int SERVER_ACTION_ID_OFFSET = 20000;
 		// Built on first use. Lazy publishes it only once fully configured: a mapper visible before its RegisterTypeId
 		// calls finish would leave a thread racing the first call unable to resolve _t ids.

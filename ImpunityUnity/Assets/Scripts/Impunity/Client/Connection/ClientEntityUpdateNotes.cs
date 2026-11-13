@@ -115,7 +115,7 @@ namespace Impunity.Connection
 		/// <summary>Applies a noted update: its notes are current for the entity while its fields are applied (so their
 		/// <c>OnChanged</c> handlers can read them) and while <see cref="IDistributedEntity.OnUpdateNote"/> runs
 		/// afterwards, once per note, in the order the writer added them.</summary>
-		private void ApplyNotedUpdate(IDistributedEntity entity, ArraySegment<byte> updateData, ushort seq, BsonValue notes, long sentServerMs, bool isOwn)
+		private void ApplyNotedUpdate(IDistributedEntity entity, ArraySegment<byte> updateData, uint seq, BsonValue notes, long sentServerMs, bool isOwn)
 		{
 			// The writer sends an array, one element per AddUpdateNote. Anything else is treated as a single note.
 			UpdateNote[] received;

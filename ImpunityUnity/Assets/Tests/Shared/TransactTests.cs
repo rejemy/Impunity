@@ -158,7 +158,7 @@ namespace Impunity.Tests
 		{
 			var (conns, entities, _) = await Setup("tx_noop", 1);
 			var a = entities[0];
-			ushort seqBefore = a.SendSeq;
+			uint seqBefore = a.SendSeq;
 
 			var probe = new TxProbe();
 			a.Transact(_ => true, probe.OnComplete);
@@ -178,7 +178,7 @@ namespace Impunity.Tests
 			var (conns, entities, _) = await Setup("tx_decline", 2);
 			var a = entities[0];
 			var b = entities[1];
-			ushort seqBefore = a.SendSeq;
+			uint seqBefore = a.SendSeq;
 
 			var actionProbe = new CallbackProbe<BsonValue>();
 			var probe = new TxProbe();

@@ -1203,10 +1203,10 @@ namespace Impunity.GameState
 		public ArraySegment<byte> UpdateBytes;
 
 		[BsonField("sq")]
-		public ushort Seq;
+		public uint Seq;
 
 		/// <summary>When non-null, marks this as a guarded (optimistic-concurrency) update: a blob of the client's known
-		/// per-field seqs, format <c>[fieldId:byte][seq:ushort little-endian]...[0]</c>. The server rejects the whole update
+		/// per-field seqs, format <c>[fieldId:byte][seq:uint little-endian]...[0]</c>. The server rejects the whole update
 		/// with <see cref="ImpunityErrorCode.ActionStaleData"/> if any field is stale. Absent ⇒ ordinary update.</summary>
 		[BsonField("xs")]
 		public ArraySegment<byte> KnownFieldSeqs;
@@ -1241,7 +1241,14 @@ namespace Impunity.GameState
 
 		public UpdateEntityAction() { }
 
-		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ImpunityCallback? onComplete = null)
+		/// <summary>Whether this update may be treated as unguaranteed on the sender's say-so: nothing rides on it that
+		/// has to arrive (no reply, guard, conditional action or note).</summary>
+		internal bool MayBeUnguaranteed()
+		{
+			return !ResultsExpected && KnownFieldSeqs.Array == null && OnUpdatedAction == null && Note == null;
+		}
+
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, uint seq, ImpunityCallback? onComplete = null)
 		{
 			EntityId = entityId;
 			UpdateBytes = updateBytes;
@@ -1249,7 +1256,7 @@ namespace Impunity.GameState
 			OnCompleteCallback = onComplete;
 		}
 
-		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, ushort seq, ArraySegment<byte> knownFieldSeqs, ImpunityCallback? onComplete)
+		public UpdateEntityAction(uint entityId, ArraySegment<byte> updateBytes, uint seq, ArraySegment<byte> knownFieldSeqs, ImpunityCallback? onComplete)
 		{
 			EntityId = entityId;
 			UpdateBytes = updateBytes;

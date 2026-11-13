@@ -24,6 +24,9 @@ namespace Impunity.Networking
 
 		/// <summary>Whether this transport supports unguaranteed (UDP-like) delivery.</summary>
 		bool SupportsUnguaranteed { get; }
+		/// <summary>Largest message, in bytes, to pass to <see cref="SendUnguaranteedMessage"/>. The connection sends a
+		/// larger unguaranteed message with <see cref="SendGuaranteedMessage"/> instead.</summary>
+		int MaxUnguaranteedMessageBytes { get; }
 
 		/// <summary>Sends a length-prefixed binary message reliably.</summary>
 		void SendGuaranteedMessage(ArraySegment<byte> messageBytes);

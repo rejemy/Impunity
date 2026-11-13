@@ -207,9 +207,9 @@ namespace Impunity.Connection
 		bool DirtyGuaranteed { get; }
 
 		/// <summary>Per-entity outgoing sequence counter, incremented each time this entity sends an update.</summary>
-		ushort SendSeq { get; set; }
+		uint SendSeq { get; set; }
 		/// <summary>Per-field last-received sequence numbers, indexed by field ID. Used to detect and discard stale out-of-order updates.</summary>
-		ushort[]? FieldRecvSeq { get; set; }
+		uint[]? FieldRecvSeq { get; set; }
 
 		/// <summary>Marks one or more distributed fields as changed so their new values are sent on the next update
 		/// flush. Normally called by the generated field setters rather than directly: ORs <paramref name="fieldBitmask"/>
@@ -637,9 +637,9 @@ namespace Impunity.Connection
 		public bool DirtyGuaranteed { get; private set; }
 
 		/// <summary>Per-entity outgoing sequence counter, incremented each time this entity sends an update.</summary>
-		public ushort SendSeq { get; set; }
+		public uint SendSeq { get; set; }
 		/// <summary>Per-field last-received sequence numbers, indexed by field ID. Used to detect and discard stale out-of-order updates.</summary>
-		public ushort[]? FieldRecvSeq { get; set; }
+		public uint[]? FieldRecvSeq { get; set; }
 
 		/// <summary>Constructs the entity, resolving its <see cref="DistributedEntityType"/> from the
 		/// <see cref="DistributedEntity"/> attribute and calling <see cref="InitializeDistributedFields"/>, so the

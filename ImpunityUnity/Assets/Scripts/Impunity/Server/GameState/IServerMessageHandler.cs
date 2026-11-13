@@ -9,15 +9,15 @@ namespace Impunity.GameState
 	{
 		/// <summary>Called when a new channel (subscription group) is created. <paramref name="seq"/> is the entity's current
 		/// broadcast seq at snapshot time, used to seed per-field received-seqs for optimistic guarded updates.</summary>
-		void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, ushort seq);
+		void HandleCreateChannel(uint channelId, string channelName, int channelType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, uint seq);
 		/// <summary>Called when a new entity is created within a channel. <paramref name="seq"/> is the entity's current
 		/// broadcast seq at snapshot time, used to seed per-field received-seqs for optimistic guarded updates.</summary>
-		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, ushort seq);
+		void HandleCreateObject(uint objectId, uint channelId, int objectType, bool isLocked, byte instanceFlags, ArraySegment<byte> propData, string? uniqueName, bool newlyCreated, uint seq);
 		/// <summary>Called when an entity's properties are updated (dirty fields only).</summary>
 		/// <summary>An entity's properties were updated. <paramref name="note"/> is the writer's note on the update (null
 		/// for none), stamped <paramref name="noteSentMs"/>; <paramref name="noteIsOwn"/> is true when this connection
 		/// wrote the update.</summary>
-		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, ushort seq, BsonValue? note, long noteSentMs, bool noteIsOwn);
+		void HandleEntityUpdate(uint entityId, ArraySegment<byte> propData, uint seq, BsonValue? note, long noteSentMs, bool noteIsOwn);
 		/// <summary>Called when a custom event is fired on an entity. <paramref name="sentServerMs"/> is the server time
 		/// the sender fired it at; <paramref name="isOwn"/> is true when this connection fired it.</summary>
 		void HandleEntityEvent(uint entityId, int eventType, BsonValue eventData, long sentServerMs, bool isOwn);
