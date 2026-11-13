@@ -229,10 +229,10 @@ repository**, as `UltraLiteDB.dll` is, so `build.sh` and `./test.sh` need no net
 
 | Target | RID | Runner | Artifact | State |
 | --- | --- | --- | --- | --- |
-| macOS arm64 | `osx-arm64` | `macos-14` | `libdatachannel.dylib` | Built locally and browser-tested. |
+| macOS arm64 | `osx-arm64` | `macos-15` | `libdatachannel.dylib` | Built locally and browser-tested. |
 | Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | Not built yet: needs a workflow run. |
 | Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | Not built yet: needs a workflow run. |
-| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Not built yet: needs a workflow run. |
+| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Built and smoke-tested by the workflow; not committed until all four legs pass. |
 
 - Location: `ImpunityStandaloneServer/runtimes/<rid>/native/`, each with a `libdatachannel.manifest.json` giving
   the pinned tags and commits, build flags, dependencies, platform floor and the file's SHA-256.

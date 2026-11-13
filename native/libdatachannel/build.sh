@@ -59,7 +59,13 @@ case "$RID" in
 		;;
 	linux-*)
 		# No dependency on the host's libstdc++: only glibc is left, and its floor is that of the build machine.
-		LDC_EXTRA+=("-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc")
+		# --no-undefined: a shared library may be linked with symbols left unresolved, which only shows up when it
+		# is loaded. Make that a build error instead.
+		LDC_EXTRA+=("-DCMAKE_SHARED_LINKER_FLAGS=-static-libstdc++ -static-libgcc -Wl,--no-undefined")
+		# libdatachannel's find module puts the Mbed TLS archives on the link line as tls, crypto, x509. GNU ld reads
+		# archives once, in order, so what x509 needs from crypto (mbedtls_pk_write_pubkey and friends) was never
+		# pulled in. Naming crypto again at the very end of the line resolves it.
+		LDC_EXTRA+=("-DCMAKE_CXX_STANDARD_LIBRARIES=$WORK/mbedtls-install-$RID/lib/libmbedcrypto.a")
 		;;
 	win-x64)
 		# Static C runtime everywhere, so the server needs no Visual C++ redistributable.
@@ -78,7 +84,7 @@ PYTHON="$(command -v python3 || command -v python)"
 "$PYTHON" "$WORK/mbedtls/scripts/config.py" -f "$WORK/mbedtls/include/mbedtls/mbedtls_config.h" set MBEDTLS_SSL_DTLS_SRTP
 cmake -S "$WORK/mbedtls" -B "$WORK/mbedtls-build-$RID" "${COMMON[@]}" \
 	-DENABLE_TESTING=OFF -DENABLE_PROGRAMS=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
-	-DMBEDTLS_FATAL_WARNINGS=OFF -DCMAKE_INSTALL_PREFIX="$MBED_PREFIX"
+	-DMBEDTLS_FATAL_WARNINGS=OFF -DCMAKE_INSTALL_PREFIX="$MBED_PREFIX" -DCMAKE_INSTALL_LIBDIR=lib
 cmake --build "$WORK/mbedtls-build-$RID" --config Release -j "$JOBS"
 cmake --install "$WORK/mbedtls-build-$RID" --config Release
 
