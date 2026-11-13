@@ -9,6 +9,7 @@ Networked multiplayer save-game and distributed object library for Unity. Provid
 | `ImpunityCodeGenerator/` | netstandard2.0 | Roslyn source generator — produces serialization helpers for distributed entity types |
 | `ImpunityRuntime/` | netstandard2.1 | Core shared library (networking, serialization, game state) — used by both client and server. This is just the project file to build the dll, the actual code lives ImpunityUnity/Assets/Scripts/Impunity for ease of testing in Unity |
 | `ImpunityStandaloneServer/` | net10.0 | ASP.NET Core standalone server with WebSocket + TCP transport, can host multiple Impunity server instances |
+| `native/libdatachannel/` | C/C++ (CMake) | `build.sh` builds the pinned libdatachannel + Mbed TLS into one shared library for the current platform and writes it, with a manifest, to `ImpunityStandaloneServer/runtimes/<rid>/native/` (committed binaries; rebuilt by `.github/workflows/native-libdatachannel.yml`). For the planned WebRTC transport, see `docs/designs/WebRtcTransport.md`. Nothing loads it yet |
 | `ImpunityTests/` | net10.0 | NUnit test project runnable with plain `dotnet test` — compiles the shared test sources against the non-Unity runtime; also hosts the out-of-proc standalone-server transport tests |
 | `ImpunityUnity/` | Unity 6 (netstandard2.1) | Unity project containing client connection code, distributed field types, and test scenes |
 

@@ -23,6 +23,14 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Native libdatachannel for the WebRTC transport, one folder per runtime id, built by
+       native/libdatachannel/build.sh. Copied as is: the server picks its own platform's file at startup and runs
+       without WebRTC when there is none. -->
+  <ItemGroup>
+    <Content Remove="runtimes/**" />
+    <None Include="runtimes/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/Server/**/*.cs" />
     <Compile Include="../ImpunityUnity/Assets/Scripts/Impunity/ImpunityLifecycle.cs" />

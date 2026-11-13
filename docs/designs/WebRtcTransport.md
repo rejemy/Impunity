@@ -222,31 +222,40 @@ port; no ICE servers; ICE-TCP off; `disableAutoNegotiation` left off so the answ
 
 ### Build and packaging
 
-No trustworthy prebuilt set covers all four platforms, so Impunity builds them. A GitHub Actions workflow
-builds the pinned sources and the outputs are **committed to the repository**, as `UltraLiteDB.dll` is, so
-`build.sh` and `./test.sh` need no network or toolchain.
+No trustworthy prebuilt set covers all four platforms, so Impunity builds them. One script,
+`native/libdatachannel/build.sh`, builds the library for whatever platform it runs on; the workflow
+`.github/workflows/native-libdatachannel.yml` runs it on each platform, and the outputs are **committed to the
+repository**, as `UltraLiteDB.dll` is, so `build.sh` and `./test.sh` need no network or toolchain.
 
-| Target | RID | Runner | Artifact |
-| --- | --- | --- | --- |
-| macOS arm64 | `osx-arm64` | `macos-14` | `libdatachannel.dylib` |
-| Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` |
-| Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` |
-| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` |
+| Target | RID | Runner | Artifact | State |
+| --- | --- | --- | --- | --- |
+| macOS arm64 | `osx-arm64` | `macos-14` | `libdatachannel.dylib` | Built locally and browser-tested. |
+| Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | Not built yet: needs a workflow run. |
+| Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | Not built yet: needs a workflow run. |
+| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Not built yet: needs a workflow run. |
 
-- Location: `ImpunityStandaloneServer/runtimes/<rid>/native/`, with a manifest listing the libdatachannel
-  commit, build flags and a SHA-256 per file.
+- Location: `ImpunityStandaloneServer/runtimes/<rid>/native/`, each with a `libdatachannel.manifest.json` giving
+  the pinned tags and commits, build flags, dependencies, platform floor and the file's SHA-256.
+- Pins: libdatachannel v0.24.6 and Mbed TLS v3.6.7, each by tag and commit. The script refuses a tag that no
+  longer points at the pinned commit.
 - One shared library per platform with libjuice, usrsctp and the TLS library linked statically:
-  `-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DBUILD_SHARED_LIBS=ON`.
-- TLS backend: OpenSSL linked statically is the first choice. If a static OpenSSL proves awkward on Windows or
-  for an old glibc floor, libdatachannel's MbedTLS backend builds with plain CMake everywhere and is the
-  fallback. Decide in the build stage and use the same backend on all four.
-- Check each artifact: `otool -L` / `ldd` / PE imports show no stray dependencies (no Homebrew paths, no system
-  OpenSSL); record the glibc floor and the macOS deployment target.
-- `ImpunityStandaloneServer/build.sh` copies a fixed file list today. It switches to copying the whole build
-  output so the `runtimes` folder travels with the server.
-- Elsewhere (Alpine/musl, macOS x64, Windows arm64) the load fails and the server runs without WebRTC.
-- Static linking makes Impunity responsible for rebuilding when libdatachannel or the TLS library ships a
-  security fix. Ship the MPL-2.0 notice and the dependency licenses with the binaries.
+  `-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DUSE_MBEDTLS=ON -DBUILD_SHARED_LIBS=ON`.
+- **TLS backend: Mbed TLS**, built from source by the same script. OpenSSL would have needed a different static
+  build recipe on each platform (Homebrew, distro packages, vcpkg) and the platform's own choice of deployment
+  target; Mbed TLS is plain CMake everywhere. It is also much smaller: 2.2 MB stripped on macOS against 6.3 MB
+  with OpenSSL. libdatachannel's DTLS code needs `MBEDTLS_SSL_DTLS_SRTP` even without media, so the script
+  switches that on in the Mbed TLS config header before building.
+- The script fails if the result depends on anything beyond the system libraries (`otool -L` on macOS,
+  `objdump` on Linux and Windows), and records the glibc floor or macOS deployment target (12.0) in the manifest.
+  Linux links `libstdc++` statically; Windows uses the static C runtime.
+- The workflow smoke-tests each artifact on its own runner with `native/libdatachannel/smoke.py`: load the
+  library, create a peer and a data channel, read back an offer with a certificate fingerprint, delete both.
+- `ImpunityStandaloneServer.csproj` copies `runtimes/` to the build output, and `build.sh` copies it on to
+  `bin/StandaloneServer/`.
+- Elsewhere (Alpine/musl, macOS x64, Windows arm64) there is no library and the server runs without WebRTC.
+- Static linking makes Impunity responsible for rebuilding when libdatachannel or Mbed TLS ships a security
+  fix. Ship the MPL-2.0 notice (libdatachannel, libjuice), the usrsctp BSD licence and Mbed TLS's Apache-2.0
+  notice with the binaries. **Not done yet.**
 
 A native crash takes the process down; managed code cannot turn that into fallback. Isolating it would need a
 helper process and is not planned.
@@ -279,7 +288,7 @@ TURN is not supported in the first version. A client whose network blocks UDP st
 | Stage | Work | Proof |
 | --- | --- | --- |
 | A (done) | Shared-runtime fixes from section 2, `MaxUnguaranteedMessageBytes`, version bump. | New cases on `_EmbeddedTcp`: an unguaranteed update stays unguaranteed downstream; a reordered update relays only its fresh fields; a field dormant for more than 65,536 entity updates still applies; an oversize unguaranteed update arrives reliably. Full `./test.sh` passes. |
-| B | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
+| B (macOS done; other three need a workflow run) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
 | C | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
 | D | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
 | E | `ImpunityWebRTC.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
@@ -307,7 +316,8 @@ same machine. The spike code was not kept.
 
 Things the spike showed that change the plan:
 
-- **Size.** The library is 6.3 MB stripped, so four committed platforms add about 25 MB to the repository.
+- **Size.** The OpenSSL build is 6.3 MB stripped. (The Mbed TLS build adopted in section 8 is 2.2 MB, so four
+  committed platforms add roughly 10 MB to the repository.)
 - **The C structs differ between releases.** `rtcConfiguration` on libdatachannel's main branch has fields that
   v0.24.6 lacks. The P/Invoke layer must match the pinned header exactly, and the manifest check in section 8 is
   required, not optional.
@@ -316,6 +326,9 @@ Things the spike showed that change the plan:
   WebSocket.
 - **Threads.** The process ran about 50 threads with three peers and 48 with one, including ASP.NET's own. That
   suggests at most one thread per peer; it was not measured at scale.
+
+A second run against the Mbed TLS build from `native/libdatachannel/build.sh` gave the same results: channel
+open in 61 ms from a candidate-less offer, 200 of 200 echoes, 201 WebSocket binary frames alongside.
 
 Not covered: packet loss (that the channel really drops instead of retransmitting), Firefox and Safari, any
 NAT, `public_address`, load, and process shutdown with peers still connected (the spike server did not exit on
@@ -329,7 +342,7 @@ yet about libdatachannel).
 | Does libjuice connect when the offer carries no candidates? | Yes on one machine in Chromium (section 11). Unproven across NAT and in Firefox and Safari. Fallback: pass browser candidates through, refusing multicast and broadcast targets. | Stage D across two hosts; stage E per browser. |
 | Does the channel drop under loss instead of retransmitting? | Settings are confirmed on both ends; behaviour under loss is not. | Stage D with induced loss. |
 | Does `public_address` candidate injection work behind real NAT? | Assumed yes; it is the same technique other WebRTC servers use. | A test deployment on a cloud VM in stage C. |
-| OpenSSL or MbedTLS? | OpenSSL unless static builds are painful. | Stage B. |
+| OpenSSL or MbedTLS? | Mbed TLS (section 8). Works with Chromium on macOS; the other platforms and browsers are unproven. | Workflow run for the other three; stage E per browser. |
 | Is one mux port enough under load? | Assumed yes for `max_peers` 256. | Stage D load case; stage F. |
 | Is 1,200 bytes the right cap, and 16 KiB the right budget? | Starting values. | Stage F measurements. |
 | Is the latency benefit real through Unity's `Update()` loop? | Unknown. Messages are only applied once per frame on both ends. | Stage F. |

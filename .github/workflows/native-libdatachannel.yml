@@ -1,0 +1,70 @@
+# Builds the libdatachannel native library for the four platforms the standalone server supports WebRTC on, and
+# (optionally) commits the results under ImpunityStandaloneServer/runtimes/. Run it by hand after changing the pins
+# in native/libdatachannel/build.sh. See docs/designs/WebRtcTransport.md, section 8.
+name: Native libdatachannel
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit the built libraries to this branch
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: osx-arm64, os: macos-14, lib: libdatachannel.dylib }
+          - { rid: linux-x64, os: ubuntu-22.04, lib: libdatachannel.so }
+          - { rid: linux-arm64, os: ubuntu-22.04-arm, lib: libdatachannel.so }
+          - { rid: win-x64, os: windows-2022, lib: datachannel.dll }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: bash
+        run: native/libdatachannel/build.sh
+      - name: Smoke test
+        shell: bash
+        run: |
+          PY="$(command -v python3 || command -v python)"
+          "$PY" native/libdatachannel/smoke.py "ImpunityStandaloneServer/runtimes/${{ matrix.rid }}/native/${{ matrix.lib }}"
+      - name: Show manifest
+        shell: bash
+        run: cat "ImpunityStandaloneServer/runtimes/${{ matrix.rid }}/native/libdatachannel.manifest.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libdatachannel-${{ matrix.rid }}
+          path: ImpunityStandaloneServer/runtimes/${{ matrix.rid }}/native/
+          if-no-files-found: error
+
+  commit:
+    if: ${{ inputs.commit }}
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Commit libraries
+        run: |
+          for dir in artifacts/libdatachannel-*; do
+            rid="${dir#artifacts/libdatachannel-}"
+            mkdir -p "ImpunityStandaloneServer/runtimes/$rid/native"
+            cp "$dir"/* "ImpunityStandaloneServer/runtimes/$rid/native/"
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ImpunityStandaloneServer/runtimes
+          if git diff --cached --quiet; then
+            echo "Libraries unchanged; nothing to commit."
+          else
+            git commit -m "Rebuild libdatachannel native libraries"
+            git push
+          fi

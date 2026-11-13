@@ -75,3 +75,6 @@ lib
 obj
 ImpunityStandaloneServer/worlds
 ImpunityUnity/Builds
+
+# Sources and build trees of native/libdatachannel/build.sh
+native/libdatachannel/.work/
