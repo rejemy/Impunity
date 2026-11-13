@@ -1,0 +1,10 @@
+{
+  "rid": "linux-arm64",
+  "file": "libdatachannel.so",
+  "sha256": "c405d94096ff4b69f614da50fafb688004579cc116c1c93ab0f9c8c902c7385a",
+  "libdatachannel": { "tag": "v0.24.6", "commit": "6b1e2e620f1e37f0eafeee702eaea0043cb305fd" },
+  "mbedtls": { "tag": "v3.6.7", "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5" },
+  "flags": "-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=ON -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_DEPS_LIBS=OFF -DPREFER_SYSTEM_LIB=OFF",
+  "dependencies": "ld-linux-aarch64.so.1 libc.so.6 libm.so.6",
+  "floor": "GLIBC_2.34"
+}

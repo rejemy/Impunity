@@ -1,10 +1,10 @@
 {
   "rid": "osx-arm64",
   "file": "libdatachannel.dylib",
-  "sha256": "f7b3849647d2683b7eba215291ac5fc03a288c8ca09300188ab702c5343d8d6e",
+  "sha256": "8f8a2567519d8d7496bd5159b1952f1f988c65a0d4306ff35a136cf480d14a9d",
   "libdatachannel": { "tag": "v0.24.6", "commit": "6b1e2e620f1e37f0eafeee702eaea0043cb305fd" },
   "mbedtls": { "tag": "v3.6.7", "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5" },
   "flags": "-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=ON -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_DEPS_LIBS=OFF -DPREFER_SYSTEM_LIB=OFF",
-  "dependencies": "/usr/lib/libSystem.B.dylib /usr/lib/libc++.1.dylib",
+  "dependencies": "/usr/lib/libc++.1.dylib /usr/lib/libSystem.B.dylib",
   "floor": "macOS 12.0"
 }

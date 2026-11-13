@@ -1,0 +1,10 @@
+{
+  "rid": "win-x64",
+  "file": "datachannel.dll",
+  "sha256": "50a09f926ea74bbed055ab049a7f6ea96731917a5a17b3564af682093c478b8c",
+  "libdatachannel": { "tag": "v0.24.6", "commit": "6b1e2e620f1e37f0eafeee702eaea0043cb305fd" },
+  "mbedtls": { "tag": "v3.6.7", "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5" },
+  "flags": "-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DUSE_GNUTLS=OFF -DUSE_MBEDTLS=ON -DBUILD_SHARED_LIBS=ON -DBUILD_SHARED_DEPS_LIBS=OFF -DPREFER_SYSTEM_LIB=OFF",
+  "dependencies": "bcrypt.dll kernel32.dll ws2_32.dll",
+  "floor": "Windows 10"
+}
