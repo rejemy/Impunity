@@ -1003,6 +1003,37 @@ Use it for client-side prediction, cosmetic/interpolated state, or any value you
 
 `SetUnguaranteed(value)` behaves like `Set` but flags the update as best-effort (it may be sent over an unreliable transport and may be dropped or reordered). Use it for high-frequency, self-correcting streams — positions, rotations — where the latest value matters and a missed intermediate frame is harmless. The per-field sequence numbers ensure a late straggler never clobbers a newer value.
 
+### Inspecting live state
+
+Read-only queries over the server's live memory, on `BaseGameConnection` (callback form; `…Async` / `…Yield` wrappers as usual). They run on the live thread like any live action, so each answer is one consistent moment, and none of them loads anything — a channel that isn't in memory is `ActionNotFound`, never loaded to answer.
+
+| Call | Answers |
+|---|---|
+| `DescribeChannels(namePrefix, cb)` | every live channel (`ChannelInfo`): id, name, type, flags, subscribers' connection ids, object count, `IdleSinceMs` (0 = has subscribers), lock holder |
+| `DescribeChannel(name, cb)` | that channel plus every object in it (`EntityInfo`): id, type, unique name, flags, lock holder and waiters, ephemeral owner, broadcast seq — subscribed or not |
+| `GetEntitySnapshot(entityId, cb)` | one entity's state (`EntitySnapshot`): its fields in the create wire format plus per-field bookkeeping (`FieldSnapshot`: the broadcast seq and time of the last change, the writer's connection id and its own seq) |
+| `DescribeConnections(cb)` | every connection (`ConnectionInfo`): local or remote, UDP, subscriptions, locks held, owned delete-on-disconnect entities |
+
+They are general-purpose (which areas are loaded and who is in each, who holds a lock) as well as debugging tools. They show nothing a client couldn't get by subscribing — channels aren't access-controlled — plus who is subscribed and who holds which lock; a server whose clients shouldn't see that sets `ImpunityOptions.AllowStateInspection = false`, and the queries fail with `ActionBadRequest`. (`ListActiveChannels` / `ListPersistedChannels` remain, unaffected.)
+
+The server doesn't know what a custom-typed field means (it stores opaque bytes), so the client decodes a snapshot with its own type registry, on `ClientEntityManager`:
+
+- `GetFieldsAsBson(entity)` — every field of this client's copy by field name (persisted or not; temporal fields as their current value).
+- `DecodeSnapshot(snapshot)` — the server's copy in the same shape; `DecodeSnapshotEntity(snapshot)` gives a detached typed instance instead (never registered or sent).
+- `CompareWithSnapshot(entity, snapshot)` (pure) and `CheckSync(entity, cb)` (fetches the snapshot, compares on arrival) — an `EntitySyncReport` with one `FieldSyncResult` per field: both values, `BsonDiff` lines naming each differing path, and a `FieldSyncState`.
+- `GetRegisteredEntities()`, `FindEntity(id)`, `GetTypeName(typeId)`.
+
+The comparison uses the per-field seqs to tell a desync from a change on its way. With `c` the client's received seq for the field, `m` the server's last-modifying broadcast seq and `o` the entity's broadcast seq at the snapshot:
+
+| State | When the values differ and… |
+|---|---|
+| `InFlightToServer` | the field is dirty here, or this client owns the client-authoritative entity and has sent an update newer than any the server had applied |
+| `InFlightToClient` | `m` is newer than `c`: the server changed it after this client's last update for it (on its way — or a dropped unguaranteed update, if it persists) |
+| `ChangedSinceSnapshot` | `c` is newer than `o`: this client received a later change than the snapshot |
+| `Mismatch` | none of the above: both sides have seen the same change and disagree — a desync |
+
+`report.InSync` means no `Mismatch`; `report.IsSettled` means every field matches. A field the application writes with `SetLocalOnly` on purpose (a projection, like a position interpolated from a motion field) shows up as a `Mismatch`; an application that does this should filter those fields out itself. Coverage: `Assets/Tests/Shared/InspectionTests.cs` (`--filter "Category=Inspection"`).
+
 ---
 
 ## 14. Quick reference
@@ -1034,7 +1065,7 @@ For a contended change use `entity.Transact(body, onComplete)`: the body runs ag
 
 ### Operations (on `IDistributedEntity`)
 
-`TriggerEvent` · `AddUpdateNote` · `UpdateIfUnchanged` · `Transact` · `Delete` · `DeleteIfUnchanged` · `ReplaceIfUnchanged` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`.
+`TriggerEvent` · `AddUpdateNote` · `UpdateIfUnchanged` · `Transact` · `Delete` · `DeleteIfUnchanged` · `ReplaceIfUnchanged` · `TryLock` · `WaitForLock` · `Unlock` · `RunExclusive` — all callback-based. Channels add `Unsubscribe`. The manager adds `CreateObject`, `CreateChannel`, `SubscribeToChannel`, `UnsubscribeFromChannel`, `GetFieldSchema`, `GetPersistedFieldsAsBson`, `ApplyPersistedFieldsFromBson`, and the inspection helpers `GetFieldsAsBson`, `DecodeSnapshot`, `CompareWithSnapshot`, `CheckSync` (see [Inspecting live state](#inspecting-live-state)).
 
 `Delete` and the manager's `CreateObject` take an optional trailing database action that runs only if the entity operation succeeded — the world ↔ inventory move. `AddConditionalAction(action)` attaches one to an entity's next update (`UpdateIfUnchanged(onComplete, action)` attaches and flushes). See [§11](#11-conditional-actions).
 

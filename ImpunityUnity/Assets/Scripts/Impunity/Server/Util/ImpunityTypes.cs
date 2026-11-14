@@ -103,6 +103,15 @@ namespace Impunity
 		/// </summary>
 		public long MaxSendBacklogBytes = 32L * 1024 * 1024;
 
+		/// <summary>
+		/// Whether clients may inspect the server's live state: <c>DescribeChannels</c>, <c>DescribeChannel</c>,
+		/// <c>GetEntitySnapshot</c> and <c>DescribeConnections</c> on <c>BaseGameConnection</c>. They are read-only and
+		/// show nothing a client couldn't get by subscribing (channels aren't access-controlled), plus who is subscribed
+		/// and who holds which lock. Turn off on a server whose clients shouldn't see that; the queries then fail with
+		/// <see cref="ImpunityErrorCode.ActionBadRequest"/>. <c>ListActiveChannels</c> isn't affected.
+		/// </summary>
+		public bool AllowStateInspection = true;
+
 		/// <summary>Floor applied to <see cref="ConnectionTimeoutMillis"/>. Test seam only: lowered by tests so silence
 		/// detection can be exercised in a couple of seconds instead of <see cref="ImpunityKeepAlive.MinTimeoutMillis"/>.</summary>
 		internal int ConnectionTimeoutFloorMillis = ImpunityKeepAlive.MinTimeoutMillis;

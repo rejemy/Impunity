@@ -145,7 +145,7 @@ namespace Impunity.GameState
 	}
 
 	// Base for all live entities
-	public abstract class GameStateEntity
+	public abstract partial class GameStateEntity
 	{
 		public uint Id { get; internal set; }
 		public string? Name { get; private set; }
@@ -734,7 +734,7 @@ namespace Impunity.GameState
 
 	}
 
-	public class GameStateChannel : GameStateEntity
+	public partial class GameStateChannel : GameStateEntity
 	{
 		Dictionary<uint, GameStateObject> Members;
 		Dictionary<string, GameStateReplicant> Listeners;
@@ -1309,7 +1309,7 @@ namespace Impunity.GameState
 	}
 
 	// Live gamestate in memory
-	public class GameStateLive
+	public partial class GameStateLive
 	{
 		public GameStateServer Server { get; private set; }
 		GameStateEntityType[] EntityTypes = null!;

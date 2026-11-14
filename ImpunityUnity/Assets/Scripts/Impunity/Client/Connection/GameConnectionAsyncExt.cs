@@ -416,6 +416,46 @@ namespace Impunity.Connection
 			return t.Task;
 		}
 
+		/// <summary>Async wrapper for <c>BaseGameConnection.DescribeChannels</c>: completes with the channels, faults on an error.</summary>
+		public static Task<List<ChannelInfo>> DescribeChannels(this BaseGameConnection connection, string? namePrefix = null)
+		{
+			var t = new ImpunityTaskCompletionSource<List<ChannelInfo>>();
+			connection.DescribeChannels(namePrefix, t.OnComplete);
+			return t.Task;
+		}
+
+		/// <summary>Async wrapper for <c>BaseGameConnection.DescribeChannel</c>: completes with the channel and its objects, faults on an error.</summary>
+		public static Task<ChannelContents> DescribeChannel(this BaseGameConnection connection, string channelName)
+		{
+			var t = new ImpunityTaskCompletionSource<ChannelContents>();
+			connection.DescribeChannel(channelName, t.OnComplete);
+			return t.Task;
+		}
+
+		/// <summary>Async wrapper for <c>BaseGameConnection.GetEntitySnapshot</c>: completes with the snapshot, faults on an error.</summary>
+		public static Task<EntitySnapshot> GetEntitySnapshot(this BaseGameConnection connection, uint entityId)
+		{
+			var t = new ImpunityTaskCompletionSource<EntitySnapshot>();
+			connection.GetEntitySnapshot(entityId, t.OnComplete);
+			return t.Task;
+		}
+
+		/// <summary>Async wrapper for <c>BaseGameConnection.DescribeConnections</c>: completes with the connections, faults on an error.</summary>
+		public static Task<List<ConnectionInfo>> DescribeConnections(this BaseGameConnection connection)
+		{
+			var t = new ImpunityTaskCompletionSource<List<ConnectionInfo>>();
+			connection.DescribeConnections(t.OnComplete);
+			return t.Task;
+		}
+
+		/// <summary>Async wrapper for <c>ClientEntityManager.CheckSync</c>: completes with the report, faults on an error.</summary>
+		public static Task<EntitySyncReport> CheckSyncAsync(this ClientEntityManager manager, IDistributedEntity entity)
+		{
+			var t = new ImpunityTaskCompletionSource<EntitySyncReport>();
+			manager.CheckSync(entity, t.OnComplete);
+			return t.Task;
+		}
+
 	}
 
 	/// <summary>Async/await extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>

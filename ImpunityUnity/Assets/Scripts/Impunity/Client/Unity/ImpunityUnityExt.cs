@@ -311,6 +311,51 @@ namespace Impunity.Unity
 			connection.ListPersistedChannels(action.OnComplete);
 			return action;
 		}
+
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.DescribeChannels</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<List<ChannelInfo>> DescribeChannelsYield(this BaseGameConnection connection, string? namePrefix = null)
+		{
+			var action = new ImpunityYield<List<ChannelInfo>>();
+			connection.DescribeChannels(namePrefix, action.OnComplete);
+			return action;
+		}
+
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.DescribeChannel</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<ChannelContents> DescribeChannelYield(this BaseGameConnection connection, string channelName)
+		{
+			var action = new ImpunityYield<ChannelContents>();
+			connection.DescribeChannel(channelName, action.OnComplete);
+			return action;
+		}
+
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.GetEntitySnapshot</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<EntitySnapshot> GetEntitySnapshotYield(this BaseGameConnection connection, uint entityId)
+		{
+			var action = new ImpunityYield<EntitySnapshot>();
+			connection.GetEntitySnapshot(entityId, action.OnComplete);
+			return action;
+		}
+
+		/// <summary>Coroutine wrapper for <c>BaseGameConnection.DescribeConnections</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<List<ConnectionInfo>> DescribeConnectionsYield(this BaseGameConnection connection)
+		{
+			var action = new ImpunityYield<List<ConnectionInfo>>();
+			connection.DescribeConnections(action.OnComplete);
+			return action;
+		}
+
+		/// <summary>Coroutine wrapper for <c>ClientEntityManager.CheckSync</c>. Yield it, then check <c>Error</c> (null on success) and read the
+		/// result from <c>Value</c>.</summary>
+		public static ImpunityYield<EntitySyncReport> CheckSyncYield(this ClientEntityManager manager, IDistributedEntity entity)
+		{
+			var action = new ImpunityYield<EntitySyncReport>();
+			manager.CheckSync(entity, action.OnComplete);
+			return action;
+		}
 	}
 
 	/// <summary>Unity coroutine yield extension methods for <see cref="GameStateDBCollection{DTYPE}"/>.</summary>

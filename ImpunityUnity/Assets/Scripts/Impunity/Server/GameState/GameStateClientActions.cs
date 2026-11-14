@@ -47,6 +47,10 @@ namespace Impunity.GameState
 		LIST_ACTIVE_CHANNELS = 311,
 		CANCEL_LOCK_WAIT = 313,
 		LIST_PERSISTED_CHANNELS = 312,
+		DESCRIBE_CHANNELS = 314,
+		DESCRIBE_CHANNEL = 315,
+		GET_ENTITY_SNAPSHOT = 316,
+		DESCRIBE_CONNECTIONS = 317,
 
 		BROADCAST_MESSAGE = 400,
 	}
@@ -140,6 +144,14 @@ namespace Impunity.GameState
 					return typeof(ListActiveChannelsAction);
 				case ClientActionType.LIST_PERSISTED_CHANNELS:
 					return typeof(ListPersistedChannelsAction);
+				case ClientActionType.DESCRIBE_CHANNELS:
+					return typeof(DescribeChannelsAction);
+				case ClientActionType.DESCRIBE_CHANNEL:
+					return typeof(DescribeChannelAction);
+				case ClientActionType.GET_ENTITY_SNAPSHOT:
+					return typeof(GetEntitySnapshotAction);
+				case ClientActionType.DESCRIBE_CONNECTIONS:
+					return typeof(DescribeConnectionsAction);
 
 				case ClientActionType.CREATE_CHANNEL:
 					return typeof(CreateChannelAction);
@@ -1563,6 +1575,97 @@ namespace Impunity.GameState
 		{
 			Result = game.DB.ListPersistedChannelNames();
 		}
+	}
+
+	/// <summary>Base of the live-state inspection queries: refused with <see cref="ImpunityErrorCode.ActionBadRequest"/>
+	/// when the server has <see cref="ImpunityOptions.AllowStateInspection"/> off.</summary>
+	public abstract class InspectionActionBase<TResult> : ClientActionResultBase<TResult>
+	{
+		public override bool IsDBOperation() { return false; }
+
+		protected sealed override void DoAction(GameStateServer game)
+		{
+			if (!game.Options.AllowStateInspection)
+			{
+				throw new ImpunityServerException(ImpunityErrorCode.ActionBadRequest, "State inspection is turned off on this server");
+			}
+			Result = Inspect(game.Live);
+		}
+
+		protected abstract TResult Inspect(GameStateLive live);
+	}
+
+	/// <summary>Describes every channel in live memory: type, subscribers, object count, idle time, lock.</summary>
+	public class DescribeChannelsAction : InspectionActionBase<List<ChannelInfo>>
+	{
+		/// <summary>Keep only channels whose name starts with this (ordinal); null or empty for all.</summary>
+		[BsonField("np")]
+		public string? NamePrefix;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.DESCRIBE_CHANNELS; }
+
+		public DescribeChannelsAction() { }
+
+		public DescribeChannelsAction(string? namePrefix, ImpunityCallback<List<ChannelInfo>>? onComplete = null)
+		{
+			NamePrefix = namePrefix;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override List<ChannelInfo> Inspect(GameStateLive live) => live.DescribeChannels(NamePrefix);
+	}
+
+	/// <summary>Describes one live channel and every object in it.</summary>
+	public class DescribeChannelAction : InspectionActionBase<ChannelContents>
+	{
+		[BsonField("cn")]
+		public string ChannelName = null!;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.DESCRIBE_CHANNEL; }
+
+		public DescribeChannelAction() { }
+
+		public DescribeChannelAction(string channelName, ImpunityCallback<ChannelContents>? onComplete = null)
+		{
+			ChannelName = channelName;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override ChannelContents Inspect(GameStateLive live) => live.DescribeChannel(ChannelName);
+	}
+
+	/// <summary>Snapshots one live entity's state: its property bytes plus per-field bookkeeping.</summary>
+	public class GetEntitySnapshotAction : InspectionActionBase<EntitySnapshot>
+	{
+		[BsonField("ei")]
+		public uint EntityId;
+
+		public override ushort GetActionType() { return (ushort)ClientActionType.GET_ENTITY_SNAPSHOT; }
+
+		public GetEntitySnapshotAction() { }
+
+		public GetEntitySnapshotAction(uint entityId, ImpunityCallback<EntitySnapshot>? onComplete = null)
+		{
+			EntityId = entityId;
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override EntitySnapshot Inspect(GameStateLive live) => live.SnapshotEntity(EntityId);
+	}
+
+	/// <summary>Describes every connection: local or remote, subscriptions, locks held, owned ephemerals.</summary>
+	public class DescribeConnectionsAction : InspectionActionBase<List<ConnectionInfo>>
+	{
+		public override ushort GetActionType() { return (ushort)ClientActionType.DESCRIBE_CONNECTIONS; }
+
+		public DescribeConnectionsAction() { }
+
+		public DescribeConnectionsAction(ImpunityCallback<List<ConnectionInfo>>? onComplete = null)
+		{
+			OnCompleteCallback = onComplete;
+		}
+
+		protected override List<ConnectionInfo> Inspect(GameStateLive live) => live.DescribeConnections();
 	}
 
 	/// <summary>Broadcasts a typed message to all connected clients.</summary>

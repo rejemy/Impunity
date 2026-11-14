@@ -918,6 +918,50 @@ namespace Impunity.Connection
 			DoAction(new ListPersistedChannelsAction(onComplete));
 		}
 
+		// -------- Live-state inspection
+
+		/// <summary>Describes every channel in the server's live memory: id, name, type, persistence, subscribers' connection
+		/// ids, object count, idle time and lock holder — e.g. to show which areas are loaded and who is in each. Read-only;
+		/// refused (<see cref="ImpunityErrorCode.ActionBadRequest"/>) when the server has
+		/// <see cref="ImpunityOptions.AllowStateInspection"/> off. See docs/guides/DistributedEntities.md, "Inspecting live state".</summary>
+		/// <param name="namePrefix">Keep only channels whose name starts with this (ordinal); null or empty for all.</param>
+		/// <param name="onComplete">Invoked with the channels sorted by name, or an error.</param>
+		public void DescribeChannels(string? namePrefix, ImpunityCallback<List<ChannelInfo>>? onComplete)
+		{
+			DoAction(new DescribeChannelsAction(namePrefix, onComplete));
+		}
+
+		/// <summary>Describes one channel in the server's live memory and every object in it: id, type, unique name,
+		/// flags, lock holder and waiters, ephemeral owner, broadcast seq. Works whether or not this client subscribes.
+		/// Fails with <see cref="ImpunityErrorCode.ActionNotFound"/> when no channel of that name is live (it is never
+		/// loaded to answer).</summary>
+		/// <param name="channelName">The channel's name.</param>
+		/// <param name="onComplete">Invoked with the channel and its objects (by ascending id), or an error.</param>
+		public void DescribeChannel(string channelName, ImpunityCallback<ChannelContents>? onComplete)
+		{
+			DoAction(new DescribeChannelAction(channelName, onComplete));
+		}
+
+		/// <summary>Snapshots one live entity on the server: its identity and lock state, every field's value in wire
+		/// form, and per-field bookkeeping (the broadcast seq and time of its last change, and who made it). Decode the
+		/// values with <see cref="ClientEntityManager.DecodeSnapshot"/>, or compare them with this client's copy with
+		/// <see cref="ClientEntityManager.CheckSync"/>. Fails with <see cref="ImpunityErrorCode.ActionNotFound"/> for an
+		/// id that isn't a live channel or object.</summary>
+		/// <param name="entityId">The entity id (<see cref="IDistributedEntity.DistributedEntityId"/>).</param>
+		/// <param name="onComplete">Invoked with the snapshot, or an error.</param>
+		public void GetEntitySnapshot(uint entityId, ImpunityCallback<EntitySnapshot>? onComplete)
+		{
+			DoAction(new GetEntitySnapshotAction(entityId, onComplete));
+		}
+
+		/// <summary>Describes every connection to the server: id, local or remote, unguaranteed delivery, subscribed
+		/// channels, locks held and owned delete-on-disconnect entities.</summary>
+		/// <param name="onComplete">Invoked with the connections sorted by id, or an error.</param>
+		public void DescribeConnections(ImpunityCallback<List<ConnectionInfo>>? onComplete)
+		{
+			DoAction(new DescribeConnectionsAction(onComplete));
+		}
+
 		// -------- Broadcast
 
 		/// <summary>Sends a typed broadcast message to all connected clients (delivered to their <see cref="OnBroadcastMessage"/>). Fire-and-forget — no completion callback or reply.</summary>
