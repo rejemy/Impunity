@@ -1,459 +1,512 @@
 # WebRTC transport for Unity WebGL
 
-Status: design, revised 2026-11-12 after a review against the code. Stages A to D are implemented and tested:
-the shared-runtime fixes (section 2), the native libraries for four platforms (section 8), the server side of
-the transport (sections 3 to 6, 9), and a headless test client that runs the whole transport battery over a real
-data channel. Stage E, the Unity WebGL bridge, is written and its browser code has been run against the real
-server, but **it has not yet been through a Unity WebGL build**. Measurements (stage F) are not started. Section
-11 records what a throwaway spike proved. This revision replaces the original proposal, which is kept beside it
-as [WebRtcTransport.original.md](WebRtcTransport.original.md) for reference.
+Status: implemented. Reviewed against the repository on 2026-11-14. The standalone server, native libraries for
+four platforms, headless test client, and Unity WebGL bridge are present. A real Unity WebGL build is confirmed
+working in Chromium. Network impairment, NAT, Firefox/Safari, and capacity validation remain outstanding.
 
-**Update 2026-11-14:** stage E is now proven in a real Unity WebGL build (Chromium), using the swarm demo in
-`ImpunityUnity/` (see "Stage E proven, stage F started" below). What remains is measuring under packet loss,
-and Firefox and Safari.
+This document describes the current transport and its limits. The [connection guide](../guides/Connections.md)
+covers the logical connection; the [distributed entity guide](../guides/DistributedEntities.md) covers the
+replication model; the [swarm demo guide](../../ImpunityUnity/docs/SwarmDemo.md) covers exercising and measuring it.
 
-## 1. Goal and verdict
+## 1. Purpose and contract
 
-Browser games can only reach Impunity over WebSocket, so `SetUnguaranteed` state (movement, aim) waits behind
-every lost TCP segment. The goal is UDP-style delivery for that state in a Unity WebGL build.
+Impunity keeps a WebSocket connection for reliable traffic and adds one optional, bidirectional WebRTC data
+channel for unguaranteed entity updates such as movement and aim. Every peer connection terminates at the
+standalone ASP.NET server through libdatachannel. The server relays state through the existing channel
+subscriptions; clients do not connect directly to one another.
 
-The approach: keep the WebSocket as the connection, and add one optional WebRTC data channel beside it for
-unguaranteed entity updates. The standalone server terminates every peer connection with
-[libdatachannel](https://github.com/paullouisageneau/libdatachannel) and keeps relaying through the existing
-channel subscriptions. Clients never connect to each other. If WebRTC is unavailable for any reason, the
-connection carries on over WebSocket exactly as today.
+The channel is unordered with zero retransmissions. A lost update does not have to be retransmitted before a
+later update is delivered. This remains SCTP over DTLS with congestion control and buffering, not raw UDP or a
+delivery-time guarantee.
 
-This is feasible. The alternatives were checked and do not work today:
+WebSocket is the lifetime owner and fallback. `Connect` completes through the ordinary Impunity handshake and
+clock sync without waiting for WebRTC. If the optional channel is unavailable, later unguaranteed sends use
+WebSocket. An open but congested channel drops updates rather than moving its backlog onto the reliable path.
+Losing WebRTC does not disconnect the game or fail its pending reliable actions.
 
-| Alternative | Why not |
-| --- | --- |
-| SIPSorcery (pure C#, no native code) | Its SCTP has no partial reliability and no unordered sends: `FORWARD-TSN` is commented out of the chunk enum and `SctpDataSender` retransmits without limit. A channel opened with `maxRetransmits: 0` would behave reliably. |
-| WebTransport on Kestrel | Still a preview feature in .NET 10, and datagrams are not implemented. Worth revisiting when they are: Safari has shipped WebTransport since 26.4. |
-| DataChannelDotnet (NuGet wrapper) | Could not confirm which native platforms it ships. Impunity needs about twenty C functions, so it owns a small P/Invoke layer instead. |
+The production client implementation is Unity WebGL. Native Unity clients retain TCP/UDP or WebSocket;
+`RtcWebSocketTestClient` is a headless test transport, not a shipped native-client API. There are no media
+tracks, reliable data channels, TURN configuration, application fragmentation, or WebSocket replacement.
 
-What this buys, stated plainly: a later update no longer waits for the retransmission of an earlier one. It is
-still SCTP over DTLS with congestion control, not raw UDP, and it promises no delivery time.
+## 2. Replication and wire contract
 
-Out of scope for the first version: replacing the WebSocket, native (non-browser) WebRTC clients, peer-to-peer,
-audio/video, TURN hosting, reliable data channels, and application-level fragmentation.
+The current wire-protocol version is `ImpunityConstants.ImpunityVersion = "2"`. The establish request carries
+that version, and a remote server rejects a missing or different version with `ServerProtocolIncompatible`.
+There is no legacy protocol path or capability-version negotiation. Game schema/rule compatibility remains a
+separate check through `GameStateFormatData.Version` and its checksum.
 
-## 2. Bugs in today's code that this work must fix first
+Each data-channel message is exactly one existing Impunity frame: **12 total header bytes**, including the
+four-byte total-length prefix, followed by BSON. There is no RTC-specific envelope, packet sequence, or
+connection token. The native peer and its owning WebSocket supply the connection identity. See
+[ImpunityNetworkingUtil.cs](../../ImpunityUnity/Assets/Scripts/Impunity/Server/Networking/ImpunityNetworkingUtil.cs).
 
-These were found while reviewing the proposal. They affected the existing TCP+UDP transport, and a second
-unordered path would have made each of them worse. **All four are now fixed** in the shared runtime, with
-regression tests (`--filter "Category=Sequence|Category=Unguaranteed"`).
+### Delivery intent
 
-1. **Unguaranteed intent is lost at the server.** `GameStateActionBase.Guaranteed` is `[BsonIgnore]` and defaults
-   to true; `ImpunityServer.ClientMessageReceived` never sets it. An update that arrived over UDP is relayed to
-   every listener reliably, so UDP only helps the upstream hop.
-   *Fix:* a header flag, `ImpunityMessageFlags.UNGUARANTEED = 2`, set by the sender from the action's delivery
-   class regardless of which path carries it. The server honours it only for `UpdateEntityAction`.
-2. **Stale fields are relayed.** `GameStateEntity.UpdateProps` (`GameStateLive.cs`) skips a field whose sequence
-   is stale, but the channel and object overrides relay the original `propData` under a fresh `OutSeq`. Listeners
-   accept bytes the server itself rejected.
-   *Fix:* relay only the accepted fields (copy their byte ranges into a scratch buffer); stamp `LastModSeq` only
-   for those; send nothing if every field was rejected.
-3. **16-bit sequence wrap drops valid writes.** `SendSeq` is a per-entity `ushort` bumped on every update, and
-   freshness is `(short)(seq - RecvSeq[propId]) > 0`. A field untouched for 32,768 updates of its entity (about
-   nine minutes of 60 Hz movement) has its next write rejected as stale. This hits guaranteed writes too.
-   *Fix:* widen `Seq`, `SendSeq`, `OutSeq`, `RecvSeq`, `LastModSeq`, `FieldRecvSeq` and the known-field-seq blob
-   to `uint`, compared with a signed 32-bit difference (`ImpunityUtil.SeqIsNewer`). The wire cost is two more
-   bytes per field in guard blobs, plus whatever BSON spends on a wider integer in each update. At 60 Hz the
-   window is over a year per entity.
-4. **No size limit on unguaranteed sends.** Anything under 65,000 bytes goes to UDP.
-   *Fix:* both ends send an unguaranteed message reliably when it exceeds the transport's limit (section 5).
+`RemoteGameConnection.SendMessage` writes `ImpunityMessageFlags.UNGUARANTEED` (value 2) from the action's delivery
+class, even if this particular send falls back to WebSocket. `GameStateActionBase.Guaranteed` itself is not
+BSON-serialized. The server restores unguaranteed intent only for an `UpdateEntityAction` whose
+`MayBeUnguaranteed()` returns true: no requested reply, known-field guard, conditional action, or update note.
+Other actions retain guaranteed delivery.
 
-All four change the wire or its meaning, so `ImpunityConstants.ImpunityVersion` went from 1 to 2. There is no
-capability negotiation and no legacy path: the project does not keep backward compatibility before a game ships.
+This lets a writer using WebSocket fallback still reach another client's working data channel. Every recipient
+selects its own transport. Reliable dirty fields and update extras continue to force reliable sends. Database
+operations, subscriptions, entity creation/deletion, events, locks, guarded operations, notes, and action replies
+use the reliable path in normal client operation.
 
-## 3. Architecture
+### Freshness
+
+Entity update sequences are `uint`: client `SendSeq`, wire `Seq`, server `RecvSeq`/`OutSeq`/`LastModSeq`, and
+client `FieldRecvSeq`. `ImpunityUtil.NextSeq` skips zero, which means no sequence. `SeqIsNewer` uses a signed
+32-bit difference; its ordering window is less than 2^31 increments (about 414 days at 60 updates/second for one
+entity). Guard blobs use `[fieldId: byte][seq: uint little-endian]...[0]`.
+
+The server's `ApplyProps` checks each field against the last sequence from that field's last writer. It applies
+and stamps accepted fields, excludes stale fields from the relayed bytes, and leaves their `LastModSeq`
+unchanged. A wholly stale property update without a note produces no relay and does not advance `OutSeq`.
+Listeners compare the server's broadcast sequence per field. This preserves fresh fields in a partly stale
+message rather than dropping the whole message. Notes can require a relay even without accepted fields.
+
+There is no ordering between WebSocket and the data channel. An update can overtake creation or arrive after
+deletion; unknown entities do not acquire state from those packets. The implementation uses existing entity
+IDs, snapshots, and sequences, not separate incarnation tokens. The sequence checks have a finite comparison
+window and do not establish a global order between different writers.
+
+Games should use unguaranteed delivery for independently useful replacement values, send fresh samples
+regularly, and finish movement with a guaranteed value when convergence matters. Use `force: true` if the final
+value equals the local value and dirty tracking would otherwise suppress it. Lost samples are not replayed by
+the transport.
+
+## 3. Architecture and ownership
 
 ```mermaid
 flowchart LR
-    G[Unity game / RemoteGameConnection] --> C[ImpunityWebSocketClient, WebGL]
-    C --> W[WebSocket: everything reliable, plus signaling]
-    C --> J[ImpunityWebRTC.jslib: RTCPeerConnection]
-    J --> D[Unordered data channel, DTLS over UDP]
+    G[Unity game / RemoteGameConnection] --> C[ImpunityWebSocketClient: WebGL]
+    C --> J[ImpunityWebSocket.jslib]
+    J --> W[WebSocket: binary gameplay and text signaling]
+    J --> D[Unordered data channel over DTLS / UDP]
     W --> S[WebSocketController]
-    D --> N[WebRtcSession over libdatachannel]
+    D --> N[WebRtcSession / libdatachannel]
     N --> S
-    S --> P[The connection's existing proxy]
+    S --> P[One existing connection proxy]
+    P --> L[Live-state and database workers]
 ```
 
-The WebRTC session is a private detail of the WebSocket transport on both ends, the same way the UDP socket is
-a private detail of `ImpunityTCPClient` and `ImpunityNetworkTCPServer` today. One browser has one proxy, one
-connection id, one world authorization. Nothing above the transport knows WebRTC exists; it sees
-`SupportsUnguaranteed` turn true and later, perhaps, false again.
+WebRTC is a private detail of the WebSocket transport, much as the UDP socket is a private detail of the TCP
+transport. One browser has one logical connection, one proxy, and one world authorization. The shared runtime
+selects paths through `SupportsUnguaranteed` and `MaxUnguaranteedMessageBytes`, not WebRTC-specific APIs.
 
-The transport interfaces already fit:
+Both transport interfaces distinguish reliable and datagram receives with `OnMessageRecieved` and
+`OnUnguaranteedMessageRecieved` (the spelling is the existing API). This distinction keeps optional-path traffic
+from extending the reliable connection's silence deadline. TCP/UDP uses the same split.
 
-- `SupportsUnguaranteed` is already dynamic. The TCP transports flip it when the UDP ping/pong completes.
-- `IImpunityNetworkServerClientContext` already allows an unguaranteed send while a reliable write is in flight.
-- `ServerSideNetworkConnectionProxy.QueueMessage` already routes on `SupportsUnguaranteed` per message.
-
-One member is added to each transport interface: `MaxUnguaranteedMessageBytes`. `QueueMessage` and
-`RemoteGameConnection` send anything larger through the reliable path.
-
-Standalone-only classes, outside the glob of shared server sources:
-
-| Class | Responsibility |
+| Component | Responsibility |
 | --- | --- |
-| `LibDataChannelNative` | P/Invoke for the pinned C API, native loading, callback lifetime. |
-| `WebRtcService` | Loads the library once, owns configuration and the peer limit, creates sessions. Singleton. |
-| `WebRtcSession` | One peer connection and one data channel, owned by one `WebSocketController`. |
+| [WebSocketController](../../ImpunityStandaloneServer/src/controllers/WebsocketController.cs) | Owns the socket and optional session; separates text signaling from binary frames; serializes socket sends. |
+| [WebRtcService](../../ImpunityStandaloneServer/src/webrtc/WebRtcService.cs) | Singleton for native availability, configuration, peer/channel callback routing, admission checks, and periodic liveness ticks. |
+| [WebRtcSession](../../ImpunityStandaloneServer/src/webrtc/WebRtcSession.cs) | One peer and one channel; answer generation, sends, health clocks, and asynchronous deletion. |
+| [LibDataChannelNative](../../ImpunityStandaloneServer/src/webrtc/LibDataChannelNative.cs) | Version-specific C interop, platform selection, manifest/hash validation, and library loading. |
+| [ImpunityWebSocketClient](../../ImpunityUnity/Assets/Scripts/Impunity/Client/Networking/ImpunityWebSocketClient.cs) | Managed WebGL transport; exposes channel availability and bridges copied frames into the shared runtime. |
+| [ImpunityWebSocket.jslib](../../ImpunityUnity/Assets/Plugins/ImpunityWebSocket.jslib) | Owns browser WebSocket/peer/channel objects, signaling, timers, retry, and WASM transfers in one instance registry. |
 
-## 4. Signaling
+Native code and ASP.NET integration stay in the standalone project. The shared runtime remains
+`netstandard2.1`; native interop is not shipped inside Unity's plugins. Native callbacks copy data into managed
+memory and route through the existing receive/parser path; game-state work is queued to the live worker, and
+client action application/callbacks occur through `RemoteGameConnection.Update()`.
 
-Signaling uses **WebSocket text frames on the existing socket**. Impunity messages are binary frames; the
-jslib already ignores anything that is not an `ArrayBuffer`, and `WebSocketController` can branch on
-`WebSocketMessageType.Text`. Text frames never reach `OnMessageRecieved`, so the action protocol,
-`RemoteGameConnection` and the proxy are untouched.
+## 4. Signaling and establishment
+
+Signaling uses JSON **text messages on the existing WebSocket**. Binary messages remain Impunity frames. Text
+messages never enter the action factory or game-state queues. Availability is learned from the answer or a
+refusal in response to an offer; it is not advertised in `EstablishConnectResult` or a separate capability push.
 
 ```text
-browser                                        server
-  |-- text {"t":"offer","sdp":"..."} ----------->|   create peer, set remote description
-  |<- text {"t":"answer","sdp":"..."} -----------|   answer includes the server's candidates
-  |          or {"t":"unavailable","r":"..."}    |
-  |== ICE / DTLS / SCTP over UDP ================|
-  |   data channel "open" on each side           |   each side sets SupportsUnguaranteed = true
+browser                                         standalone server
+   |-- WebSocket opens --------------------------->|
+   |-- binary Impunity establish ----------------->|  normal logical connection
+   |-- text {"t":"offer","sdp":"..."} ------------>|  optional negotiation in parallel
+   |<- text {"t":"answer","sdp":"..."} ------------|  complete server candidates
+   |      or {"t":"unavailable","r":"..."}         |
+   |=== ICE / DTLS / SCTP over UDP =================|
+   |    each local channel-open event enables sends |
 ```
 
-Rules:
+The browser creates `RTCPeerConnection({ iceServers: [] })` and
+`createDataChannel("impunity", { ordered: false, maxRetransmits: 0 })`. It sends its offer as soon as
+`setLocalDescription` resolves; it does not wait for candidate gathering or send trickled candidates.
 
-- The browser is always the offerer and creates the channel:
-  `createDataChannel("impunity", { ordered: false, maxRetransmits: 0 })`. The server accepts exactly one
-  incoming channel and checks it is unordered with zero retransmits; anything else closes the peer.
-- **No trickle ICE and no browser candidates.** The browser sends its offer as soon as `setLocalDescription`
-  resolves. The server removes any `a=candidate` lines from the offer and learns the browser's address as a
-  peer-reflexive candidate when the browser's first connectivity check arrives. Browser host candidates are
-  mDNS names a remote server could not resolve anyway, and this way the server never sends a packet to an
-  address that did not contact it first, so no candidate address policy is needed.
-- The server gathers only local candidates, which is immediate, and returns the complete answer in one frame.
-- There is no activation handshake. A data channel opens only after ICE, DTLS and SCTP have all succeeded in
-  both directions, so each side starts sending on its own `open` event and stops on `close` or `error`.
-- There is no per-packet envelope. One data-channel message is one complete Impunity frame (12-byte header and
-  BSON body). The channel belongs to one DTLS session owned by one WebSocket; a retry is a new peer object.
-- The browser starts as soon as the WebSocket opens, in parallel with the Impunity handshake. `Connect` never
-  waits for WebRTC.
-- Server-side text sends share the socket with the proxy's reliable writes, and `WebSocket.SendAsync` must not
-  run concurrently. `WebSocketController` takes a `SemaphoreSlim` around every socket send. Reliable writes are
-  already serialized by the proxy, so the lock is only ever contended by the one answer frame.
+The server removes `a=candidate` and `a=end-of-candidates` lines from the offer. It learns the browser's remote
+address through the browser's incoming ICE connectivity check as a peer-reflexive candidate. This avoids
+requiring the server to resolve browser mDNS host candidates or initiate checks to client-supplied candidate
+addresses. It still depends on the browser reaching a server candidate; it does not solve blocked UDP.
 
-Limits: one peer per WebSocket at a time; offers over 16 KiB are refused; a second offer while one is pending
-is refused; a process-wide `max_peers`. A socket that never completes the Impunity handshake is closed by the
-existing 2.5-second establish timeout, which takes its peer with it.
+libdatachannel auto-negotiation generates the answer after the remote offer is set. The server waits for its
+local gathering-complete callback, up to five seconds, then reads the full description. No local candidates
+means failure. If configured, it adds a `public_address` host candidate on the same `udp_port`; fingerprints and
+ICE credentials are left intact. There is no trickle exchange, activation handshake, or offer/attempt ID.
 
-Trust is unchanged from the original proposal. The browser trusts the page's HTTPS/WSS endpoint; the offer and
-answer travel over that socket and carry the DTLS certificate fingerprints; each DTLS stack verifies its peer
-against them. libdatachannel and the browser generate their own self-signed certificates. No public certificate
-is provisioned for WebRTC, and fingerprint verification is never disabled.
+The server adopts one incoming channel and checks `unordered`, `unreliable`, zero retransmits, and zero
+packet-lifetime limit. Extra channels are deleted. It does not validate the channel label or subprotocol.
+Each endpoint enables sending on its own channel-open event; reliable connection establishment remains
+independent. Before the game connection has a server and connection replicant, datagram gameplay is dropped.
 
-## 5. Sending, receiving and limits
+### Refusals and limits
 
-| Message | Path |
+| `r` value | Meaning |
 | --- | --- |
-| Guaranteed, or not an entity update | WebSocket. |
-| Unguaranteed, channel not open | WebSocket (existing fallback). |
-| Unguaranteed, larger than `MaxUnguaranteedMessageBytes` | WebSocket. |
-| Unguaranteed, channel open, send buffer under budget | Data channel. |
-| Unguaranteed, channel open, send buffer over budget | Dropped. |
+| `disabled` | Server configuration disables WebRTC. |
+| `unavailable` | Native service cannot operate, or peer creation fails. |
+| `full` | The peer-count check reaches `max_peers`. |
+| `busy` | This socket already has an offer being answered. |
+| `failed` | The offer cannot be answered, including invalid SDP or gathering failure. |
 
-- `MaxUnguaranteedMessageBytes` is 1,200 for WebRTC and for the existing UDP transport. This is a conservative
-  budget for one unfragmented packet, to be checked against real movement payloads.
-- Send budget: skip the send when `bufferedAmount` (browser) or `rtcGetBufferedAmount` (server) is above
-  16 KiB. `maxRetransmits: 0` stops retransmission but not queueing, and stale movement is worth less than no
-  movement. Dropping a whole unguaranteed update is within its contract.
-- The server never falls back to the WebSocket from inside `SendUnguaranteedMessageAsync`; the choice was made
-  in `QueueMessage` before the call. A send that fails after that is dropped.
-- Encode-once fan-out is unchanged: with no envelope, every recipient gets the same shared array.
-- Received data-channel messages go to the same `OnMessageRecieved` handler as WebSocket messages, after a
-  check that the declared frame length equals the message length. On the server only `UpdateEntityAction` is
-  accepted from the data channel; anything else is dropped and logged.
-- A data-channel receive does not refresh the proxy's reliable keepalive timestamp. Otherwise a dead WebSocket
-  could be held open by movement packets. (The existing UDP path refreshes it today; it gets the same fix.)
+An SDP string over 16,384 characters is rejected by `AnswerAsync`; the outer message is subject to the
+controller's receive buffer. Only one offer is answered per socket at a time. A later offer replaces its
+existing session. A peer that never opens is closed after 15 seconds. Admission uses a current-count check,
+not an atomic capacity reservation; concurrent offers can exceed the configured count.
 
-Ordering across the two paths is not preserved. An update can overtake the reliable message that creates its
-entity, or arrive after the one that deletes it. Both ends already drop updates for unknown entities, and the
-per-field sequence check (section 2, fix 3) stops an old value replacing a newer one. Games should send
-unguaranteed state as complete replacement values and finish a motion with one guaranteed update.
+A 2.5-second controller deadline waits for the **first binary Impunity message**, not for successful world
+authorization. Signaling does not reset it. Native negotiation can allocate a peer before authorization, and
+the deadline should not be described as a complete pre-authentication resource limit.
 
-## 6. Liveness and retry
+Binary sends and signaling replies take the same `SemaphoreSlim` (`SendLock`). The proxy already serializes
+its reliable writes; this extra lock coordinates them with signaling. Batched reliable frames are split into
+individual WebSocket binary messages while holding the lock. The bounded socket-close handshake is a separate
+shutdown path.
 
-- When the channel has carried nothing for one second, each side sends the existing header-only `KEEPALIVE`
-  frame over it. If a side receives nothing on the channel for five seconds, it closes the peer and sets
-  `SupportsUnguaranteed` to false; later unguaranteed sends use the WebSocket.
-- A peer `failed`/`closed` state or a channel `close`/`error` does the same immediately.
-- The browser retries once, 30 seconds after a failure, with a new peer. It does not retry after
-  `unavailable`.
-- Losing the WebSocket tears down the peer. Losing the peer never reports `OnNetworkError`.
-- `Dispose()` closes both without reporting an error.
+## 5. Sending, receiving, and buffering
 
-The game can read `SupportsUnguaranteed` on its connection to show or log which mode it is in.
+| Send condition | Path/result |
+| --- | --- |
+| Guaranteed | WebSocket. |
+| Unguaranteed, no open data channel | WebSocket fallback. |
+| Unguaranteed frame larger than 1,200 bytes | Reliable path, retaining its delivery-intent flag upstream. |
+| Unguaranteed, channel open, buffer at/below budget | Submit one binary frame to the data channel. |
+| Unguaranteed, channel open, already buffered above 16 KiB | Drop the update. |
 
-## 7. Unity WebGL bridge
+`ImpunityConstants.MaxUnguaranteedMessageSize` is 1,200 bytes, including the Impunity header. Both TCP/UDP and
+WebSocket/WebRTC expose this limit. Client routing occurs in `RemoteGameConnection`; server routing occurs in
+`ServerSideNetworkConnectionProxy.QueueMessage`, before bypassing the reliable queue. This is an application
+size budget, not a guarantee that SCTP/DTLS/IP never fragments on a particular network path.
 
-`ImpunityWebRTC.jslib` sits beside `ImpunityWebSocket.jslib` and shares its instance registry, because the peer
-needs its instance's WebSocket for signaling. The WebGL `ImpunityWebSocketClient` drives it.
+The browser checks `RTCDataChannel.bufferedAmount`; the server checks `rtcGetBufferedAmount`. These are
+admission thresholds on already-buffered data, not hard total-memory limits: a send is allowed at exactly
+16 KiB, lower transport buffers are not included, and the server also sends timer-driven keepalives. There is
+no latest-value coalescing, application expiry queue, or replay. Zero retransmits alone does not eliminate
+initial-send buffering.
 
-- All signaling happens in JavaScript. C# receives only `open`, `close(reason)` and binary messages.
-- Feature-detect `RTCPeerConnection`, wrap construction in `try`, and catch every rejected promise. Any failure
-  is "stay on WebSocket".
-- `binaryType = "arraybuffer"`. Copy received bytes into `_malloc` memory, call the managed callback, free in
-  `finally`, as the WebSocket bridge does.
-- Sends must honour `ArraySegment.Offset`; the existing WebSocket interop passes only array and count.
-- Copy outbound bytes out of the WASM heap before the call returns. Never hold a `HEAPU8` view across an
-  `await` or memory growth.
-- Late promise completions and events check that their instance still exists and still owns that peer.
-- Add a `wss://` factory overload; `MakeWebSocketClient` hardcodes `ws://` today, which a page served over
-  HTTPS cannot use.
+Server sends that lose the race with channel closure are dropped. `SendUnguaranteedMessageAsync` never writes
+to WebSocket, which could already have a reliable write in flight. A native send error is logged/dropped or
+returned as failure by the native API; it does not itself close the session. Close/error callbacks and silence
+detection determine fallback for later sends.
 
-## 8. Server native library
+The browser bridge returns `0` after submission, `1` for an intentional budget drop, or a negative value for
+missing channel/send failure. C# falls back to WebSocket for a negative result, including a synchronous JS
+send exception. It does not fall back for a budget drop. Submission is not a delivery acknowledgement.
 
-Use libdatachannel's C API (`rtc.h`) with the libjuice ICE backend. Pin one release and its submodules.
+Without a per-recipient envelope, ordinary relayed updates retain encode-once fan-out: recipients share the
+encoded frame. Notes force reliable delivery and have their own sender-specific representation under the
+existing update-note semantics.
 
-Loading must only ever disable WebRTC:
+### Receive path
 
-1. HTTP, WebSocket and TCP start first, independently.
-2. `WebRtcService` resolves the library from an absolute path under the application folder for the current
-   **process** architecture, with `NativeLibrary.TryLoad`. No static initializers or DI constructors that throw.
-3. It creates and deletes one peer as a smoke test, then marks itself available.
-4. Any failure logs one line saying why, and every offer is answered `unavailable`.
+The server copies native binary data before the callback returns and hands it to
+`ClientUnguaranteedMessageReceived`. It checks a minimum 12-byte frame and exact declared length, ignores
+transport `KEEPALIVE`, and dispatches only `UPDATE_ENTITY` for an established replicant. The client equivalent
+checks framing and dispatches only `ENTITY_UPDATE_MESSAGE`. Datagrams never refresh the reliable silence clock.
+The browser consumes server channel keepalives in JS rather than forwarding them into C#.
 
-Interop rules: keep delegates and user-pointer handles alive until the native object is deleted; copy callback
-payloads before returning; catch every managed exception at the boundary; never hold a lock across a native
-call that can call back; never delete a peer from inside one of its callbacks. Callbacks only enqueue.
+These checks have two boundaries worth preserving explicitly:
 
-Peer configuration: `enableIceUdpMux = true` with `portRangeBegin == portRangeEnd` so every peer shares one UDP
-port; no ICE servers; ICE-TCP off; `disableAutoNegotiation` left off so the answer is produced by
-`rtcSetRemoteDescription`.
+- The 1,200-byte limit is enforced on **outgoing selection**; there is no corresponding 1,200-byte receive cap
+  before native-buffer allocation/copy. Native `MaxMessageSize` is left at its default.
+- The server's datagram gate restricts the message type. `MayBeUnguaranteed()` controls whether the header flag
+  downgrades relay reliability; it does not reject an inbound `UpdateEntityAction` with reliable-only extras
+  merely because that action arrived over the data channel. Normal clients route those updates reliably.
 
-### Build and packaging
+## 6. Liveness, fallback, and retry
 
-No trustworthy prebuilt set covers all four platforms, so Impunity builds them. One script,
-`native/libdatachannel/build.sh`, builds the library for whatever platform it runs on; the workflow
-`.github/workflows/native-libdatachannel.yml` runs it on each platform, and the outputs are **committed to the
-repository**, as `UltraLiteDB.dll` is, so `build.sh` and `./test.sh` need no network or toolchain.
+Reliable and optional-path health are separate. WebSocket binary traffic and the ordinary Impunity keepalives
+maintain the logical connection. RTC gameplay and channel keepalives maintain only the RTC session. Continuing
+movement cannot keep a dead reliable connection alive.
 
-| Target | RID | Runner | Artifact | State |
+| Timer/setting | Server | Browser bridge |
+| --- | --- | --- |
+| Check interval | 500 ms | 250 ms |
+| Send channel keepalive after idle | 1 second | 1 second |
+| Close open channel after receive silence | 5 seconds | 5 seconds |
+| Give up without channel opening | 15 seconds | 15 seconds |
+| Candidate-gathering wait | 5 seconds | No wait before sending offer |
+| Retry | Client-driven | One retry after 30 seconds; successful open re-arms it |
+| Clock | `Environment.TickCount64` | `Date.now()` |
+
+Keepalives are existing header-only Impunity frames: client type 104 and server type 2, twelve bytes each.
+They provide independent receive-silence checks, not an acknowledged ping/pong or an RTT estimator. RTC receipt
+updates the channel-health clock before full gameplay validation.
+
+The server closes on peer disconnected/failed/closed or channel close/error. The browser closes immediately
+on peer failed/closed or channel close/error; its silence timer handles a disconnected path that does not
+produce one of those events. Channel failure clears `SupportsUnguaranteed`; later sends use WebSocket.
+
+A browser failure can schedule one retry while its WebSocket remains open. Successful channel opening clears
+the retry-used flag, so a subsequent failure can earn another attempt. An explicit `unavailable` response,
+including `full` or `busy`, stops that attempt without retry. Missing `RTCPeerConnection` or failure during
+initial construction simply leaves WebSocket in use.
+
+Closing/deleting the browser transport cancels timers, closes peer/channel, and removes the instance. Late
+RTC handlers and Promise continuations verify that their instance still owns that peer. Server session close
+is idempotent, removes callback routing, notifies its controller, and schedules native deletion on the thread
+pool rather than deleting from a native callback. WebSocket loss tears down RTC; RTC loss alone does not raise
+logical `OnNetworkError`. Explicit disposal does not report a spurious connection error.
+
+Background tabs can delay timers and Unity frames. A lost channel may recover through the retry policy;
+application responsiveness and continuous RTC availability while backgrounded are not guaranteed. Browser
+wall-clock changes can also affect the current `Date.now()` deadlines.
+
+## 7. Unity WebGL bridge and application API
+
+All browser transport code lives in **one** file, `ImpunityWebSocket.jslib`, with one instance registry.
+There is no separate `ImpunityWebRTC.jslib`. JS owns descriptions, signaling, native browser objects, and timers.
+Managed C# registers static AOT callbacks for channel open, close, and binary receive, and reads the resulting
+`RtcOpen` flag.
+
+`ImpunityOptions.UseWebRtc` defaults to true; false suppresses the browser's attempt. Both
+`MakeWebSocketClient(url)` and `MakeWebsocketRemoteConnection(url, …)` accept full `ws://` or `wss://` URLs.
+The host/port overload still constructs an insecure `ws://` URL. `RemoteGameConnection.SupportsUnguaranteed`
+reports whether the optional path is currently open, not its measured latency or packet-loss rate.
+
+Buffer ownership is explicit:
+
+- Both JS send functions accept array pointer, offset, and length. `HEAPU8.buffer.slice` copies the specified
+  segment before returning, so later WASM buffer reuse or growth cannot mutate a pending send.
+- Incoming binary messages are copied into temporary `_malloc` memory, passed to C#, and freed in `finally`.
+  C# copies into a managed byte array before queuing further work.
+- The bridge sets `binaryType = "arraybuffer"`. Text signaling stays in JS.
+- Values in `$impunityWsState` must survive Emscripten emitting the object as text. The keepalive template is a
+  plain array converted to bytes at send time, not a typed array stored in the initial object.
+
+The WebGL C# branch can compile headlessly through
+[ImpunityUnityWebGLRuntime.csproj](../../ImpunityRuntime/ImpunityUnityWebGLRuntime.csproj). Actual Unity WebGL
+builds additionally exercise Emscripten's `.jslib` processing, `makeDynCall`, and IL2CPP callback linkage.
+`ImpunityRuntime/build.sh` distributes the combined jslib alongside the WebGL runtime.
+
+## 8. Native library, loading, and packaging
+
+The server owns a small C API binding pinned to **libdatachannel v0.24.6**. Builds use libjuice for ICE,
+usrsctp for SCTP, and **Mbed TLS v3.6.7** for DTLS. The binding explicitly represents C booleans as bytes and uses
+Cdecl callbacks. It must remain matched to the pinned `rtc.h` layout rather than a newer upstream header.
+
+### Availability and lifetime
+
+`Program.cs` starts TCP, then calls `WebRtcService.Start()` synchronously before building/running the HTTP app.
+Expected initialization failures are caught and leave RTC unavailable; HTTP/WebSocket startup continues.
+Initialization is not a background task or independently time-bounded startup operation.
+
+The service:
+
+1. Skips native loading when `enabled` is false.
+2. Selects a library by OS and **process architecture**, from `AppContext.BaseDirectory/runtimes` or the
+   `IMPUNITY_WEBRTC_RUNTIMES` override.
+3. Checks the manifest's libdatachannel tag and file SHA-256, loads the absolute file with
+   `NativeLibrary.TryLoad`, and installs a DllImport resolver. This verifies consistency with the supplied
+   manifest, not an independently signed supply chain; other manifest fields are build metadata.
+4. Probes the configured UDP bind address/port, resolves optional `public_address`, initializes native logging,
+   and creates/deletes a peer as a smoke test.
+5. Starts the liveness timer and reports availability. The port probe is not a reservation; actual mux binding
+   occurs when a real peer gathers candidates.
+
+Missing files, unsupported platforms, hash/tag mismatch, native loader failure, or startup port conflicts
+leave the server usable over WebSocket and produce a warning. Availability is process-local and not a promise
+that a particular client can reach UDP. A failed public-address lookup logs a warning and leaves only local
+candidates. There is no automatic library reload.
+
+Peers use UDP mux on the configured single port, no ICE servers, ICE-TCP off, and automatic negotiation.
+Service fields root the native delegates; concurrent dictionaries map peer/channel IDs to sessions. Callback
+handlers catch managed exceptions and copy borrowed data before returning. They can route receives and change
+session state directly; they are not all deferred to a separate executor.
+
+At shutdown, after `app.Run()` returns, the service stops admission/ticking, closes sessions, and invokes
+`rtcCleanup` on a task with a three-second wait limit. Peer deletion is also asynchronous. That bound prevents
+waiting indefinitely in this cleanup call; it does not prove all concurrent teardown work has completed or
+bound ASP.NET's earlier shutdown. A native crash can terminate the process and cannot be converted to ordinary
+managed fallback.
+
+### Build artifacts
+
+[build.sh](../../native/libdatachannel/build.sh) builds the current platform; the
+[native workflow](../../.github/workflows/native-libdatachannel.yml) runs it on four runners, smoke-tests the
+results, and optionally commits them. Binaries and manifests are committed under
+[ImpunityStandaloneServer/runtimes](../../ImpunityStandaloneServer/runtimes), so ordinary managed builds do not
+rebuild or download the native stack.
+
+| Target | RID | Workflow runner | Library | Native manifest floor |
 | --- | --- | --- | --- | --- |
-| macOS arm64 | `osx-arm64` | `macos-15` | `libdatachannel.dylib` | Built and smoke-tested by the workflow; committed. |
-| Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | Built and smoke-tested by the workflow; committed. |
-| Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | Built and smoke-tested by the workflow; committed. |
-| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Built and smoke-tested by the workflow; committed. |
+| macOS Arm64 | `osx-arm64` | `macos-15` | `libdatachannel.dylib` | macOS 12.0 |
+| Linux Arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | glibc 2.34 |
+| Linux x86-64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | glibc 2.34 |
+| Windows x86-64 | `win-x64` | `windows-2022` | `datachannel.dll` | Windows 10 |
 
-- Location: `ImpunityStandaloneServer/runtimes/<rid>/native/`, each with a `libdatachannel.manifest.json` giving
-  the pinned tags and commits, build flags, dependencies, platform floor and the file's SHA-256.
-- Pins: libdatachannel v0.24.6 and Mbed TLS v3.6.7, each by tag and commit. The script refuses a tag that no
-  longer points at the pinned commit.
-- One shared library per platform with libjuice, usrsctp and the TLS library linked statically:
-  `-DNO_MEDIA=ON -DNO_WEBSOCKET=ON -DNO_EXAMPLES=ON -DNO_TESTS=ON -DUSE_NICE=OFF -DUSE_MBEDTLS=ON -DBUILD_SHARED_LIBS=ON`.
-- **TLS backend: Mbed TLS**, built from source by the same script. OpenSSL would have needed a different static
-  build recipe on each platform (Homebrew, distro packages, vcpkg) and the platform's own choice of deployment
-  target; Mbed TLS is plain CMake everywhere. It is also much smaller: 2.2 MB stripped on macOS against 6.3 MB
-  with OpenSSL. libdatachannel's DTLS code needs `MBEDTLS_SSL_DTLS_SRTP` even without media, so the script
-  switches that on in the Mbed TLS config header before building.
-- The script fails if the result depends on anything beyond the system libraries (`otool -L` on macOS,
-  `objdump` on Linux and Windows), and records the glibc floor or macOS deployment target (12.0) in the manifest.
-  Linux links `libstdc++` statically; Windows uses the static C runtime.
-- The workflow smoke-tests each artifact on its own runner with `native/libdatachannel/smoke.py`: load the
-  library, create a peer and a data channel, read back an offer with a certificate fingerprint, delete both.
-- `ImpunityStandaloneServer.csproj` copies `runtimes/` to the build output, and `build.sh` copies it on to
-  `bin/StandaloneServer/`.
-- Committed sizes: 2.2 MB (macOS), 2.4 MB (Windows), 4.8 and 5.0 MB (Linux arm64 and x64, which carry a static
-  `libstdc++`). Linux needs glibc 2.34 or later (the `ubuntu-22.04` runners), so Ubuntu 22.04, Debian 12 and
-  RHEL 9 onward; older distributions run without WebRTC.
-- **macOS quarantine.** The macOS library is ad-hoc signed, not notarized. macOS refuses to load it
-  ("library load disallowed by system policy") when the file carries the `com.apple.quarantine` attribute,
-  which Sourcetree, browsers and most unzip tools add to what they download; command-line `git` does not. The
-  fix on the affected machine is `xattr -dr com.apple.quarantine ImpunityStandaloneServer/runtimes`, or
-  allowing the library under System Settings, Privacy & Security after the first blocked load. The
-  server's loader (stage C) must treat this as "no WebRTC" and log that command. A distributed server build for
-  macOS would need Developer ID signing and notarization to avoid it.
-- Elsewhere (Alpine/musl, macOS x64, Windows arm64) there is no library and the server runs without WebRTC.
-- Static linking makes Impunity responsible for rebuilding when libdatachannel or Mbed TLS ships a security
-  fix. Ship the MPL-2.0 notice (libdatachannel, libjuice), the usrsctp BSD licence and Mbed TLS's Apache-2.0
-  notice with the binaries. **Not done yet.**
+The native floor is not the whole application's OS support policy: the .NET 10 runtime must also support the
+host. Musl/Alpine, macOS x64, and Windows Arm64 have no matching supported native build and use WebSocket
+fallback. A matching CPU alone does not make a glibc binary usable on musl.
 
-A native crash takes the process down; managed code cannot turn that into fallback. Isolating it would need a
-helper process and is not planned.
+Each artifact is one shared library with libjuice, usrsctp, and Mbed TLS statically linked. Linux also links
+the C++ runtime statically; Windows uses the static C runtime. The script checks dynamic dependencies against
+system-library allowlists and records dependencies, platform floor, flags, pins, and SHA-256 in
+`libdatachannel.manifest.json`.
 
-## 9. Deployment and configuration
+Pins are checked as both tags and commits:
 
-WebRTC needs one more open port than today: UDP 29656 by default, separate from the port Impunity's own UDP
-transport uses and from 29655, which LAN discovery already uses (`ImpunityConstants.DefaultClientPort`). A reverse proxy that terminates WSS does not forward it; containers and cloud firewalls need a
-UDP rule; a load balancer must deliver a peer's UDP to the process that holds its WebSocket.
+- libdatachannel: `v0.24.6`, `6b1e2e620f1e37f0eafeee702eaea0043cb305fd`.
+- Mbed TLS: `v3.6.7`, `068ff080b369adfac81509f9b57b2afabaf82dc5`.
 
-`config.json` gains a `webrtc` object. Leaving it out means enabled with defaults.
+The build disables media, libdatachannel's own WebSockets, examples, and upstream tests; selects Mbed TLS and
+libjuice; and builds shared libdatachannel with static dependencies. It enables `MBEDTLS_SSL_DTLS_SRTP` because
+the selected libdatachannel DTLS code requires that API even in a data-only build. The workflow's
+[smoke.py](../../native/libdatachannel/smoke.py) loads each library, creates a peer and data channel, reads an
+offer containing a certificate fingerprint, and deletes the objects. This is distinct from a browser
+interoperability or impaired-network test.
 
-| Setting | Default | Meaning |
+The standalone csproj copies `runtimes/` to build and publish outputs; its build script copies that directory
+to `bin/StandaloneServer/`. Native libraries do not go in Unity's `Assets/Plugins`.
+
+On macOS the library is ad-hoc signed, not Developer ID signed/notarized. A quarantined copy may fail to load;
+the loader includes a quarantine-removal hint. After verifying the provenance of an affected checkout, the
+repository-relative command is:
+
+```bash
+xattr -dr com.apple.quarantine ImpunityStandaloneServer/runtimes
+```
+
+For a copied server distribution, apply the command to that distribution's `runtimes` directory. Public macOS
+release signing/notarization and bundled third-party notices are outstanding packaging work. The native
+artifact directories currently contain binaries/manifests, not the dependency license/notice bundle. Static
+bundling also makes rebuilding dependency security fixes part of maintaining this transport.
+
+## 9. Certificates and deployment
+
+WebRTC uses certificates generated by the browser and libdatachannel. Their SDP descriptions carry DTLS
+fingerprints; the DTLS implementations authenticate the presented peer certificates against those descriptions.
+A separate public CA certificate is not provisioned into libdatachannel. Neither the bridge nor the P/Invoke
+adapter disables fingerprint verification or ships private keys to the other endpoint.
+
+HTTPS/WSS has a different role: it authenticates the page and signaling endpoint that supplies those
+fingerprints. Production deployments should serve the game over HTTPS and connect using WSS with a normally
+trusted certificate. Plain WS does not authenticate fingerprint exchange against an intermediary. The server's
+current `Program.cs` binds HTTP; a public TLS endpoint/reverse proxy is a deployment responsibility. The
+`server_hostname` CORS setting is not an explicit WebSocket `Origin` allowlist in the controller.
+
+The server needs a reachable UDP port in addition to HTTP/WSS:
+
+| Setting in `webrtc` | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `true` | `false` skips loading the native library. |
-| `udp_port` | `29656` | The single multiplexed UDP port. |
-| `bind_address` | any | Local interface to bind. |
-| `public_address` | none | Address clients should send to, when it differs from what the server sees locally. |
-| `max_peers` | `256` | Offers beyond this are answered `unavailable`. |
+| `enabled` | `true` | False skips native loading and refuses RTC offers. |
+| `udp_port` | `29656` | Single multiplexed RTC UDP port. |
+| `bind_address` | null | Local IP to bind; null probes/binds the default interface configuration. |
+| `public_address` | null | Public IP or hostname to add as a candidate on the same UDP port. |
+| `max_peers` | `256` | Peer-count admission threshold, subject to concurrent creation races. |
 
-`public_address` matters on any host behind one-to-one NAT, which includes AWS, GCP and Docker: the server only
-sees its private address there, so its own candidates are unreachable. When set, the server adds a host
-candidate with that address and `udp_port` to the answer. It modifies only the candidate list, never the
-fingerprint or ICE credentials.
+Omitting the entire object uses defaults. Configuration is in
+[ServerConfig.cs](../../ImpunityStandaloneServer/src/ServerConfig.cs). For example, this fragment enables RTC on
+an operator-supplied public address:
 
-TURN is not supported in the first version. A client whose network blocks UDP stays on WebSocket.
+```json
+{
+  "webrtc": {
+    "enabled": true,
+    "udp_port": 29656,
+    "public_address": "203.0.113.7",
+    "max_peers": 256
+  }
+}
+```
 
-## 10. Stages and tests
+`203.0.113.7` is an example address, not a usable service endpoint. A hostname is resolved once at startup and
+the first returned address is used. The implementation adds one public host candidate; it does not discover
+NAT mappings, provide a different external-port setting, or act as a TURN relay. Forward the same UDP port to
+the instance when using this configuration behind NAT.
 
-| Stage | Work | Proof |
-| --- | --- | --- |
-| A (done) | Shared-runtime fixes from section 2, `MaxUnguaranteedMessageBytes`, version bump. | New cases on `_EmbeddedTcp`: an unguaranteed update stays unguaranteed downstream; a reordered update relays only its fresh fields; a field dormant for more than 65,536 entity updates still applies; an oversize unguaranteed update arrives reliably. Full `./test.sh` passes. |
-| B (done) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
-| C (done) | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
-| D (done) | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
-| E (written; no Unity build yet) | WebRTC support in `ImpunityWebSocket.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
-| F | WebGL test scene with moving entities; measurements. | Age of applied state at p50/p95/p99 under induced loss and jitter, WebRTC against WebSocket-only, at 30 and 60 Hz. If the tail is not clearly better, tune the send budget before enabling by default. |
+UDP 29656 is separate from Impunity's TCP/UDP transport on 29654 and discovery's default client port 29655.
+A reverse proxy terminating WSS does not automatically forward RTC UDP. Containers/firewalls need the UDP rule,
+and a load balancer must direct UDP to the process that owns the WebSocket session. Local candidate gathering
+without an external STUN service still uses ICE/STUN connectivity checks between endpoints.
 
-Stage D is what keeps this maintainable: the server half is exercised without a browser on every test run.
-Stages E and F are the only ones that need a Unity WebGL build.
+No TURN or ICE-TCP fallback is configured. Networks that cannot reach a server UDP candidate keep using
+WebSocket. `public_address` injection is tested as SDP construction; successful traversal through an actual
+cloud NAT is a separate, outstanding validation.
 
-### Stage C as built
+## 10. Tests, demo, and evidence
 
-- Code is in `ImpunityStandaloneServer/src/webrtc/`; the signaling and send lock are in `WebSocketController`.
-- Both server transports now hand datagram-path messages to a second handler,
-  `IImpunityNetworkServerClientContext.OnUnguaranteedMessageRecieved`. The proxy
-  (`ClientUnguaranteedMessageReceived`) does not count them against the silence deadline, accepts only
-  `UPDATE_ENTITY` on an established connection, and ignores `KEEPALIVE`. The existing UDP path uses it too.
-- Refusal reasons a client can be sent in `{"t":"unavailable","r":...}`: `disabled`, `unavailable` (no library,
-  port taken, peer creation failed), `full` (`max_peers`), `busy` (an offer is already being answered) and
-  `failed` (this offer could not be used). Details go to the server log only.
-- A second offer on the same socket replaces the session the first one made.
-- A session that has not opened its channel within 15 seconds is closed, so abandoned offers do not hold peer
-  slots.
-- At startup the service checks the library against its manifest (release tag and SHA-256), probes that the
-  UDP port can be bound, and creates and deletes one peer. `IMPUNITY_WEBRTC_RUNTIMES` points the loader at another
-  `runtimes` folder; the tests use it to stand in for a platform with no library.
-- Checked by `ImpunityTests/Host/WebRtc_Standalone.cs` (`--filter "Category=WebRtc"`) with a canned offer over a
-  raw WebSocket: answer with candidates and the public address, disabled, missing library, port taken, bad offer,
-  peer limit. And once by hand in a Chromium browser against the real server: answer, channel open, the server's
-  keepalive frame arriving on the channel after a second, and the session closed when the socket was.
+The headless client in
+[RtcWebSocketTestClient.cs](../../ImpunityTests/Host/RtcWebSocketTestClient.cs) combines `ClientWebSocket` and a
+libdatachannel peer. It compiles the server's binding as source, which is why that binding retains C# 9 and a
+block namespace. Counters distinguish channel sends/receives from socket updates; `Blackhole` suppresses
+application-level channel traffic to exercise silence fallback. It does not simulate packet loss inside SCTP.
 
-### Stage D as built
-
-- `ImpunityTests/Host/RtcWebSocketTestClient.cs` is a client transport made of a `ClientWebSocket` and a
-  libdatachannel peer, using the server's own bindings (`LibDataChannelNative.cs` is compiled into the tests as
-  source). It behaves as the browser bridge must, and is the reference for stage E: offer as soon as the socket
-  opens, send unguaranteed messages on the channel only while it is open, send the client `KEEPALIVE` frame
-  after a second idle, and drop the peer after five seconds of silence.
-- `TransportSuite_StandaloneRtc` runs the whole transport battery through it against the real server binary,
-  waiting for each client's channel to open first, and adds the data-channel cases: an unguaranteed update goes
-  up one channel and down the others (echo included) while a guaranteed one uses the sockets; an oversize one
-  uses the sockets; an idle channel survives seven seconds on keepalives; a blackholed channel is closed by the
-  server after five silent seconds and delivery resumes over the socket with the connection intact; a channel
-  the client closes falls back in both directions. `WebRtcRefused_Standalone` connects the same client to a
-  server with WebRTC disabled.
-- The client side got the same split as the server: `IImpunityNetworkClient.OnUnguaranteedMessageRecieved`.
-  `RemoteGameConnection` does not count such a message against the server-silence deadline and accepts only an
-  entity update from it. The TCP client's UDP path uses it too.
-- Run with `./test.sh --filter "Category=WebRtc"` (about 20 seconds; two of the cases are also `Slow`).
-- Not covered: real packet loss or reordering (everything is loopback), a reliable write held in flight while
-  the channel fails, load, and any NAT. The offer from this client carries candidates, which the server strips;
-  the fully candidate-less browser offer was proven in the spike (section 11) and in the stage C browser check.
-
-### Stage E as built
-
-- The WebRTC code went into the existing `ImpunityWebSocket.jslib`, not a second file: the peer needs its
-  instance's WebSocket for signaling, and one file keeps one registry. `ImpunityRuntime/build.sh` already ships
-  that file beside the WebGL runtime DLL.
-- Everything about the channel lives in JavaScript: the offer on socket open, the answer or refusal, the
-  keepalive after a second idle, the five-second silence and fifteen-second negotiation limits, and one retry
-  thirty seconds after a failure (a channel that opens earns another, so a tab that was backgrounded gets its
-  channel back). C# sees three callbacks: channel open, channel closed, and an Impunity frame arriving on it.
-  The server's keepalive frames never cross into C#.
-- The WebGL `ImpunityWebSocketClient` reports `SupportsUnguaranteed` while the channel is open and sends
-  unguaranteed messages with `ImpunityRtcSend`, which returns 0 (sent), 1 (dropped, more than 16 KiB already
-  queued) or a negative number (no open channel, so the caller uses the socket).
-- Both JS send functions now take an offset, fixing sends from an `ArraySegment` that does not start at zero.
-- `ImpunityOptions.UseWebRtc` (default true) turns the attempt off. `MakeWebSocketClient(url)` and
-  `MakeWebsocketRemoteConnection(url, ...)` take a full URL, so `wss://` works.
-- Checked: the WebGL branch of the C# compiles (`ImpunityUnityWebGLRuntime.csproj`). The jslib's functions were
-  loaded into a Chromium page through a small stand-in for Unity's runtime and driven against the real server:
-  a real Impunity handshake sent from an offset buffer, channel open 60 to 170 ms after the socket, the channel
-  still open at eight seconds on the bridge's own keepalives (the server closes a silent one at five), sends
-  returning 0 while open and negative after the instance was deleted, and against a server with WebRTC disabled
-  no channel and no retry scheduled.
-- **Not checked, and the real risk:** an actual Unity WebGL build. The stand-in does not reproduce how Unity's
-  Emscripten toolchain processes a `.jslib` (the `makeDynCall` macros, how the shared state object is emitted) or
-  the IL2CPP callback path. Firefox and Safari are also untested. Until a built game reports
-  `SupportsUnguaranteed` in a browser, treat stage E as unproven.
-
-### Stage E proven, stage F started (2026-11-14)
-
-- **A real Unity WebGL build works end to end.** The swarm demo (`ImpunityUnity/docs/SwarmDemo.md`), built for
-  WebGL with Unity 6000.3.28f1 and opened in a Chromium browser against a local standalone server, connected,
-  reported `WebSocket + WebRTC data channel`, and exchanged position updates with a second client (the editor,
-  over WebSocket): 480 updates a second each way, the server listing the browser as `remote+udp`. So the jslib
-  survives Unity's toolchain and the IL2CPP callback path. Firefox and Safari are still untested.
-- Numbers, both clients on one machine, 16 movers at 30 Hz each, 60 frames a second: age of applied state
-  p50 24 ms, p99 25 ms, worst 28 ms in the browser (data channel down); p50 27 ms, p99 30 ms in the editor
-  (WebSocket down). That is close to the floor for this design: the sender's update leaves on its next frame,
-  the receiver applies it on its next frame, and each waits half a frame on average. The first run measured
-  41 ms because the demo wrote positions after the connection's update, which cost a frame.
-- The page bridge works in the build: `impunityDemo.run("net server conns")` returned the server's view, with
-  the browser listed as `remote+udp` and the editor as `remote`.
-- Three kinds of client shared one arena: the WebGL page (WebSocket + data channel), a macOS build (TCP + UDP)
-  and the editor (WebSocket only). The editor received all 960 updates a second from the other two, at p50
-  26 ms, p99 59 ms.
-- The client's server-clock estimate was not good enough to measure with (it ignored the round trip and was
-  taken when the reply's callback ran, up to a second late in a throttled tab). It now measures the round trip
-  at the transport and keeps the best sample; see `Connections.md` section 10.
-- **Not measured: the thing this is all for.** On loopback nothing is ever lost, so the data channel and the
-  WebSocket look alike. Showing the benefit needs packet loss and delay injected between browser and server
-  (or a real network), comparing `tools/demo-server` with `tools/demo-server --no-webrtc`.
-
-## 11. Spike results
-
-Run 2026-11-12 on macOS arm64: libdatachannel v0.24.6 built from source (libjuice, usrsctp, OpenSSL 3.6 linked
-statically), a throwaway ASP.NET echo server using P/Invoke, and a plain HTML page in a Chromium browser on the
-same machine. The spike code was not kept.
-
-| Check | Result |
+| Coverage | Evidence in the repository |
 | --- | --- |
-| Offer with no candidates connects | **Yes.** The browser sent an offer with zero candidates; the server paired its host candidate with a peer-reflexive remote and the channel opened 60–76 ms after the offer was created. |
-| Offer with candidates left in | Also connects (189 ms, most of it the browser's own gathering). So the fallback works too, and the candidate-less offer is the faster path. |
-| Server sees the right reliability | `rtcGetDataChannelReliability` reported `unordered=1 unreliable=1 maxRetransmits=0`. The browser reported `ordered=false maxRetransmits=0`. |
-| One UDP port for every peer | Three peers at once; the process held exactly one UDP socket (the spike used port 29655). |
-| Text signaling beside binary frames | 201 binary frames echoed over the WebSocket while the offer and answer travelled as text frames on it. |
-| Echo over the channel | 200 of 200 messages of 1,200 bytes returned; round trip p50 under 1 ms, p99 under 4 ms on one machine. |
-| Teardown | Closing the WebSocket deleted the peer in under 1 ms. No leaked peers. |
-| Build | Plain CMake with the flags in section 8 produced one dylib depending only on `libc++` and `libSystem`. |
+| Signaling/native refusal | [WebRtc_Standalone](../../ImpunityTests/Host/WebRtc_Standalone.cs): candidates/fingerprint/public-address construction, disabled service, missing library, port conflict, bad offer, sequential peer-limit refusal. |
+| Logical transport behavior | [TransportSuite_StandaloneRtc](../../ImpunityTests/Host/TransportSuite_StandaloneRtc.cs): inherited transport battery against the real standalone process with RTC open. |
+| Data-channel routing/fallback | Upstream/downstream/echo over RTC, guaranteed and oversized updates over sockets, idle keepalives, application blackhole fallback, explicit channel closure, and disabled-server fallback. |
+| Shared sequencing | `IntegrationTests` category `Sequence`: dormant-field progress and partly/wholly stale updates, including guard consistency after filtering. |
+| Existing UDP path | [UnguaranteedDeliveryTests](../../ImpunityTests/UnguaranteedDeliveryTests.cs): real loopback UDP relay and oversized reliable fallback. |
+| Native build matrix | Four committed binary/manifest pairs and per-runner native smoke steps in the native workflow. |
+| Built browser client | Real Unity WebGL swarm demo confirmed in Chromium, including JS/IL2CPP callbacks, dynamic transport status, and mixed-client replication. |
 
-Things the spike showed that change the plan:
+From the repository root:
 
-- **Size.** The OpenSSL build is 6.3 MB stripped. (The Mbed TLS build adopted in section 8 is 2.2 MB, so four
-  committed platforms add roughly 10 MB to the repository.)
-- **The C structs differ between releases.** `rtcConfiguration` on libdatachannel's main branch has fields that
-  v0.24.6 lacks. The P/Invoke layer must match the pinned header exactly, and the manifest check in section 8 is
-  required, not optional.
-- **No loopback candidate.** The answer listed only the machine's LAN addresses (two IPv4, one IPv6). A browser
-  on the same machine connects through those. A development machine with no network interface up would stay on
-  WebSocket.
-- **Threads.** The process ran about 50 threads with three peers and 48 with one, including ASP.NET's own. That
-  suggests at most one thread per peer; it was not measured at scale.
+```bash
+./test.sh --filter "Category=WebRtc"
+./test.sh --filter "Category=Sequence|Category=Unguaranteed"
+./test.sh
+```
 
-A second run against the Mbed TLS build from `native/libdatachannel/build.sh` gave the same results: channel
-open in 61 ms from a candidate-less offer, 200 of 200 echoes, 201 WebSocket binary frames alongside.
+The focused combined WebRTC/Sequence/Unguaranteed run on the review host (macOS Arm64) passes **58 tests, with
+no failures or skips**. This does not establish current results on the other three server targets or repeat
+the Unity/browser validation. The available workflow builds/smoke-tests native artifacts; it is not a
+four-platform execution of the entire managed transport suite.
 
-Not covered: packet loss (that the channel really drops instead of retransmitting), Firefox and Safari, any
-NAT, `public_address`, load, and process shutdown with peers still connected (the spike server did not exit on
-SIGTERM while a browser tab held its WebSocket open; the spike had no shutdown handling, so this says nothing
-yet about libdatachannel).
+### Swarm demo and measurement
 
-## 12. Open questions
+The [swarm demo](../../ImpunityUnity/docs/SwarmDemo.md) runs in the editor, a native macOS build, and Unity WebGL.
+Each client sends replacement motion state on a known curve; recipients display the received position, the
+expected position, and age-of-applied-state percentiles. WebGL can share the arena with TCP/UDP and
+WebSocket-only clients. The server's inspection label `remote+udp` denotes an available unguaranteed path,
+including WebRTC; it is not evidence that the browser uses the raw UDP transport.
 
-| Question | Current answer | Settled by |
-| --- | --- | --- |
-| Does libjuice connect when the offer carries no candidates? | Yes on one machine in Chromium (section 11). Unproven across NAT and in Firefox and Safari. Fallback: pass browser candidates through, refusing multicast and broadcast targets. | Stage D across two hosts; stage E per browser. |
-| Does the channel drop under loss instead of retransmitting? | Settings are confirmed on both ends; behaviour under loss is not. | Stage D with induced loss. |
-| Does `public_address` candidate injection work behind real NAT? | Assumed yes; it is the same technique other WebRTC servers use. | A test deployment on a cloud VM in stage C. |
-| OpenSSL or MbedTLS? | Mbed TLS (section 8). Works with Chromium on macOS; the other platforms and browsers are unproven. | Workflow run for the other three; stage E per browser. |
-| Is one mux port enough under load? | Assumed yes for `max_peers` 256. | Stage D load case; stage F. |
-| Is 1,200 bytes the right cap, and 16 KiB the right budget? | Starting values. | Stage F measurements. |
-| Is the latency benefit real through Unity's `Update()` loop? | Unknown. Messages are only applied once per frame on both ends. | Stage F. |
+From `ImpunityUnity/`:
+
+```bash
+tools/demo-server --web              # serve the existing WebGL build and start the demo server
+tools/demo-server --web --no-webrtc  # WebSocket-only comparison
+tools/demo-server --public <address> # advertise a reachable UDP address
+```
+
+The WebGL build exposes `window.impunityDemo.status`, `.run(line)`, and `.results`. See the demo guide for Unity
+build commands and client controls.
+
+Recorded Chromium WebGL validation uses Unity 6000.3.28f1 and a local standalone server. With 16 movers at
+30 Hz each and 60 fps rendering, the reported browser age was approximately p50 24 ms / p99 25 ms; a
+WebSocket-only editor recipient was approximately p50 27 ms / p99 30 ms. These are local smoke measurements,
+not a controlled demonstration of WebRTC's advantage. Sampling/application frames and client server-clock
+estimates contribute to the result. The clock-sync implementation measures RTT at the transport and favors
+low-RTT samples; it does not eliminate clock error.
+
+## 11. Remaining validation and limits
+
+The architecture supplies the intended optional transport without a second game-state protocol. Its practical
+benefit under loss, its deployment reach, and its resource bounds need separate evidence.
+
+| Area | Current boundary / remaining work |
+| --- | --- |
+| Loss and jitter | Channel settings are correct and loopback delivery works. Measure state-age tails under controlled packet loss, delay, burst loss, and bandwidth contention against WebSocket-only. A test client's application blackhole is not this test. |
+| Browser coverage | Real Unity WebGL is confirmed in Chromium. Firefox and Safari remain unvalidated. |
+| NAT and addressing | Candidate-less offers and injected public candidates work in local/signaling tests. Exercise actual NAT/cloud routing, IPv6, multiple interfaces, and address changes. |
+| Capacity | `max_peers` uses a non-atomic count check; it is not a strict concurrent ceiling. Measure memory, native threads, buffering, and shared-port behavior under load. |
+| Receive enforcement | Enforceable outgoing size/eligibility rules are stronger than the current inbound gates. A receive cap before allocation and rejection of reliable-only update extras on the datagram path remain hardening opportunities. |
+| Connection admission | RTC negotiation begins before world authentication. The controller's first-binary deadline and peer-count check are not a complete authorization/rate-limiting scheme. |
+| Failure concurrency | Add explicit coverage of a stalled reliable write during RTC failure, reliable-path loss while RTC continues, simultaneous offers/close, late native callbacks, and shutdown with active peers. These are not established by the existing RTC tests. |
+| Buffer thresholds | The 1,200-byte message budget and 16 KiB admission threshold are fixed constants, not measured optimal values or complete memory bounds. |
+| Distribution | Add the dependency notices and qualify public macOS signing/notarization. Native artifact floors and successful smoke tests do not establish every supported .NET deployment. |
+
+These limits do not require redesigning ordinary entity replication. They define where the current behavior
+is proven and where deployment or robustness claims still need tests or targeted changes.
