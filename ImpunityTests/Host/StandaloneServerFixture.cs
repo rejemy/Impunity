@@ -49,9 +49,19 @@ namespace Impunity.Tests
 		/// also exercises keepalives on healthy connections (and a silence test only waits ~10s).</summary>
 		public int ConnectionTimeoutMillis => ImpunityKeepAlive.MinTimeoutMillis;
 
-		public static StandaloneServerFixture Launch()
+		/// <summary>UDP port of the server's WebRTC transport (a free one per launch, so parallel servers never share).</summary>
+		public ushort WebRtcPort { get; private set; }
+
+		// Extra members for the "webrtc" config object (JSON, without braces), and extra environment variables.
+		string WebRtcConfigJson;
+		Dictionary<string, string> Environment_;
+
+		/// <param name="webRtcConfig">Extra members for the server's <c>webrtc</c> config object, as JSON without the
+		/// braces, e.g. <c>"\"enabled\": false"</c>. <c>udp_port</c> is always supplied.</param>
+		/// <param name="environment">Environment variables for the server process.</param>
+		public static StandaloneServerFixture Launch(string webRtcConfig = null, Dictionary<string, string> environment = null)
 		{
-			var fixture = new StandaloneServerFixture();
+			var fixture = new StandaloneServerFixture { WebRtcConfigJson = webRtcConfig, Environment_ = environment };
 			Exception lastFailure = null;
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
@@ -101,6 +111,7 @@ namespace Impunity.Tests
 
 			HttpPort = TestPorts.GetFreePort();
 			TcpPort = TestPorts.GetFreePort();
+			WebRtcPort = TestPorts.GetFreePort();
 
 			WorkDir = Path.Combine(TestEnv.TempRoot, "ImpunityStandalone_" + Guid.NewGuid().ToString("N"));
 			Directory.CreateDirectory(WorkDir);
@@ -112,6 +123,7 @@ namespace Impunity.Tests
 				$"  \"tcp_port\": {TcpPort},\n" +
 				$"  \"connection_timeout_ms\": {ConnectionTimeoutMillis},\n" +
 				"  \"datapath\": \"worlds\",\n" +
+				$"  \"webrtc\": {{ \"udp_port\": {WebRtcPort}{(string.IsNullOrEmpty(WebRtcConfigJson) ? "" : ", " + WebRtcConfigJson)} }},\n" +
 				"  \"worlds\": [\n" +
 				$"    {{ \"id\": \"{WorldId}\", \"name\": \"Transport Test World\", \"password\": \"{Password}\", \"max_players\": 16 }}\n" +
 				"  ]\n" +
@@ -132,6 +144,13 @@ namespace Impunity.Tests
 					RedirectStandardError = true,
 				}
 			};
+			if (Environment_ != null)
+			{
+				foreach (var pair in Environment_)
+				{
+					Proc.StartInfo.Environment[pair.Key] = pair.Value;
+				}
+			}
 			Proc.OutputDataReceived += (s, e) => { if (e.Data != null) lock (OutputLock) Output.AppendLine(e.Data); };
 			Proc.ErrorDataReceived += (s, e) => { if (e.Data != null) lock (OutputLock) Output.AppendLine(e.Data); };
 			Proc.Start();

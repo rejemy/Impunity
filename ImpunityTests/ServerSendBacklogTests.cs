@@ -34,6 +34,7 @@ namespace Impunity.Tests
 	internal class StallableClientContext : IImpunityNetworkServerClientContext
 	{
 		public ImpunityServerMessageHandler OnMessageRecieved { get; set; }
+		public ImpunityServerMessageHandler OnUnguaranteedMessageRecieved { get; set; }
 		public ImpunityServerErrorCallback OnNetworkError { get; set; }
 		public ImpunityServerClientContextCallback OnClientDisconnected { get; set; }
 

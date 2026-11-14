@@ -1,9 +1,11 @@
 # WebRTC transport for Unity WebGL
 
-Status: design, revised 2026-11-12 after a review against the code. Stage A (the shared-runtime fixes in
-section 2) is implemented; nothing WebRTC-specific is. Section 11 records
-what a throwaway spike proved and what is still unproven. This revision replaces the original proposal, which is kept
-beside it as [WebRtcTransport.original.md](WebRtcTransport.original.md) for reference.
+Status: design, revised 2026-11-12 after a review against the code. Stages A to C are implemented: the
+shared-runtime fixes (section 2), the native libraries for four platforms (section 8), and the server side of
+the transport (sections 3 to 6, 9). No client can use it yet: the headless test client (stage D) and the Unity
+WebGL bridge (stage E) are still to do. Section 11 records what a throwaway spike proved. This revision replaces
+the original proposal, which is kept beside it as [WebRtcTransport.original.md](WebRtcTransport.original.md) for
+reference.
 
 ## 1. Goal and verdict
 
@@ -229,10 +231,10 @@ repository**, as `UltraLiteDB.dll` is, so `build.sh` and `./test.sh` need no net
 
 | Target | RID | Runner | Artifact | State |
 | --- | --- | --- | --- | --- |
-| macOS arm64 | `osx-arm64` | `macos-15` | `libdatachannel.dylib` | Built locally and browser-tested. |
-| Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | Not built yet: needs a workflow run. |
-| Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | Not built yet: needs a workflow run. |
-| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Built and smoke-tested by the workflow; not committed until all four legs pass. |
+| macOS arm64 | `osx-arm64` | `macos-15` | `libdatachannel.dylib` | Built and smoke-tested by the workflow; committed. |
+| Linux arm64 | `linux-arm64` | `ubuntu-22.04-arm` | `libdatachannel.so` | Built and smoke-tested by the workflow; committed. |
+| Linux x64 | `linux-x64` | `ubuntu-22.04` | `libdatachannel.so` | Built and smoke-tested by the workflow; committed. |
+| Windows x64 | `win-x64` | `windows-2022` | `datachannel.dll` | Built and smoke-tested by the workflow; committed. |
 
 - Location: `ImpunityStandaloneServer/runtimes/<rid>/native/`, each with a `libdatachannel.manifest.json` giving
   the pinned tags and commits, build flags, dependencies, platform floor and the file's SHA-256.
@@ -252,6 +254,16 @@ repository**, as `UltraLiteDB.dll` is, so `build.sh` and `./test.sh` need no net
   library, create a peer and a data channel, read back an offer with a certificate fingerprint, delete both.
 - `ImpunityStandaloneServer.csproj` copies `runtimes/` to the build output, and `build.sh` copies it on to
   `bin/StandaloneServer/`.
+- Committed sizes: 2.2 MB (macOS), 2.4 MB (Windows), 4.8 and 5.0 MB (Linux arm64 and x64, which carry a static
+  `libstdc++`). Linux needs glibc 2.34 or later (the `ubuntu-22.04` runners), so Ubuntu 22.04, Debian 12 and
+  RHEL 9 onward; older distributions run without WebRTC.
+- **macOS quarantine.** The macOS library is ad-hoc signed, not notarized. macOS refuses to load it
+  ("library load disallowed by system policy") when the file carries the `com.apple.quarantine` attribute,
+  which Sourcetree, browsers and most unzip tools add to what they download; command-line `git` does not. The
+  fix on the affected machine is `xattr -dr com.apple.quarantine ImpunityStandaloneServer/runtimes`, or
+  allowing the library under System Settings, Privacy & Security after the first blocked load. The
+  server's loader (stage C) must treat this as "no WebRTC" and log that command. A distributed server build for
+  macOS would need Developer ID signing and notarization to avoid it.
 - Elsewhere (Alpine/musl, macOS x64, Windows arm64) there is no library and the server runs without WebRTC.
 - Static linking makes Impunity responsible for rebuilding when libdatachannel or Mbed TLS ships a security
   fix. Ship the MPL-2.0 notice (libdatachannel, libjuice), the usrsctp BSD licence and Mbed TLS's Apache-2.0
@@ -288,14 +300,37 @@ TURN is not supported in the first version. A client whose network blocks UDP st
 | Stage | Work | Proof |
 | --- | --- | --- |
 | A (done) | Shared-runtime fixes from section 2, `MaxUnguaranteedMessageBytes`, version bump. | New cases on `_EmbeddedTcp`: an unguaranteed update stays unguaranteed downstream; a reordered update relays only its fresh fields; a field dormant for more than 65,536 entity updates still applies; an oversize unguaranteed update arrives reliably. Full `./test.sh` passes. |
-| B (macOS done; other three need a workflow run) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
-| C | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
+| B (done) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
+| C (done) | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
 | D | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
 | E | `ImpunityWebRTC.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
 | F | WebGL test scene with moving entities; measurements. | Age of applied state at p50/p95/p99 under induced loss and jitter, WebRTC against WebSocket-only, at 30 and 60 Hz. If the tail is not clearly better, tune the send budget before enabling by default. |
 
 Stage D is what keeps this maintainable: the server half is exercised without a browser on every test run.
 Stages E and F are the only ones that need a Unity WebGL build.
+
+### Stage C as built
+
+- Code is in `ImpunityStandaloneServer/src/webrtc/`; the signaling and send lock are in `WebSocketController`.
+- Both server transports now hand datagram-path messages to a second handler,
+  `IImpunityNetworkServerClientContext.OnUnguaranteedMessageRecieved`. The proxy
+  (`ClientUnguaranteedMessageReceived`) does not count them against the silence deadline, accepts only
+  `UPDATE_ENTITY` on an established connection, and ignores `KEEPALIVE`. The existing UDP path uses it too.
+- Refusal reasons a client can be sent in `{"t":"unavailable","r":...}`: `disabled`, `unavailable` (no library,
+  port taken, peer creation failed), `full` (`max_peers`), `busy` (an offer is already being answered) and
+  `failed` (this offer could not be used). Details go to the server log only.
+- A second offer on the same socket replaces the session the first one made.
+- A session that has not opened its channel within 15 seconds is closed, so abandoned offers do not hold peer
+  slots.
+- At startup the service checks the library against its manifest (release tag and SHA-256), probes that the
+  UDP port can be bound, and creates and deletes one peer. `IMPUNITY_WEBRTC_RUNTIMES` points the loader at another
+  `runtimes` folder; the tests use it to stand in for a platform with no library.
+- Checked by `ImpunityTests/Host/WebRtc_Standalone.cs` (`--filter "Category=WebRtc"`) with a canned offer over a
+  raw WebSocket: answer with candidates and the public address, disabled, missing library, port taken, bad offer,
+  peer limit. And once by hand in a Chromium browser against the real server: answer, channel open, the server's
+  keepalive frame arriving on the channel after a second, and the session closed when the socket was.
+- Not yet exercised: an entity update actually travelling over the channel in either direction, the five-second
+  silence fallback, and anything under load. Those need a client that speaks Impunity over the channel (stage D).
 
 ## 11. Spike results
 

@@ -20,6 +20,8 @@ namespace Impunity.Networking
 		/// <inheritdoc/>
 		public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
+		public ImpunityServerMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
+		/// <inheritdoc/>
 		public ImpunityServerErrorCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
 		public ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
@@ -635,7 +637,7 @@ namespace Impunity.Networking
 			{
 				try
 				{
-					context.OnMessageRecieved?.Invoke(context, data);
+					context.OnUnguaranteedMessageRecieved?.Invoke(context, data);
 				}
 				catch (Exception e)
 				{

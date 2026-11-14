@@ -24,6 +24,10 @@ namespace Impunity.Networking
 	{
 		/// <summary>Called when a complete framed message is received from this client.</summary>
 		ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
+		/// <summary>Called when a complete framed message arrives over the unguaranteed (datagram) path. Kept apart from
+		/// <see cref="OnMessageRecieved"/> because such a message proves nothing about the reliable connection and may
+		/// only be an entity update.</summary>
+		ImpunityServerMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
 		/// <summary>Called on network errors (broken pipe, timeout, etc.).</summary>
 		ImpunityServerErrorCallback? OnNetworkError { get; set; }
 		/// <summary>Called when the client disconnects (gracefully or not).</summary>

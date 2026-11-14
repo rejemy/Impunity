@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -128,17 +129,50 @@ namespace Impunity.Networking
 			LastGuaranteedSendTimestamp = now;
 
 			ClientContext.OnMessageRecieved = ClientMessageReceived;
+			ClientContext.OnUnguaranteedMessageRecieved = ClientUnguaranteedMessageReceived;
 			ClientContext.OnNetworkError = ClientNetworkError;
 			ClientContext.OnClientDisconnected = ClientDisconnected;
 
 		}
 
+		// Called on the transport's datagram thread (UDP listener, WebRTC callback). A datagram says nothing about the
+		// reliable connection, so it does not count against the silence deadline: otherwise a client whose TCP or
+		// WebSocket has died could be kept alive by its movement packets. Only a plain entity update is accepted here,
+		// and only once the connection is established; anything else is dropped.
+		private void ClientUnguaranteedMessageReceived(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
+		{
+			if (messageBytes.Array == null || messageBytes.Count < 12 || ImpunityNetworkingUtil.GetMessageLength(messageBytes) != messageBytes.Count)
+			{
+				ImpunityLogger.LogDebug("Dropping malformed unguaranteed message from " + context.RemoteAddress);
+				return;
+			}
+
+			ushort messageType = BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 4, 2));
+			if (messageType == (ushort)ClientActionType.KEEPALIVE)
+			{
+				// The transport's own liveness probe for its datagram path; nothing for the connection to do.
+				return;
+			}
+
+			if (messageType != (ushort)ClientActionType.UPDATE_ENTITY || GameServer == null || ConnectionReplicant == null)
+			{
+				ImpunityLogger.LogDebug("Dropping unguaranteed message of type " + messageType + " from " + context.RemoteAddress);
+				return;
+			}
+
+			DispatchClientMessage(context, messageBytes);
+		}
+
 		// Called on socket thread
 		private void ClientMessageReceived(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
 		{
-			MessageHeaderStruct msg;
-
 			Interlocked.Exchange(ref LastReceivedTimestamp, ImpunityKeepAlive.Now());
+			DispatchClientMessage(context, messageBytes);
+		}
+
+		private void DispatchClientMessage(IImpunityNetworkServerClientContext context, ArraySegment<byte> messageBytes)
+		{
+			MessageHeaderStruct msg;
 
 			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
 
@@ -668,6 +702,7 @@ namespace Impunity.Networking
 			if (ClientContext != null)
 			{
 				ClientContext.OnMessageRecieved = null;
+				ClientContext.OnUnguaranteedMessageRecieved = null;
 				ClientContext.OnNetworkError = null;
 				ClientContext.OnClientDisconnected = null;
 			}

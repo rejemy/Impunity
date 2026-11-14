@@ -114,6 +114,11 @@ serverLogger.LogInformation($"Listening for TCP on port {impOptions.ServerPort}"
 
 builder.Services.AddSingleton(new InfoService(impOptions));
 
+// Optional: anything that goes wrong in here only leaves clients on WebSocket.
+WebRtcService webRtcService = new WebRtcService(config.webrtc);
+builder.Services.AddSingleton(webRtcService);
+webRtcService.Start();
+
 // --------------- Setup AspNetCore web server ---------------------
 builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();
 
@@ -170,6 +175,8 @@ app.Run();
 // --------------- Shutdown server ---------------------
 
 serverLogger.LogInformation("Shutting down");
+
+webRtcService.Stop();
 
 connectionService.Stop();
 

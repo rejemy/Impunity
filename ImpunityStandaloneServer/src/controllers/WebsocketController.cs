@@ -5,6 +5,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -14,12 +16,27 @@ using System.Net;
 
 namespace Impunity.StandaloneServer;
 
-public class WebSocketController(ILogger<WebSocketController> logger, ConnectionService connectionService) : ControllerBase, IImpunityNetworkServerClientContext
+// Binary WebSocket messages are Impunity frames. Text messages are the transport's own business and never reach
+// Impunity: they carry the WebRTC signaling ({"t":"offer","sdp":...} answered by {"t":"answer","sdp":...} or
+// {"t":"unavailable","r":...}). Once the browser's data channel is open this context reports SupportsUnguaranteed
+// and unguaranteed messages go over it; when it closes they go back to the WebSocket. See
+// docs/designs/WebRtcTransport.md.
+public class WebSocketController(ILogger<WebSocketController> logger, ConnectionService connectionService, WebRtcService webRtc) : ControllerBase, IImpunityNetworkServerClientContext
 {
 	private readonly CancellationTokenSource ReadCancelSource = new();
 	private WebSocket? Socket;
 	private readonly ILogger<WebSocketController> Logger = logger;
 	private readonly ConnectionService Connections = connectionService;
+	private readonly WebRtcService WebRtc = webRtc;
+
+	// Every write to the socket takes this. Impunity never overlaps its own reliable writes, but a signaling reply
+	// is sent from another task and WebSocket.SendAsync must not run twice at once.
+	private readonly SemaphoreSlim SendLock = new(1, 1);
+
+	// The current WebRTC session, if the client asked for one. Replaced when the client offers again.
+	private WebRtcSession? RtcSession;
+	private int OfferInProgress;
+	private volatile bool Disconnected;
 	private IPAddress RemoteIPAddress = IPAddress.Any;
 
 	private const int ConnectEstablishTimeout = 2500;
@@ -27,13 +44,14 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
 	private readonly byte[] ReceiveBuffer = new byte[ImpunityConstants.MaxMessageSize];
 
-	public bool SupportsUnguaranteed { get => false; }
+	public bool SupportsUnguaranteed { get => RtcSession?.IsOpen == true; }
 	public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 	public string RemoteAddress { get => RemoteIPAddress.ToString(); }
 
 	public string ConnectionId { get; private set; } = "";
 
 	public ImpunityServerMessageHandler? OnMessageRecieved { get; set; }
+	public ImpunityServerMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
 	public ImpunityServerErrorCallback? OnNetworkError { get; set; }
 	public ImpunityServerClientContextCallback? OnClientDisconnected { get; set; }
 
@@ -83,21 +101,15 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 		int bytesBuffered = 0;
 		bool firstMessage = true;
 
+		// One deadline for the first Impunity message, however many signaling messages arrive before it.
+		using var establishTimeout = CancellationTokenSource.CreateLinkedTokenSource(ReadCancelSource.Token);
+		establishTimeout.CancelAfter(ConnectEstablishTimeout);
+
 		while (!ReadCancelSource.IsCancellationRequested)
 		{
 			try
 			{
-				CancellationToken token;
-				if (firstMessage)
-				{
-					var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ReadCancelSource.Token);
-					timeoutSource.CancelAfter(ConnectEstablishTimeout);
-					token = timeoutSource.Token;
-				}
-				else
-				{
-					token = ReadCancelSource.Token;
-				}
+				CancellationToken token = firstMessage ? establishTimeout.Token : ReadCancelSource.Token;
 
 				var receiveResult = await Socket.ReceiveAsync(
 					new ArraySegment<byte>(ReceiveBuffer, bytesBuffered, ReceiveBuffer.Length - bytesBuffered),
@@ -113,6 +125,13 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 				if (!receiveResult.EndOfMessage)
 				{
 					// Fragment received — continue accumulating
+					continue;
+				}
+
+				if (receiveResult.MessageType == WebSocketMessageType.Text)
+				{
+					HandleSignal(Encoding.UTF8.GetString(ReceiveBuffer, 0, bytesBuffered));
+					bytesBuffered = 0;
 					continue;
 				}
 
@@ -185,37 +204,158 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 		}
 	}
 
-	public Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
+	public async Task SendGuaranteedMessageAsync(ArraySegment<byte> messageBytes)
 	{
 		var socket = Socket;
 		if (socket == null)
 		{
-			return Task.CompletedTask;
+			return;
 		}
 
-		if (ImpunityNetworkingUtil.GetMessageLength(messageBytes) >= messageBytes.Count)
+		await SendLock.WaitAsync();
+		try
 		{
-			return socket.SendAsync(messageBytes, WebSocketMessageType.Binary, true, CancellationToken.None);
+			// The server batches several framed messages into one send; WebSocket clients expect exactly one per
+			// WebSocket message, so split them back apart on their length prefixes.
+			while (messageBytes.Count > 0)
+			{
+				int length = ImpunityNetworkingUtil.GetMessageLength(messageBytes);
+				await socket.SendAsync(messageBytes.Slice(0, length), WebSocketMessageType.Binary, true, CancellationToken.None);
+				messageBytes = messageBytes.Slice(length);
+			}
 		}
-
-		return SendEachAsync(socket, messageBytes);
+		finally
+		{
+			SendLock.Release();
+		}
 	}
 
-	// The server batches several framed messages into one send; WebSocket clients expect exactly one per WebSocket
-	// message, so split them back apart on their length prefixes.
-	private static async Task SendEachAsync(WebSocket socket, ArraySegment<byte> messages)
-	{
-		while (messages.Count > 0)
-		{
-			int length = ImpunityNetworkingUtil.GetMessageLength(messages);
-			await socket.SendAsync(messages.Slice(0, length), WebSocketMessageType.Binary, true, CancellationToken.None);
-			messages = messages.Slice(length);
-		}
-	}
-
+	/// <summary>Sends over the WebRTC data channel. Only called while <see cref="SupportsUnguaranteed"/> is true; if the
+	/// channel closed in the meantime the message is dropped, never rerouted to the socket from here.</summary>
 	public Task SendUnguaranteedMessageAsync(ArraySegment<byte> messageBytes)
 	{
-		return SendGuaranteedMessageAsync(messageBytes);
+		RtcSession?.Send(messageBytes);
+		return Task.CompletedTask;
+	}
+
+	// ----- WebRTC signaling
+
+	private void HandleSignal(string text)
+	{
+		string? sdp = null;
+		try
+		{
+			using JsonDocument message = JsonDocument.Parse(text);
+			if (message.RootElement.TryGetProperty("t", out JsonElement type) && type.GetString() == "offer"
+				&& message.RootElement.TryGetProperty("sdp", out JsonElement sdpElement))
+			{
+				sdp = sdpElement.GetString();
+			}
+		}
+		catch (JsonException)
+		{
+		}
+
+		if (sdp == null)
+		{
+			// Not something this server understands; nothing to answer.
+			return;
+		}
+
+		// One negotiation at a time per socket. A client that offers again mid-answer is told no and may retry later.
+		if (Interlocked.CompareExchange(ref OfferInProgress, 1, 0) != 0)
+		{
+			_ = SendSignalAsync("unavailable", "r", "busy");
+			return;
+		}
+
+		_ = AnswerOfferAsync(sdp);
+	}
+
+	private async Task AnswerOfferAsync(string offer)
+	{
+		WebRtcSession? session = null;
+		try
+		{
+			// A new offer replaces whatever the client had before.
+			Interlocked.Exchange(ref RtcSession, null)?.Close("replaced by a new offer");
+
+			session = WebRtc.CreateSession(out string reason);
+			if (session == null)
+			{
+				await SendSignalAsync("unavailable", "r", reason);
+				return;
+			}
+
+			session.OnMessage = OnRtcMessage;
+			session.OnClosed = OnRtcClosed;
+			RtcSession = session;
+			if (Disconnected)
+			{
+				// The socket went away while the session was being made.
+				session.Close("socket closed");
+				return;
+			}
+
+			string answer = await session.AnswerAsync(offer);
+			await SendSignalAsync("answer", "sdp", answer);
+		}
+		catch (Exception e)
+		{
+			Logger.LogDebug("WebRTC offer from {address} failed: {error}", RemoteAddress, e.Message);
+			session?.Close("offer failed: " + e.Message);
+			await SendSignalAsync("unavailable", "r", "failed");
+		}
+		finally
+		{
+			Interlocked.Exchange(ref OfferInProgress, 0);
+		}
+	}
+
+	private async Task SendSignalAsync(string type, string key, string value)
+	{
+		var socket = Socket;
+		if (socket == null || Disconnected)
+		{
+			return;
+		}
+
+		try
+		{
+			byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new System.Collections.Generic.Dictionary<string, string> { ["t"] = type, [key] = value });
+			await SendLock.WaitAsync();
+			try
+			{
+				await socket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+			}
+			finally
+			{
+				SendLock.Release();
+			}
+		}
+		catch (Exception)
+		{
+			// The socket is closing; the read loop reports that.
+		}
+	}
+
+	// Called on a libdatachannel thread.
+	private void OnRtcMessage(ArraySegment<byte> message)
+	{
+		try
+		{
+			OnUnguaranteedMessageRecieved?.Invoke(this, message);
+		}
+		catch (Exception e)
+		{
+			ImpunityLogger.LogError("Exception in WebRTC message handler", e);
+		}
+	}
+
+	private void OnRtcClosed(WebRtcSession session, string reason)
+	{
+		// Unguaranteed sends go back to the WebSocket from here on. The client offers again if it wants another try.
+		Interlocked.CompareExchange(ref RtcSession, null, session);
 	}
 
 	public void Disconnect()
@@ -225,6 +365,9 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 
 	private void OnDisconnected()
 	{
+		Disconnected = true;
+		Interlocked.Exchange(ref RtcSession, null)?.Close("socket closed");
+
 		try
 		{
 			OnClientDisconnected?.Invoke(this);
@@ -243,5 +386,6 @@ public class WebSocketController(ILogger<WebSocketController> logger, Connection
 			Socket = null;
 		}
 		ReadCancelSource.Dispose();
+		Interlocked.Exchange(ref RtcSession, null)?.Close("disposed");
 	}
 }

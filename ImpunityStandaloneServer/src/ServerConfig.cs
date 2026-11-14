@@ -19,6 +19,27 @@ public class WorldConfig
 	public int max_players { get; set; } = 16;
 }
 
+// Settings for the optional WebRTC transport (docs/designs/WebRtcTransport.md). Leaving the whole object out of
+// config.json means enabled with these defaults.
+public class WebRtcConfig
+{
+	// false skips loading the native library altogether.
+	public bool enabled { get; set; } = true;
+
+	// The one UDP port every WebRTC client talks to. Must be reachable from clients, like http_port.
+	public ushort udp_port { get; set; } = 29656;
+
+	// Local interface to bind, as an IP address. Null binds them all.
+	public string? bind_address { get; set; }
+
+	// Address (or host name) clients should send to when it isn't one of this machine's own, i.e. behind NAT:
+	// most cloud hosts and Docker.
+	public string? public_address { get; set; }
+
+	// Offers beyond this many live peers are refused; those clients stay on WebSocket.
+	public int max_peers { get; set; } = 256;
+}
+
 public class ServerConfig
 {
 	public string? game_type_code { get; set; }
@@ -38,6 +59,8 @@ public class ServerConfig
 	// Most outbound bytes held for one client that isn't reading before it's dropped
 	// (ImpunityOptions.MaxSendBacklogBytes). Null keeps the library default; 0 means no limit.
 	public long? max_send_backlog_bytes { get; set; }
+
+	public WebRtcConfig? webrtc { get; set; }
 
 	public List<WorldConfig>? worlds { get; set; }
 
