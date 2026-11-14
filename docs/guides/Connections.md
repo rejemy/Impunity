@@ -170,6 +170,8 @@ Because dispatch happens *inside* `Update()`, **all of your callbacks run on the
 
 The remote connection's `Update()` adds a few transport chores before the shared steps above: on WebGL it pumps the send queue and sends any keepalive that's due (there is no writer thread there); on every platform it checks for **server silence** past the connection timeout (see [§4](#losing-a-connection-keepalives-and-the-disconnect-deadline)), and **times out** any reply-expecting action older than `ActionTimeoutMillis`, completing it with a `TimeoutError`.
 
+On WebGL it also drains the send queue **after** those shared steps, so this call's dirty-field updates and requests queued by callbacks reach the transport in the same frame. The initial drain remains necessary: queued property payloads may refer to the shared buffer that the next dirty sweep reuses. Neither drain sends after the connection has closed. Field changes made by inbound callbacks still wait for the next dirty sweep; the second drain does not run another sweep or dispatch another round of callbacks. Other platforms keep their background writer unchanged.
+
 ---
 
 ## 6. The action system: request → reply

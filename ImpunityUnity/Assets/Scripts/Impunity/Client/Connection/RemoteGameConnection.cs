@@ -332,14 +332,13 @@ namespace Impunity.Connection
 		// WebGL has no background threads, so the send queue is drained synchronously from Update() instead.
 		private void SendPendingMessages()
 		{
-			if (!Running)
+			if (!Running || Volatile.Read(ref ConnectionEnded) != 0)
 			{
 				return;
 			}
 
-			while(PendingSend.Count > 0)
+			while (Volatile.Read(ref ConnectionEnded) == 0 && PendingSend.TryTake(out GameStateActionBase action))
 			{
-				GameStateActionBase action = PendingSend.Take();
 				try
 				{
 					SendMessage(action);
@@ -350,8 +349,12 @@ namespace Impunity.Connection
 				}
 			}
 
-			SendKeepAliveIfDue();
-			FlushTransport();
+			// A send can report a connection loss synchronously. Don't touch the closed transport again.
+			if (Volatile.Read(ref ConnectionEnded) == 0)
+			{
+				SendKeepAliveIfDue();
+				FlushTransport();
+			}
 		}
 #endif
 
@@ -421,6 +424,7 @@ namespace Impunity.Connection
 		public override void Update()
 		{
 #if UNITY_WEBGL
+			// Consume earlier queued payloads before the dirty sweep reuses its shared property buffer.
 			SendPendingMessages();
 #endif
 			int ended = Volatile.Read(ref ConnectionEnded);
@@ -469,6 +473,12 @@ namespace Impunity.Connection
 			}
 
 			base.Update();
+#if UNITY_WEBGL
+			// The base pump queues this frame's dirty fields and callback-generated requests. With no writer
+			// thread, send them now rather than adding a frame of latency. Keep the initial drain above too.
+			// SendPendingMessages also checks for a callback having disposed/lost the connection.
+			SendPendingMessages();
+#endif
 		}
 
 		// Completes timed-out actions with a TimeoutError.
