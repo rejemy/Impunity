@@ -1,0 +1,10 @@
+#!/bin/bash
+# work-done — bring Claude.app to the foreground as a visual "work is done / ready for input" cue.
+# Run it at the end of an agent session that drove Unity (see AGENTS.md).
+#
+# (Replaces the old `tools/unity-session end`. The `start` half — keeping Unity foreground so it
+# would compile / enter play mode — was retired on 2026-09-13: tools/ucmd works with Unity in the
+# background.)
+
+open -b com.anthropic.claudefordesktop 2>/dev/null || open -a Claude
+echo "Claude foregrounded."

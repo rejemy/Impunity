@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 using UnityEngine;
 
+
 namespace Dreamwing.Cons
 {
 
@@ -13,8 +14,8 @@ namespace Dreamwing.Cons
 			Cons.AddCommand<string[]>(
 				"help",
 				BuiltinCommands.Help,
-				"Prints command help text and lists commands",
-				new CommandRemainingArgument("command")
+				"Lists a group's commands or shows a command's usage. --all lists everything under the path, one line each; --find <text> searches names and help text",
+				new CommandPathArgument("command")
 
 			);
 
@@ -29,13 +30,13 @@ namespace Dreamwing.Cons
 				"console clear", ConsoleClear, "Clears console output"
 			);
 			Cons.AddCommand(
-				"console clearcommands", ConsoleClearHistory, "Clears console command history"
+				"console clear-history", ConsoleClearHistory, "Clears console command history"
 			);
 			Cons.AddCommand(
 				"console close", ConsoleClose, "Closes console"
 			);
 
-			Cons.AddCommandGroup("system", "Commands related to the dotnet system");
+			Cons.AddCommandGroup("system", "Runtime diagnostics: memory, device");
 			Cons.AddCommand(
 				"system gc", SystemGC, "Runs system garbage collection immediately"
 			);
@@ -46,35 +47,7 @@ namespace Dreamwing.Cons
 
 		public static void Help(string[] args)
 		{
-			string commandPath = String.Join(" ", args);
-			CommandNode node = Cons.GetCommandInfo(commandPath);
-			if (node == null)
-			{
-				Cons.LogWarning("Command not found: " + commandPath);
-				return;
-			}
-
-			ConsoleCommand cmd = node as ConsoleCommand;
-			if (cmd != null)
-			{
-				Cons.Log(node.HelpText);
-				Cons.Log("Usage: " + cmd.GetUsageString());
-			}
-
-			ConsoleCommandGroup grp = node as ConsoleCommandGroup;
-			if (grp != null)
-			{
-				Cons.Log(node.HelpText + ":");
-				List<CommandNode> subcommands = new List<CommandNode>(grp.SubCommands.Values);
-				subcommands.Sort((n1, n2) =>
-				{
-					return String.Compare(n1.Path, n2.Path);
-				});
-				foreach (CommandNode sub in subcommands)
-				{
-					Cons.Log("  " + sub.Path);
-				}
-			}
+			Cons.Help(args);
 		}
 
 		public static void Quit()
@@ -121,6 +94,5 @@ namespace Dreamwing.Cons
 				);
 
 		}
-
 	}
 }

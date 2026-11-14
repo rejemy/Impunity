@@ -1,0 +1,19 @@
+{
+    "name": "DevTools",
+    "rootNamespace": "",
+    "references": [
+        "Dreamwing",
+        "Impunity",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

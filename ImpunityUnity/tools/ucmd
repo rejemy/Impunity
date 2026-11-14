@@ -1,0 +1,570 @@
+#!/usr/bin/env python3
+"""ucmd — drive the Unity editor and the running game through Unity's official Pipeline server.
+
+Thin wrapper over `unity command` (Unity CLI + com.unity.pipeline) that:
+  * always targets this project (--project-path), so a second open editor can't hijack calls;
+  * retries through the ~2s window where the server is down during a domain reload
+    (recompile, entering/leaving play mode) — only connection failures, never a command that ran;
+  * prints just the result; exits non-zero when either the CLI exits non-zero or the result itself
+    reports failure (some commands put success:false inside it), with the error's message and,
+    for script run/eval, its stack trace;
+  * adds verbs for the loops we run constantly (compile, play, tests, logs, ...).
+
+Raw form — any Pipeline command (`tools/ucmd list` to discover them):
+  tools/ucmd <group> <command> [--param value ...]   e.g. tools/ucmd gameobject find --name Players
+
+Verbs:
+  status                        editor state, plus game state (dev status) while playing
+  compile                       import + compile + domain reload; prints compiler errors (exit 2)
+  play [--game [timeout]]       enter play mode and wait; --game also waits for a loaded world
+  stop                          exit play mode and wait
+  tests [editmode|playmode] [filter]
+                                run tests and wait; prints summary + failures (exit 8 on failures or no match)
+  game <console command...>     run a dev-console command in the running game (dev console);
+                                exit 1 when it failed (unknown, bad args, threw, logged an error)
+  logs [--all] [--since CURSOR] [--tail N]
+                                Unity console entries (default: warnings+errors, newest 50).
+                                Prints `cursor=...` last; pass it to --since to see only newer ones.
+  shot [path]                   screenshot of the game view (composited, incl. overlay UI, in play
+                                mode); default Temp/ucmd/shot-<ms>.png. Prints the path.
+  tree [scenePath] [--depth N]  compact indented GameObject tree of the open scenes
+  wait <playing|stopped|ready|ingame> [timeoutSec]
+  list [query]                  list available commands (optionally filtered)
+
+Targeting a development player build instead of the editor (e.g. the multiplayer test client
+that a multiplayer harness launches): pass `--runtime <path/to/Game.app>` before the verb, or set UCMD_RUNTIME.
+Then `status`, `game`, `logs`, `shot`, `wait ingame`, `list` and raw commands work; the editor-only
+verbs (compile, play, stop, tests, tree) refuse.
+
+Env: UCMD_RETRY_SEC (default 30) — how long to ride out an unreachable server.
+     UCMD_RUNTIME — .app bundle of a running dev build to target (same as --runtime).
+See docs/AgentTooling.md.
+"""
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The CLI installer puts `unity` in ~/.unity/bin, which non-login shells may not have on PATH.
+UNITY = shutil.which("unity") or os.path.expanduser("~/.unity/bin/unity")
+RETRY_SEC = float(os.environ.get("UCMD_RETRY_SEC", "30"))
+# .app bundle of a development player to target instead of the editor (--runtime / UCMD_RUNTIME)
+RUNTIME = os.environ.get("UCMD_RUNTIME") or None
+
+# Exit codes for "the command never ran" (CLI beta.16+): 12 = no Pipeline instance found (the server
+# is down mid-reload), 17 UNAVAILABLE = loading/compiling/reloading/busy. Safe to retry any command.
+RETRY_EXITS = {12, 17}
+# Messages the CLI returns when it never reached a server — safe to retry for any command.
+UNREACHABLE = ("No Unity Editor instances found", "No Pipeline instance found", "Cannot connect to Pipeline server", "ECONNREFUSED",
+			   "not reachable", "unreachable", "No runtime", "runtime port file")
+# The connection dropped mid-request (a domain reload started) — the command may have run, so only
+# retry commands that are harmless to repeat.
+RESET = ("Connection reset", "socket hang up", "ECONNRESET")
+REPEATABLE = {"editor status", "editor.playmode start", "editor.playmode stop", "script recompile", "script recompile_status", "console get",
+			  "console status", "test status", "dev status", "scene list_open", "scene get_hierarchy",
+			  "capture game_view", "gameobject find", "editor search"}
+
+
+class CommandError(Exception):
+	pass
+
+
+def call(name, *args, retry_sec=None, failed_result=False):
+	"""Run one Pipeline command — `name` is the grouped name, e.g. "editor status" — and return its
+	result (JSON strings are decoded). Raises CommandError.
+
+	failed_result: return the reply of a command that failed but still wrote one (exit 6 with the
+	result on stdout — `test status` since Pipeline 1.0 when a test failed or none matched). Pass a
+	list to also learn that it failed: the error message is appended to it."""
+	retry_sec = RETRY_SEC if retry_sec is None else retry_sec
+	deadline = time.time() + retry_sec
+	argv = [UNITY, "command", *target_args(), *name.split(), *[str(a) for a in args], "--no-banner", "--format", "json"]
+	while True:
+		proc = subprocess.run(argv, capture_output=True, text=True)
+		if proc.returncode == 0:
+			result = decode_result(proc.stdout)
+			failure = result_failure(result)
+			if failure:
+				raise CommandError(failure)
+			return result
+		if (failed_result or isinstance(failed_result, list)) and proc.stdout.strip():
+			result = decode_result(proc.stdout)
+			if isinstance(result, dict):
+				if isinstance(failed_result, list):
+					failed_result.append(error_message(proc) or f"unity command exited {proc.returncode}")
+				return result
+
+		# Since Pipeline 0.10 / CLI beta.16 a failure is a non-zero exit with the error on stderr
+		# (a JSON envelope under --format json, plain text for some), and stdout is empty.
+		message = error_message(proc) or f"unity command exited {proc.returncode}"
+		retryable = (proc.returncode in RETRY_EXITS or any(m in message for m in UNREACHABLE)
+					 or (name in REPEATABLE and any(m in message for m in RESET)))
+		if retryable and time.time() < deadline:
+			time.sleep(0.5)
+			continue
+		raise CommandError(message)
+
+
+def decode_result(stdout):
+	"""Stdout of a successful `unity command --format json`: the bare result since Pipeline 0.10
+	(one JSON value, or one per line for streamed records); the older {success, data: {result}}
+	envelope is still unwrapped for a player built against an older package."""
+	text = stdout.strip()
+	if not text:
+		return None
+	try:
+		result = json.loads(text)
+	except ValueError:
+		try:
+			result = [json.loads(line) for line in text.splitlines() if line.strip()]
+		except ValueError:
+			return text
+	if isinstance(result, dict) and {"success", "data", "errors"} <= result.keys():
+		result = (result.get("data") or {}).get("result")
+	if isinstance(result, str) and result[:1] in "{[":
+		try:
+			result = json.loads(result)
+		except ValueError:
+			pass
+	return result
+
+
+def records(result, key):
+	"""A list command's items. Pipeline 1.0 commands stream one record per item (decoded as a list,
+	or a lone dict for a single item); older ones wrapped the list as {key: [...]}."""
+	if result is None:
+		return []
+	if isinstance(result, dict):
+		return result[key] if isinstance(result.get(key), list) else [result]
+	return result
+
+
+def error_message(proc):
+	lines = [l for l in proc.stderr.splitlines() if not l.startswith("<claude-code-hint")]
+	text = "\n".join(lines).strip() or proc.stdout.strip()
+	start, end = text.find("{"), text.rfind("}")
+	if start >= 0 and end > start:
+		try:
+			parsed = json.loads(text[start:end + 1])
+			# The CLI's error envelope…
+			errors = parsed.get("errors") or []
+			joined = "; ".join(e.get("message", "") for e in errors if isinstance(e, dict))
+			if joined:
+				return joined
+			# …or the failed command's own result (script run/eval: error + errorDetails trace)
+			failure = result_failure(parsed)
+			if failure:
+				return failure
+		except ValueError:
+			pass
+	return text
+
+
+def target_args():
+	return ["--runtime-path", RUNTIME] if RUNTIME else ["--project-path", PROJECT]
+
+
+def editor_only(verb):
+	if RUNTIME:
+		raise CommandError(f"'{verb}' is an editor verb; it can't target a player build (--runtime)")
+
+
+def result_failure(result):
+	if not isinstance(result, dict):
+		return None
+	for key in ("success", "Success", "ok"):
+		if result.get(key) is False:
+			error = result.get("error") or result.get("Error") or json.dumps(result)
+			details = result.get("errorDetails")
+			return f"{error}\n{details.rstrip()}" if details else error
+	return None
+
+
+def emit(result):
+	if isinstance(result, str):
+		print(result)
+	else:
+		print(json.dumps(result, indent=1, ensure_ascii=False))
+
+
+def is_playing():
+	return call("editor status").get("playMode") == "playing"
+
+
+def wait_until(predicate, timeout, what):
+	deadline = time.time() + timeout
+	while time.time() < deadline:
+		try:
+			if predicate():
+				return
+		except CommandError:
+			pass  # e.g. dev status before the game has booted
+		time.sleep(0.5)
+	raise CommandError(f"timed out after {timeout:g}s waiting for {what}")
+
+
+def editor_settled():
+	status = call("editor status")
+	# status reads "ready" in edit mode but "playing"/"paused" in play mode.
+	return (status.get("status") in ("ready", "playing", "paused")
+			and not status.get("compiling") and not status.get("domainReloadInProgress"))
+
+
+def in_world(game):
+	# The game reports inGame through DevStatus.InGame (Assets/Scripts/DevTools/DevStatus.cs) once
+	# it is ready to be driven: connected, joined, whatever "in the world" means for it.
+	return game.get("inGame") is True
+
+
+WAITS = {
+	"playing": lambda: is_playing() and editor_settled(),
+	"stopped": lambda: call("editor status").get("playMode") == "stopped" and editor_settled(),
+	"ready": editor_settled,
+	"ingame": lambda: in_world(call("dev status")),
+}
+
+
+# ---- verbs ---------------------------------------------------------------------------------
+
+def verb_status(args):
+	if RUNTIME:
+		status = call("runtime status")
+		try:
+			status["game"] = call("dev status", retry_sec=0)
+		except CommandError as e:
+			status["game"] = {"error": str(e)}
+		emit(status)
+		return
+	status = call("editor status")
+	if status.get("playMode") == "playing":
+		try:
+			status["game"] = call("dev status", retry_sec=0)
+		except CommandError as e:
+			status["game"] = {"error": str(e)}
+	emit(status)
+
+
+def verb_compile(args):
+	editor_only("compile")
+	started = call("script recompile")
+	if started.get("status") == "up_to_date":
+		print("up to date — nothing to compile")
+		return 0
+	if started.get("status") == "failed":
+		return print_compile_errors()
+
+	deadline = time.time() + 300
+	while time.time() < deadline:
+		time.sleep(1)
+		try:
+			status = call("script recompile_status")
+		except CommandError:
+			continue
+		if status.get("status") in ("completed", "up_to_date"):
+			if status.get("failed"):
+				return print_compile_errors(status.get("errors"))
+			# "completed" is written when compilation finishes, which can precede the domain reload.
+			time.sleep(1)
+			wait_until(editor_settled, 120, "the domain reload to finish")
+			print("compiled; editor ready")
+			return 0
+	raise CommandError("timed out waiting for compilation")
+
+
+def print_compile_errors(errors=None):
+	if not errors:
+		entries = call("console get", "--level", "error", "--tail", "50").get("entries", [])
+		errors = [e["message"] for e in entries]
+	print("compilation failed:", file=sys.stderr)
+	for line in errors:
+		print("  " + line, file=sys.stderr)
+	return 2
+
+
+def verb_play(args):
+	editor_only("play")
+	if not is_playing():
+		if (call("console status").get("groundTruth") or {}).get("compilationFailed"):
+			raise CommandError("scripts have compile errors, so Unity won't enter play mode (see: tools/ucmd logs)")
+		call("editor.playmode start")
+	wait_until(WAITS["playing"], 60, "play mode")
+	if args and args[0] == "--game":
+		timeout = float(args[1]) if len(args) > 1 else 120
+		wait_until(WAITS["ingame"], timeout, "a loaded game (dev status inGame)")
+		emit(call("dev status"))
+	else:
+		print("playing")
+
+
+def verb_stop(args):
+	editor_only("stop")
+	if is_playing():
+		call("editor.playmode stop")
+	wait_until(WAITS["stopped"], 60, "play mode to exit")
+	print("stopped")
+
+
+def verb_tests(args):
+	editor_only("tests")
+	mode = {"editmode": "editor", "edit": "editor", "playmode": "playmode", "play": "playmode"}.get(
+		(args[0] if args else "editmode").lower())
+	if mode is None:
+		raise CommandError("usage: tests [editmode|playmode] [filter]")
+	params = ["--mode", mode, "--async-tests", "true"]
+	if len(args) > 1:
+		params += ["--filter", args[1]]
+	call("test run", *params)
+
+	# Since Pipeline 1.0 `test status` exits 6 once a run ends with a failed test or no tests at all,
+	# its reply still on stdout (failed_result). Errors without a reply are tolerated for a while —
+	# a playmode run reloads the domain — then reported rather than polled until the deadline.
+	deadline = time.time() + 900
+	error_since = None
+	while time.time() < deadline:
+		time.sleep(1)
+		try:
+			status = call("test status", "--detail", "failures", failed_result=True)
+			error_since = None
+		except CommandError as e:
+			error_since = error_since or time.time()
+			if time.time() - error_since > 60:
+				raise CommandError(f"test status keeps failing: {e}")
+			continue
+		if status.get("status") not in ("running", "pending", "queued", "started"):
+			return report_tests(status)
+	raise CommandError("timed out waiting for tests")
+
+
+def report_tests(status):
+	summary = {k.lower(): v for k, v in (status.get("summary") or {}).items()}
+	results = status.get("results") or []
+	print(f"{summary.get('passed', 0)}/{summary.get('total', 0)} passed, {summary.get('failed', 0)} failed, "
+		  f"{summary.get('skipped', 0)} skipped, {summary.get('inconclusive', 0)} inconclusive")
+	if status.get("status") != "completed":
+		print(f"run ended {status.get('status')}: {status.get('error') or status.get('message') or ''}".rstrip(),
+			  file=sys.stderr)
+	for r in results:
+		r = {k.lower(): v for k, v in r.items()}
+		if str(r.get("status", "")).lower() in ("failed", "failure", "error"):
+			print(f"FAIL {r.get('fullname') or r.get('name')}\n  {r.get('message') or ''}".rstrip())
+	if status.get("status") != "completed" and not summary.get("failed"):
+		return 8
+	if summary.get("total", 0) == 0:
+		print("(no tests matched)", file=sys.stderr)
+		return 8
+	return 8 if summary.get("failed", 0) else 0
+
+
+def console_line(args):
+	"""One argument is the whole console line, as typed (`game "player warp starting 5 5"`).
+	Several are words: one that the shell kept whole despite spaces (`game ui click "Start New
+	Game"`) is re-quoted for the console's tokenizer, which takes "…" with \\ and \" escapes."""
+	if len(args) == 1:
+		return args[0]
+	def word(a):
+		if a and not any(c.isspace() for c in a) and a[0] not in "\"'":
+			return a
+		return '"' + a.replace("\\", "\\\\").replace('"', '\\"') + '"'
+	return " ".join(word(a) for a in args)
+
+
+def verb_game(args):
+	if not args:
+		raise CommandError("usage: game <console command...>")
+	# dev console exits 6 when the line failed (unknown command, bad arguments, an error logged),
+	# its output still on stdout; `failed` is in the result too
+	line = console_line(args)
+	try:
+		result = call("dev console", "--cmd", line, failed_result=True)
+	except CommandError as e:
+		# A player build's runtime server returns no result for a failed command, only its error
+		# (dev console logs the output as the error)
+		prefix = "Command Execution Failed. "
+		message = str(e)
+		if RUNTIME and prefix in message:
+			print(message.split(prefix, 1)[1])
+			print(f"ucmd: console command failed: {line}", file=sys.stderr)
+			return 1
+		raise
+	output = result.get("output", "")
+	if output:
+		print(output)
+	if result.get("failed"):
+		print(f"ucmd: console command failed: {line}", file=sys.stderr)
+		return 1
+
+
+def verb_logs(args):
+	level, since, tail = "warn", None, "50"
+	i = 0
+	while i < len(args):
+		if args[i] == "--all":
+			level = "log"
+		elif args[i] == "--since" and i + 1 < len(args):
+			since = args[i + 1]; i += 1
+		elif args[i] == "--tail" and i + 1 < len(args):
+			tail = args[i + 1]; i += 1
+		else:
+			raise CommandError("usage: logs [--all] [--since CURSOR] [--tail N]")
+		i += 1
+
+	params = ["--level", level, "--tail", tail]
+	if since:
+		session, _, seq = since.rpartition(":")
+		params += ["--since", seq] + (["--since-session", session] if session else [])
+	result = call("console get", *params)
+	if result.get("reset"):
+		print("(cursor was from another editor session — showing the tail instead)", file=sys.stderr)
+	if result.get("dropped"):
+		print("(entries after the cursor were dropped from the buffer)", file=sys.stderr)
+	for e in result.get("entries", []):
+		message = e.get("message") or ""
+		if len(message) > 600:
+			message = message[:600] + " …"
+		print(f"[{e.get('level')}] #{e.get('seq')} {message}")
+		if e.get("level") == "error":
+			frames = [f for f in (e.get("stackTrace") or "").strip().splitlines() if not f.startswith(LOG_PLUMBING)]
+			if frames:
+				print("    " + "\n    ".join(frames[:5]))
+	truth = result.get("groundTruth") or {}
+	if truth.get("compilationFailed"):
+		print("(scripts currently have compile errors)", file=sys.stderr)
+	print(f"cursor={result.get('session')}:{result.get('cursor')}")
+
+
+# Stack frames that are just the logging call itself — skipped when printing error entries.
+LOG_PLUMBING = ("UnityEngine.DebugLogHandler:", "UnityEngine.Debug:", "UnityEngine.Logger:",
+				"Dreamwing.Cons.UnityDebugInterceptor:")
+
+
+def verb_shot(args):
+	import base64
+	path = args[0] if args else os.path.join("Temp", "ucmd", f"shot-{int(time.time() * 1000)}.png")
+	path = os.path.join(PROJECT, path) if not os.path.isabs(path) else path
+	if RUNTIME:
+		# No capture game_view in players: dev shot writes the PNG itself at the end of the frame
+		call("dev shot", "--path", path)
+		wait_until(lambda: os.path.exists(path) and os.path.getsize(path) > 0, 15, "the screenshot file")
+		time.sleep(0.2)  # let the writer finish
+		print(path)
+		return
+	playing = is_playing()
+	source = "screen" if playing else "camera"
+	width, height = 1920, 1080
+	if playing:
+		# Keep the game view's aspect (longest edge 1920), so a shot pixel maps to a screen pixel —
+		# what `ui dump` reports and `ui clickat` takes — by one uniform scale (and a y flip).
+		try:
+			screen = call("dev status", retry_sec=0).get("screen") or {}
+			sw, sh = int(screen.get("w", 0)), int(screen.get("h", 0))
+			if sw > 0 and sh > 0:
+				scale = 1920.0 / max(sw, sh)
+				width, height = max(1, round(sw * scale)), max(1, round(sh * scale))
+		except CommandError:
+			pass
+	result = call("capture game_view", "--source", source, "--width", str(width), "--height", str(height))
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	with open(path, "wb") as f:
+		f.write(base64.b64decode(result["base64"]))
+	print(path)
+
+
+def verb_tree(args):
+	editor_only("tree")
+	scene, depth = None, None
+	i = 0
+	while i < len(args):
+		if args[i] == "--depth" and i + 1 < len(args):
+			depth = int(args[i + 1]); i += 1
+		else:
+			scene = args[i]
+		i += 1
+	if not scene:
+		# One record per scene since Pipeline 1.0 (a {"scenes": [...]} object before)
+		listed = records(call("scene list_open"), "scenes")
+	scenes = [scene] if scene else [s["path"] for s in listed if s.get("isLoaded")]
+	for path in scenes:
+		snap = call("scene get_hierarchy", "--path", path)
+		print(f"=== {snap.get('sceneName')} ({path}) ===")
+		for root in snap.get("roots", []):
+			print_node(root, 0, depth)
+
+
+def print_node(node, level, depth):
+	children = node.get("children") or []
+	parts = ["  " * level + node.get("name", "?")]
+	if children:
+		parts.append(f"[{len(children)}]")
+	if node.get("activeSelf") is False:
+		parts.append("(inactive)")
+	components = [c for c in node.get("components") or [] if c not in ("Transform", "RectTransform")]
+	if components:
+		parts.append("{" + ", ".join(components) + "}")
+	print(" ".join(parts))
+	if depth is None or level + 1 < depth:
+		for child in children:
+			print_node(child, level + 1, depth)
+
+
+def verb_wait(args):
+	if RUNTIME and args and args[0] != "ingame":
+		raise CommandError("a player build can only wait for: ingame")
+	if not args or args[0] not in WAITS:
+		raise CommandError("usage: wait <" + "|".join(WAITS) + "> [timeoutSec]")
+	wait_until(WAITS[args[0]], float(args[1]) if len(args) > 1 else 120, args[0])
+
+
+def verb_list(args):
+	argv = [UNITY, "command", *target_args(), "--no-banner", "--no-pager", "--detail", "compact"]
+	if args:
+		argv += ["--query", args[0]]
+	return subprocess.run(argv).returncode
+
+
+VERBS = {
+	"status": verb_status, "compile": verb_compile, "play": verb_play, "stop": verb_stop,
+	"tests": verb_tests, "game": verb_game, "logs": verb_logs, "shot": verb_shot, "tree": verb_tree,
+	"wait": verb_wait, "list": verb_list,
+}
+
+
+def main(argv):
+	global RUNTIME
+	if argv and argv[0] == "--runtime":
+		if len(argv) < 2:
+			print("ucmd: --runtime needs the path of a running dev build's .app", file=sys.stderr)
+			return 1
+		RUNTIME = argv[1]
+		argv = argv[2:]
+	if RUNTIME:
+		RUNTIME = os.path.abspath(RUNTIME)
+	if not argv or argv[0] in ("-h", "--help", "help"):
+		print(__doc__.strip())
+		return 0
+	try:
+		verb = VERBS.get(argv[0])
+		if verb:
+			return verb(argv[1:]) or 0
+		# A grouped command is two words (`gameobject find`); a global one (`some_cmd`) is one.
+		split = 2 if len(argv) > 1 and not argv[1].startswith("-") else 1
+		# A command can fail and still return a result (dev net_sync when out of sync): print both
+		failure = []
+		emit(call(" ".join(argv[:split]), *argv[split:], failed_result=failure))
+		if failure:
+			sys.stdout.flush()
+			print(f"ucmd: {failure[0]}", file=sys.stderr)
+			return 1
+		return 0
+	except CommandError as e:
+		print(f"ucmd: {e}", file=sys.stderr)
+		return 1
+	except KeyboardInterrupt:
+		return 130
+
+
+if __name__ == "__main__":
+	sys.exit(main(sys.argv[1:]))

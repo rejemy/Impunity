@@ -1,7 +1,11 @@
 ﻿<Solution>
   <Project Path="Impunity.csproj" />
   <Project Path="ImpunityUnityEditorTests.csproj" />
+  <Project Path="DevTools.Tests.csproj" />
+  <Project Path="DevTools.csproj" />
   <Project Path="ImpunitySharedTests.csproj" />
+  <Project Path="Dreamwing.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
   <Project Path="ImpunityUnityPlayModeTests.csproj" />
+  <Project Path="DevTools.Cli.csproj" />
 </Solution>

@@ -31,6 +31,7 @@ RectTransform:
   m_Children:
   - {fileID: 2456473604589422027}
   m_Father: {fileID: 2456473602838729792}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
@@ -83,10 +84,11 @@ RectTransform:
   - {fileID: 2456473602773205457}
   - {fileID: 2456473603558275108}
   m_Father: {fileID: 2456473603423571170}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 0, y: 10}
+  m_AnchoredPosition: {x: 0, y: 9.999988}
   m_SizeDelta: {x: -12, y: -32.000023}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &2456473602838729799
@@ -104,11 +106,11 @@ MonoBehaviour:
   m_Content: {fileID: 2456473604589422027}
   m_Horizontal: 0
   m_Vertical: 1
-  m_MovementType: 1
+  m_MovementType: 2
   m_Elasticity: 0.1
   m_Inertia: 1
   m_DecelerationRate: 0.135
-  m_ScrollSensitivity: 1
+  m_ScrollSensitivity: 6
   m_Viewport: {fileID: 2456473602773205457}
   m_HorizontalScrollbar: {fileID: 0}
   m_VerticalScrollbar: {fileID: 2456473603558275115}
@@ -154,6 +156,7 @@ RectTransform:
   - {fileID: 2456473604118050096}
   - {fileID: 2456473604361429506}
   m_Father: {fileID: 0}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
@@ -212,7 +215,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   ConsoleOutput: {fileID: 2456473604589422026}
   ConsoleInput: {fileID: 2456473604361429504}
-  ConsoleScrollbar: {fileID: 2456473603558275115}
+  ConsoleScroll: {fileID: 2456473602838729799}
 --- !u!1 &2456473603558275109
 GameObject:
   m_ObjectHideFlags: 0
@@ -246,6 +249,7 @@ RectTransform:
   m_Children:
   - {fileID: 2456473604474282096}
   m_Father: {fileID: 2456473602838729792}
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 0}
   m_AnchorMax: {x: 1, y: 1}
@@ -370,6 +374,7 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2456473604361429506}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
@@ -449,6 +454,7 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2456473604474282096}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
@@ -524,6 +530,7 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2456473603423571170}
+  m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 0, y: 0}
@@ -605,6 +612,7 @@ RectTransform:
   m_Children:
   - {fileID: 2456473603687801322}
   m_Father: {fileID: 2456473603423571170}
+  m_RootOrder: 2
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 0}
@@ -670,10 +678,7 @@ MonoBehaviour:
   m_HideMobileInput: 0
   m_CharacterValidation: 0
   m_CharacterLimit: 0
-  m_OnSubmit:
-    m_PersistentCalls:
-      m_Calls: []
-  m_OnDidEndEdit:
+  m_OnEndEdit:
     m_PersistentCalls:
       m_Calls: []
   m_OnValueChanged:
@@ -747,6 +752,7 @@ RectTransform:
   m_Children:
   - {fileID: 2456473603906495353}
   m_Father: {fileID: 2456473603558275108}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
@@ -785,6 +791,7 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 2456473602773205457}
+  m_RootOrder: 0
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 0}

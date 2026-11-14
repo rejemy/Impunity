@@ -1,0 +1,23 @@
+{
+    "name": "DevTools.Cli",
+    "rootNamespace": "",
+    "references": [
+        "DevTools",
+        "Dreamwing",
+        "Impunity",
+        "Unity.Pipeline",
+        "Unity.Pipeline.Attributes"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR || ENABLE_PROFILER || ENABLE_RUNTIME_PIPELINE",
+        "UNITY_EDITOR || ENABLE_RUNTIME_PIPELINE_DEV || ENABLE_RUNTIME_PIPELINE"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

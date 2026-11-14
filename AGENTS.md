@@ -81,6 +81,21 @@ Run the test suite with `./test.sh` (see Tests below).
 - Every `IDistributableValueSerializer<T>` declares `ValueSemantics` (`Immutable` / `Mutable`) alongside `ValueType`, and distributed field types put **no constraint on `T`** (the former `where T : IEquatable<T>` is gone — it excluded `ArraySegment<byte>`, which has an `Equals` overload but never declared the interface). `DistributedFieldPolicy.IsUnchanged` in `Client/Connection/DistributedFields.cs` is the single place a `Set` is decided to be a no-op: `Mutable` skips the comparison entirely so every `Set` marks the field dirty; `Immutable` compares via `EqualityComparer<T>.Default`. `Mutable` is for anything whose contents a caller can change without constructing a new value — `BsonSerializer<T>`, `BsonSmallSerializer<T>`, `BlobSerializer` — because `Get()` returns the field's own state, so a value modified in place and passed back to `Set` compares equal to itself and would otherwise be silently dropped. **When writing a serializer, `Mutable` is the safe answer**; declaring `Immutable` asserts the type has meaningful value equality, which the compiler no longer checks. Both properties are compile-time constants on a concrete serializer struct, so the branches fold away in specialized generics. The user-facing rule is *treat `Get()`'s result as read-only; copy, mutate the copy, `Set` the copy* — see the mutable-values section of `docs/guides/DistributedEntities.md`. Coverage: `Assets/Tests/Shared/MutableValueDirtyTests.cs` (`--filter "Category=MutableValue"`).
 - Distributed entity types are annotated with `[DistributedEntity(typeId)]`. **Fields carry no attribute at all** — a field is distributed iff its type implements `IDistributedField` (instance fields only; `static`/`const` are ignored). The only field-level attribute is `[PersistAs("key")]`, which additionally stores the value. Wire ids are assigned by `DistributedFieldIds` per concrete type, walking the inheritance chain base-first and sorting by field name within each class, so ids never have to be coordinated across a class hierarchy. Adding or renaming a distributed field renumbers and is therefore a schema change (bump the version); reordering or moving declarations is free. The generator detects fields through the semantic model (`Compilation.GetTypeByMetadataName` + `AllInterfaces`), matching the runtime's reflection check exactly; it warns (`IMP4`) about a distributed field on a class with no `[DistributedEntity]`, and errors (`IMP5`) on `[PersistAs]` applied to a non-distributed field.
 
+## Agent tooling (ImpunityUnity editor + game)
+
+`ImpunityUnity/` carries the agent tooling ported from Brambleville (2026-11-14): Unity's official CLI + Pipeline package driven through `ImpunityUnity/tools/ucmd` (compile, tests, play mode, dev-console commands, logs, screenshots, `script eval`/`run`), the Dreamwing dev console, and a `DevTools` prefab (`Assets/Prefabs/DevTools.prefab`, in `TestGameScene`) that adds the console, `ui …` verbs for driving uGUI without a mouse, and `net …` verbs for inspecting replicated state (this client's copy, the server's, and a seq-aware sync check). Run from `ImpunityUnity/`:
+
+```bash
+tools/ucmd compile                  # make C# edits live; prints compiler errors (exit 2)
+tools/ucmd tests editmode [filter]  # run tests (exit 8 on failures or no match)
+tools/ucmd play                     # enter play mode   (stop: tools/ucmd stop)
+tools/ucmd game <console command>   # dev-console command in the running game, e.g. `game net sync`
+tools/ucmd logs [--since CURSOR]    # editor + game warnings/errors
+tools/ucmd shot                     # game-view screenshot → prints the PNG path
+```
+
+No foreground needed: compile, play mode and tests all run with Unity in the background. After a session that drove Unity, run `tools/work-done`. **Read [`ImpunityUnity/docs/AgentTooling.md`](ImpunityUnity/docs/AgentTooling.md) before any play-mode verification, prefab/UI authoring or tooling work**, and [`ImpunityUnity/docs/DevConsole.md`](ImpunityUnity/docs/DevConsole.md) before adding console commands. A scene's game code plugs into the tooling through `DevStatus.InGame`/`Details` and `NetInspector.ConnectionSource` (+ `Me`, `Labeler`, `LocalProjection`).
+
 ## Tests
 
 ### dotnet test suite (primary)
