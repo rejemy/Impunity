@@ -36,6 +36,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The standalone server's libdatachannel bindings, compiled into the tests as source (the server assembly can't
+         be referenced), so the WebRTC test client is a real peer built on the same declarations. -->
+    <Compile Include="../ImpunityStandaloneServer/src/webrtc/LibDataChannelNative.cs" LinkBase="Host/Native" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Read at runtime by StandaloneServerFixture; IMPUNITY_STANDALONE_DLL env var overrides -->
     <AssemblyMetadata Include="StandaloneServerDll"
         Value="$(MSBuildThisFileDirectory)../ImpunityStandaloneServer/bin/$(Configuration)/net10.0/ImpunityStandaloneServer.dll" />

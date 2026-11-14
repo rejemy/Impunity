@@ -84,6 +84,9 @@ namespace Impunity.Tests
 
 		/// <summary>Path of the server DLL: IMPUNITY_STANDALONE_DLL env var if set, else the path baked
 		/// in by the csproj (always built — the test project declares a build-only ProjectReference).</summary>
+		/// <summary>The server's native-library folder (the one its WebRTC transport loads from).</summary>
+		public static string RuntimesDirectory => Path.Combine(Path.GetDirectoryName(ServerDllPath()), "runtimes");
+
 		static string ServerDllPath()
 		{
 			string fromEnv = Environment.GetEnvironmentVariable("IMPUNITY_STANDALONE_DLL");

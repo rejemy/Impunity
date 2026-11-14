@@ -18,6 +18,8 @@ namespace Impunity.Networking
 		/// <inheritdoc/>
 		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
 		/// <inheritdoc/>
+		public ImpunityClientMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
+		/// <inheritdoc/>
 		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>
 		public Action<int>? OnDisconnectedByServer { get; set; }
@@ -372,7 +374,7 @@ namespace Impunity.Networking
 			System.Threading.Interlocked.Increment(ref UnguaranteedReceived);
 			try
 			{
-				OnMessageRecieved?.Invoke(data);
+				OnUnguaranteedMessageRecieved?.Invoke(data);
 			}
 			catch (Exception e)
 			{
@@ -470,6 +472,8 @@ namespace Impunity.Networking
 
 		/// <inheritdoc/>
 		public ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
+		/// <inheritdoc/>
+		public ImpunityClientMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
 		/// <inheritdoc/>
 		public ImpunityCallback? OnNetworkError { get; set; }
 		/// <inheritdoc/>

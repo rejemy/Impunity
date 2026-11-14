@@ -456,13 +456,24 @@ namespace Impunity.Tests
 			ConnectNonReadingClient();
 			var (conn, received) = await ConnectBroadcaster();
 
+			// The limit applies to the broadcaster as well, and every broadcast comes back to it. Sent all at once,
+			// its own backlog passes the limit whenever its reader falls behind (a busy machine is enough) and it is
+			// dropped too. So send a quarter of the limit at a time and wait for those to come back: the broadcaster
+			// stays well under, while the client that never reads still piles up far more than the limit.
+			const int Window = 8;
 			BsonDocument body = new BsonDocument { ["pad"] = new string('x', BroadcastBodyBytes) };
-			for (int i = 0; i < BroadcastCount; i++)
+			for (int sent = 0; sent < BroadcastCount; )
 			{
-				conn.SendBroadcastMessage(1, body);
+				for (int i = 0; i < Window && sent < BroadcastCount; i++, sent++)
+				{
+					conn.SendBroadcastMessage(1, body);
+				}
+				int expected = sent;
+				await PumpUntil(() => received() == expected || !conn.Connected, TimeSpan.FromSeconds(15), conn);
+				Assert.IsTrue(conn.Connected, "the broadcaster was dropped. Log:\n" + Log.Dump());
 			}
 
-			await PumpUntil(() => received() == BroadcastCount, TimeSpan.FromSeconds(15), conn);
+			Assert.AreEqual(BroadcastCount, received());
 			await PumpUntil(() => TcpServer.NumConnections == 1, Prompt, conn);
 			Assert.IsTrue(conn.Connected);
 			Assert.AreEqual(1, Log.At("warning").Count(m => m.Contains("backed up")), "Log:\n" + Log.Dump());

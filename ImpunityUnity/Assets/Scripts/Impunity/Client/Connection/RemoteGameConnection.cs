@@ -115,6 +115,7 @@ namespace Impunity.Connection
 			NetworkClient = networkClient;
 			NetworkClient.OnNetworkError = OnNetworkErrorReceived!;
 			NetworkClient.OnMessageRecieved = OnNetworkMessageReceived;
+			NetworkClient.OnUnguaranteedMessageRecieved = OnUnguaranteedNetworkMessageReceived;
 			NetworkClient.OnDisconnectedByServer = OnDisconnectedByServer;
 
 			SendBuffer = new byte[ImpunityConstants.MaxMessageSize];
@@ -642,9 +643,32 @@ namespace Impunity.Connection
 		// CompletedActions so the actual work happens on the main thread in Update().
 		private void OnNetworkMessageReceived(ArraySegment<byte> messageBytes)
 		{
-			MessageHeaderStruct msg;
-
 			Interlocked.Exchange(ref LastReceivedTimestamp, ImpunityKeepAlive.Now());
+			DispatchNetworkMessage(messageBytes);
+		}
+
+		// Transport callback for the datagram path (UDP, WebRTC). A datagram says nothing about the reliable connection,
+		// so it does not count against the server-silence deadline, and only an entity update is accepted this way.
+		private void OnUnguaranteedNetworkMessageReceived(ArraySegment<byte> messageBytes)
+		{
+			if (messageBytes.Array == null || messageBytes.Count < 12 || ImpunityNetworkingUtil.GetMessageLength(messageBytes) != messageBytes.Count)
+			{
+				return;
+			}
+
+			ushort messageType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(new ReadOnlySpan<byte>(messageBytes.Array, messageBytes.Offset + 4, 2));
+			if (messageType != (ushort)ServerActionType.ENTITY_UPDATE_MESSAGE)
+			{
+				// A keepalive is the transport's own probe of its datagram path; nothing else belongs here.
+				return;
+			}
+
+			DispatchNetworkMessage(messageBytes);
+		}
+
+		private void DispatchNetworkMessage(ArraySegment<byte> messageBytes)
+		{
+			MessageHeaderStruct msg;
 
 			int bodyOffset = messageBytes.Offset + ImpunityNetworkingUtil.ReadMessageHeader(messageBytes, out msg);
 

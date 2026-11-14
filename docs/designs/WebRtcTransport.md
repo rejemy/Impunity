@@ -1,11 +1,11 @@
 # WebRTC transport for Unity WebGL
 
-Status: design, revised 2026-11-12 after a review against the code. Stages A to C are implemented: the
-shared-runtime fixes (section 2), the native libraries for four platforms (section 8), and the server side of
-the transport (sections 3 to 6, 9). No client can use it yet: the headless test client (stage D) and the Unity
-WebGL bridge (stage E) are still to do. Section 11 records what a throwaway spike proved. This revision replaces
-the original proposal, which is kept beside it as [WebRtcTransport.original.md](WebRtcTransport.original.md) for
-reference.
+Status: design, revised 2026-11-12 after a review against the code. Stages A to D are implemented: the
+shared-runtime fixes (section 2), the native libraries for four platforms (section 8), the server side of the
+transport (sections 3 to 6, 9), and a headless test client that runs the whole transport battery over a real
+data channel. What is left is the browser: the Unity WebGL bridge (stage E) and measurements (stage F). Section
+11 records what a throwaway spike proved. This revision replaces the original proposal, which is kept beside it
+as [WebRtcTransport.original.md](WebRtcTransport.original.md) for reference.
 
 ## 1. Goal and verdict
 
@@ -302,7 +302,7 @@ TURN is not supported in the first version. A client whose network blocks UDP st
 | A (done) | Shared-runtime fixes from section 2, `MaxUnguaranteedMessageBytes`, version bump. | New cases on `_EmbeddedTcp`: an unguaranteed update stays unguaranteed downstream; a reordered update relays only its fresh fields; a field dormant for more than 65,536 entity updates still applies; an oversize unguaranteed update arrives reliably. Full `./test.sh` passes. |
 | B (done) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
 | C (done) | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
-| D | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
+| D (done) | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
 | E | `ImpunityWebRTC.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
 | F | WebGL test scene with moving entities; measurements. | Age of applied state at p50/p95/p99 under induced loss and jitter, WebRTC against WebSocket-only, at 30 and 60 Hz. If the tail is not clearly better, tune the send budget before enabling by default. |
 
@@ -329,8 +329,28 @@ Stages E and F are the only ones that need a Unity WebGL build.
   raw WebSocket: answer with candidates and the public address, disabled, missing library, port taken, bad offer,
   peer limit. And once by hand in a Chromium browser against the real server: answer, channel open, the server's
   keepalive frame arriving on the channel after a second, and the session closed when the socket was.
-- Not yet exercised: an entity update actually travelling over the channel in either direction, the five-second
-  silence fallback, and anything under load. Those need a client that speaks Impunity over the channel (stage D).
+
+### Stage D as built
+
+- `ImpunityTests/Host/RtcWebSocketTestClient.cs` is a client transport made of a `ClientWebSocket` and a
+  libdatachannel peer, using the server's own bindings (`LibDataChannelNative.cs` is compiled into the tests as
+  source). It behaves as the browser bridge must, and is the reference for stage E: offer as soon as the socket
+  opens, send unguaranteed messages on the channel only while it is open, send the client `KEEPALIVE` frame
+  after a second idle, and drop the peer after five seconds of silence.
+- `TransportSuite_StandaloneRtc` runs the whole transport battery through it against the real server binary,
+  waiting for each client's channel to open first, and adds the data-channel cases: an unguaranteed update goes
+  up one channel and down the others (echo included) while a guaranteed one uses the sockets; an oversize one
+  uses the sockets; an idle channel survives seven seconds on keepalives; a blackholed channel is closed by the
+  server after five silent seconds and delivery resumes over the socket with the connection intact; a channel
+  the client closes falls back in both directions. `WebRtcRefused_Standalone` connects the same client to a
+  server with WebRTC disabled.
+- The client side got the same split as the server: `IImpunityNetworkClient.OnUnguaranteedMessageRecieved`.
+  `RemoteGameConnection` does not count such a message against the server-silence deadline and accepts only an
+  entity update from it. The TCP client's UDP path uses it too.
+- Run with `./test.sh --filter "Category=WebRtc"` (about 20 seconds; two of the cases are also `Slow`).
+- Not covered: real packet loss or reordering (everything is loopback), a reliable write held in flight while
+  the channel fails, load, and any NAT. The offer from this client carries candidates, which the server strips;
+  the fully candidate-less browser offer was proven in the spike (section 11) and in the stage C browser check.
 
 ## 11. Spike results
 

@@ -12,6 +12,10 @@ namespace Impunity.Networking
 		public string? ConnectionId { get; }
 		/// <summary>Called when a complete framed message is received from the server.</summary>
 		ImpunityClientMessageHandler? OnMessageRecieved { get; set; }
+		/// <summary>Called when a complete framed message arrives over the unguaranteed (datagram) path. Kept apart from
+		/// <see cref="OnMessageRecieved"/> because such a message proves nothing about the reliable connection and may
+		/// only be an entity update.</summary>
+		ImpunityClientMessageHandler? OnUnguaranteedMessageRecieved { get; set; }
 		/// <summary>Called on network errors (connection lost, timeout, etc.).</summary>
 		ImpunityCallback? OnNetworkError { get; set; }
 		/// <summary>Called when the server closes the connection. The int parameter is a reason code.</summary>
