@@ -202,6 +202,10 @@ namespace Impunity.Tests
 			var errors = new List<ImpunityErrorResponse>();
 			var conn = await Connect("a", errors);
 
+			// A new connection asks the server the time a few more times in its first second (the clock sync keeps the
+			// quickest answer). Let those finish, so the silence being timed starts when the server goes quiet.
+			await PumpFor(TimeSpan.FromMilliseconds(1200), conn);
+
 			TcpServer.KeepAlivesSuppressed = true;
 			var sw = Stopwatch.StartNew();
 			await PumpUntil(() => errors.Count > 0, TimeSpan.FromMilliseconds(TimeoutMillis * 4), conn);

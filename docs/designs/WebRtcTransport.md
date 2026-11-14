@@ -8,6 +8,10 @@ server, but **it has not yet been through a Unity WebGL build**. Measurements (s
 11 records what a throwaway spike proved. This revision replaces the original proposal, which is kept beside it
 as [WebRtcTransport.original.md](WebRtcTransport.original.md) for reference.
 
+**Update 2026-11-14:** stage E is now proven in a real Unity WebGL build (Chromium), using the swarm demo in
+`ImpunityUnity/` (see "Stage E proven, stage F started" below). What remains is measuring under packet loss,
+and Firefox and Safari.
+
 ## 1. Goal and verdict
 
 Browser games can only reach Impunity over WebSocket, so `SetUnguaranteed` state (movement, aim) waits behind
@@ -379,6 +383,30 @@ Stages E and F are the only ones that need a Unity WebGL build.
   Emscripten toolchain processes a `.jslib` (the `makeDynCall` macros, how the shared state object is emitted) or
   the IL2CPP callback path. Firefox and Safari are also untested. Until a built game reports
   `SupportsUnguaranteed` in a browser, treat stage E as unproven.
+
+### Stage E proven, stage F started (2026-11-14)
+
+- **A real Unity WebGL build works end to end.** The swarm demo (`ImpunityUnity/docs/SwarmDemo.md`), built for
+  WebGL with Unity 6000.3.28f1 and opened in a Chromium browser against a local standalone server, connected,
+  reported `WebSocket + WebRTC data channel`, and exchanged position updates with a second client (the editor,
+  over WebSocket): 480 updates a second each way, the server listing the browser as `remote+udp`. So the jslib
+  survives Unity's toolchain and the IL2CPP callback path. Firefox and Safari are still untested.
+- Numbers, both clients on one machine, 16 movers at 30 Hz each, 60 frames a second: age of applied state
+  p50 24 ms, p99 25 ms, worst 28 ms in the browser (data channel down); p50 27 ms, p99 30 ms in the editor
+  (WebSocket down). That is close to the floor for this design: the sender's update leaves on its next frame,
+  the receiver applies it on its next frame, and each waits half a frame on average. The first run measured
+  41 ms because the demo wrote positions after the connection's update, which cost a frame.
+- The page bridge works in the build: `impunityDemo.run("net server conns")` returned the server's view, with
+  the browser listed as `remote+udp` and the editor as `remote`.
+- Three kinds of client shared one arena: the WebGL page (WebSocket + data channel), a macOS build (TCP + UDP)
+  and the editor (WebSocket only). The editor received all 960 updates a second from the other two, at p50
+  26 ms, p99 59 ms.
+- The client's server-clock estimate was not good enough to measure with (it ignored the round trip and was
+  taken when the reply's callback ran, up to a second late in a throttled tab). It now measures the round trip
+  at the transport and keeps the best sample; see `Connections.md` section 10.
+- **Not measured: the thing this is all for.** On loopback nothing is ever lost, so the data channel and the
+  WebSocket look alike. Showing the benefit needs packet loss and delay injected between browser and server
+  (or a real network), comparing `tools/demo-server` with `tools/demo-server --no-webrtc`.
 
 ## 11. Spike results
 

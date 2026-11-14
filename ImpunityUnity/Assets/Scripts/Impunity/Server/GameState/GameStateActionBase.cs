@@ -57,6 +57,15 @@ namespace Impunity.GameState
 		[BsonIgnore]
 		public DateTimeOffset SentAt { get; set; }
 
+		/// <summary>Client-side, remote connections only: local Unix milliseconds when this action was written to the
+		/// transport, and when its reply came off it (both 0 until then). Unlike <see cref="SentAt"/> and the moment the
+		/// callback runs, neither includes time spent queued for the main thread, which is what a round-trip
+		/// measurement (the clock sync) needs.</summary>
+		[BsonIgnore]
+		internal long WireSentAtMillis;
+		[BsonIgnore]
+		internal long ReplyReceivedAtMillis;
+
 		/// <summary>
 		/// Correlation id carried in the message header (not the BSON body). The client assigns a unique id per
 		/// reply-expecting action when sending; the server records the request's id and echoes it on the reply so the

@@ -12,7 +12,8 @@ namespace DevTools.Cli
 	// editor and development builds; release builds contain no Pipeline code at all.
 	internal static class RuntimePipelineStarter
 	{
-#if !UNITY_EDITOR
+#if !UNITY_EDITOR && !UNITY_WEBGL
+		// Not on WebGL: a browser page can't open a listening socket, so the server only logs errors there.
 		// After RuntimePipelineBootstrap (BeforeSceneLoad) has created the driver
 		[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
 		private static void StartInBuild()

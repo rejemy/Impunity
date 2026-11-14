@@ -1,0 +1,61 @@
+#!/bin/bash
+# demo-build — build the swarm demo (TestGameScene) with the running editor, through tools/ucmd.
+#
+#   tools/demo-build webgl            → Builds/WebGL/      (serve it with tools/demo-server --web)
+#   tools/demo-build mac              → Builds/Mac/ImpunityDemo.app
+#   tools/demo-build webgl --release  a non-development build (smaller and faster; no dev console)
+#
+# Builds are development builds by default, so the dev console overlay is in them. A WebGL build is made
+# uncompressed so that any plain static file server can serve it. Building for a platform other than the editor's
+# current one switches the editor to it, which reimports assets the first time.
+set -euo pipefail
+
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
+UCMD="$PROJECT/tools/ucmd"
+SCENE='["Assets/Scenes/TestGameScene.unity"]'
+
+KIND="${1:-}"
+OPTIONS='["Development"]'
+[ "${2:-}" = "--release" ] && OPTIONS='["None"]'
+
+case "$KIND" in
+	webgl)
+		TARGET=WebGL
+		OUT="Builds/WebGL"
+		"$UCMD" script eval --code 'UnityEditor.PlayerSettings.WebGL.compressionFormat = UnityEditor.WebGLCompressionFormat.Disabled; UnityEditor.PlayerSettings.runInBackground = true; return "WebGL compression off";'
+		;;
+	mac)
+		TARGET=StandaloneOSX
+		OUT="Builds/Mac/ImpunityDemo.app"
+		;;
+	*) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+
+echo "Building $TARGET → $OUT"
+"$UCMD" build run --target "$TARGET" --output-path "$OUT" --scenes "$SCENE" --options "$OPTIONS" --confirm true >/dev/null
+
+# The build switches platform and reloads the domain, so the editor drops off for a while; keep asking.
+START=$(date +%s)
+while true; do
+	STATUS_JSON="$(UCMD_RETRY_SEC=120 "$UCMD" build status 2>/dev/null || true)"
+	STATE="$(printf '%s' "$STATUS_JSON" | python3 -c 'import sys,json
+try:
+    d=json.load(sys.stdin); print(d.get("status","?"))
+except Exception:
+    print("unreachable")')"
+	ELAPSED=$(( $(date +%s) - START ))
+	if [ "$STATE" = "completed" ]; then
+		printf '%s' "$STATUS_JSON" | python3 -c 'import sys,json
+d=json.load(sys.stdin); r=d.get("report") or d
+s=r.get("summary") or r
+print("result:", s.get("result"), "| errors:", s.get("totalErrors"), "| size MB:", round((s.get("totalSize") or 0)/1048576,1), "| seconds:", s.get("totalTime"))
+for e in (r.get("errors") or [])[:20]: print("  error:", e if isinstance(e,str) else e.get("message"))
+sys.exit(0 if str(s.get("result")).lower()=="succeeded" else 1)'
+		exit $?
+	fi
+	if [ "$ELAPSED" -gt "${DEMO_BUILD_TIMEOUT:-1800}" ]; then
+		echo "build did not finish in ${ELAPSED}s (last state: $STATE)" >&2
+		exit 1
+	fi
+	sleep 5
+done

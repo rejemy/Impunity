@@ -42,6 +42,11 @@ namespace Impunity.Connection
 		/// </summary>
 		public ImpunityCallback? OnNetworkError { get; set; }
 
+		/// <summary>Whether unguaranteed updates currently leave by a datagram path (UDP beside TCP, or a WebRTC data
+		/// channel beside a WebSocket). False means they are being sent reliably instead. It can change at any time: the
+		/// path is negotiated after the connection is up and is dropped if it stops working.</summary>
+		public bool SupportsUnguaranteed { get => NetworkClient.SupportsUnguaranteed; }
+
 		/// <summary>
 		/// The silence window adopted from the server during the handshake (see
 		/// <see cref="ImpunityOptions.ConnectionTimeoutMillis"/>): the server drops this client after hearing nothing
@@ -642,6 +647,7 @@ namespace Impunity.Connection
 			}
 
 			ArraySegment<byte> encodedMessage = ImpunityNetworkingUtil.WriteMessage(SendBufferWriter, messageId, flags, action.GetActionType(), action);
+			action.WireSentAtMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			// An unguaranteed message too big for one packet goes the reliable way instead. It keeps its UNGUARANTEED
 			// flag, so the server still relays it unguaranteed to listeners it fits for.
@@ -743,6 +749,8 @@ namespace Impunity.Connection
 				ImpunityLogger.LogWarning("Got reply for message id " + messageId + " with no matching pending action (timed out or duplicate)");
 				return;
 			}
+
+			action.ReplyReceivedAtMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
 			try
 			{

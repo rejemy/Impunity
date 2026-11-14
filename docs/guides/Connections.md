@@ -355,7 +355,7 @@ Several systems (notably temporal distributed fields) reason about *server* time
 long nowOnServer = conn.GetServerTime();   // Unix milliseconds
 ```
 
-This is local UTC plus the measured offset. The offset is computed simply as *server time − local time at the moment the reply arrived*, so it does **not** correct for network latency — expect accuracy on the order of the round-trip time, plus a little drift between resyncs.
+This is local UTC plus the measured offset. Each sync asks the server for its clock and assumes the answer was read halfway through the exchange, so the estimate is off by at most half that exchange's round trip (plus a little drift between resyncs). The round trip is measured where the request is written and the reply comes off the wire, not when the reply's callback runs a frame later. A new connection syncs a few times in its first second and then once a minute, and a sample only replaces the current offset if its round trip was no longer than the one the offset came from, so one slow exchange doesn't spoil a good estimate. `conn.ClockSyncRoundTripMillis` is the round trip behind the current estimate (−1 before the first sync); half of it is the error bound.
 
 ### The game summary
 

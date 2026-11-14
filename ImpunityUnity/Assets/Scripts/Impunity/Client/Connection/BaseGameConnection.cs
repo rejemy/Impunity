@@ -113,6 +113,19 @@ namespace Impunity.Connection
 		private long ClockSyncRateMs = 60 * 1000;
 		private long LastClockSync = 0;
 
+		// Right after connecting, a few extra syncs in quick succession: the first exchange on a new connection is
+		// often its slowest, and the estimate keeps whichever sample had the shortest round trip.
+		private const int ClockSyncBurstCount = 4;
+		private const long ClockSyncBurstSpacingMs = 250;
+		private int ClockSyncBurstLeft = ClockSyncBurstCount;
+		// Round trip of the sample the current offset came from; -1 before the first. See SyncServerTime.
+		private long ClockSyncRoundTrip = -1;
+
+		/// <summary>Round-trip time, in milliseconds, of the exchange the current server-time estimate is based on, or
+		/// -1 before the first sync. <see cref="GetServerTime"/> is off by at most half of this (plus whatever the two
+		/// clocks have drifted since).</summary>
+		public long ClockSyncRoundTripMillis { get => ClockSyncRoundTrip; }
+
 		/// <summary>
 		/// Initializes the connection's entity manager and format. Wires the manager to this connection, registers the
 		/// format's entity types (validating their ids), generates a random <see cref="ConnectionKey"/>, and builds the
@@ -188,29 +201,53 @@ namespace Impunity.Connection
 			DoAction(establish);
 		}
 
-		// Requests the server clock and stores the offset from local time. NOTE: the offset is computed purely as
-		// (serverTime - localTimeAtReply) and does not account for network latency, so it can be off by up to roughly
-		// the round-trip time. Re-run periodically from Update() to limit drift.
+		// Asks the server for its clock and updates the offset from local time.
+		//
+		// The server's reading was taken somewhere between our request leaving and its reply arriving, so the best
+		// guess is that it matches the middle of that interval; the error is then at most half the round trip. The
+		// interval is measured at the transport (when the request was written, when the reply came off the wire), not
+		// at the callback: replies wait for the next Update() before their callbacks run, which adds a whole frame, or
+		// far more in a browser tab that is being throttled, and used to go straight into the offset.
+		//
+		// A sample with a long round trip is a poor one, so it only replaces the current offset if its round trip is
+		// no worse than the one the offset came from. That bar is raised a little each time a sample is turned down,
+		// so a connection that has become slower, or clocks that have drifted, still get a fresh offset in the end.
 		private void SyncServerTime(ImpunityCallback? onComplete = null)
 		{
-			LastClockSync = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			long requestedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+			LastClockSync = requestedAt;
 
+			GetTimeAction request = null!;
 			void gotTime(ImpunityErrorResponse? err, long serverTimeMillis)
 			{
 				if (err == null)
 				{
-					long clientTimeMillis = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-					ServerMillisOffset = serverTimeMillis - clientTimeMillis;
+					long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+					// A local connection has no wire: its action is answered in place.
+					long sentAt = request.WireSentAtMillis > 0 ? request.WireSentAtMillis : requestedAt;
+					long receivedAt = request.ReplyReceivedAtMillis > 0 ? request.ReplyReceivedAtMillis : now;
+					long roundTrip = Math.Max(0, receivedAt - sentAt);
+
+					if (ClockSyncRoundTrip < 0 || roundTrip <= ClockSyncRoundTrip)
+					{
+						ServerMillisOffset = serverTimeMillis - (sentAt + roundTrip / 2);
+						ClockSyncRoundTrip = roundTrip;
+					}
+					else
+					{
+						ClockSyncRoundTrip += ClockSyncRoundTrip / 4 + 2;
+					}
 				}
 
 				onComplete?.Invoke(err);
 			}
 
-			DoAction(new GetTimeAction(gotTime));
+			request = new GetTimeAction(gotTime);
+			DoAction(request);
 		}
 
 		/// <summary>Estimated current server time in Unix milliseconds (local UTC plus the synced clock offset).</summary>
-		/// <returns>The approximate server wall-clock time. Accuracy is bounded by network latency (the offset ignores round-trip time) and clock drift between syncs.</returns>
+		/// <returns>The approximate server wall-clock time. Off by at most half of <see cref="ClockSyncRoundTripMillis"/>, plus clock drift between syncs.</returns>
 		public long GetServerTime()
 		{
 			return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + ServerMillisOffset;
@@ -237,6 +274,11 @@ namespace Impunity.Connection
 
 				if (currTimeMillis - LastClockSync >= ClockSyncRateMs)
 				{
+					SyncServerTime();
+				}
+				else if (ClockSyncBurstLeft > 0 && currTimeMillis - LastClockSync >= ClockSyncBurstSpacingMs)
+				{
+					ClockSyncBurstLeft--;
 					SyncServerTime();
 				}
 			}

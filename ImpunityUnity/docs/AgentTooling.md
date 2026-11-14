@@ -71,7 +71,8 @@ a human is watching, or for real device input.
 | DevTools | `Assets/Scripts/DevTools/` (asmdef `DevTools`) · `Assets/Prefabs/DevTools.prefab` | `DevToolsRoot` (bootstrap), `DevStatus` (game hooks for `dev status`), `NetInspector` + `NetCommands` (replicated-state inspection, `net …`), `UiProbe` + `UiCommands` (driving uGUI, `ui …`). |
 | `dev` Pipeline commands | `Assets/Scripts/DevTools/Cli/` (asmdef `DevTools.Cli`) | `dev console`, `dev status`, `dev ui_dump`, `dev shot`, `dev net_*`; `RuntimePipelineStarter` for dev player builds. Compiled only into the editor and development builds that enable the Pipeline (the package's define constraints), so release builds carry none of it. |
 | Tests | `Assets/Tests/DevTools/` (asmdef `DevTools.Tests`, Edit Mode) | Console dispatch/help/completion, column layout, deferred replies, `NetInspector.ToPlain`, `UiProbe.PathOf`. `tools/ucmd tests editmode DevTools.Tests`. |
-| Scene | `Assets/Scenes/TestGameScene.unity` | Has the `DevTools` prefab. |
+| Scene | `Assets/Scenes/TestGameScene.unity` | Has the `DevTools` prefab and the swarm demo (`DemoGame`). |
+| Swarm demo | `Assets/Scripts/Demo/` (asmdef `ImpunityDemo`) · `tools/demo-server` · `tools/demo-build` | A two-or-more-client demo of unguaranteed delivery with on-screen delay statistics; the `demo` console group. See [SwarmDemo.md](SwarmDemo.md). |
 
 ### Setting up a scene
 
@@ -426,10 +427,19 @@ loopback only.
 
 **WebGL builds** can't host it: a browser page can't open a listening socket, so there's no
 Pipeline runtime server in a WebGL player (unverified against the package; the runtime server is
-an in-process HTTP listener). Driving a WebGL build needs another route — e.g. the in-app browser
-pane's JavaScript tool calling into the page (`SendMessage` into Unity / a `.jslib` hook that runs a
-console line through `Cons.RunCommandCapturingOutput`), or the standalone server's own inspection.
-Not built yet.
+an in-process HTTP listener). `RuntimePipelineStarter` therefore does nothing on WebGL. The
+swarm demo has its own route instead (`Assets/Scripts/Demo/DemoWebBridge.cs` +
+`Assets/Plugins/ImpunityDemo.jslib`): the page gets `window.impunityDemo`, where
+`impunityDemo.run("<console line>")` queues any dev-console line (run through
+`Cons.RunCommandCapturingOutput` on the next frame), `impunityDemo.results` holds what those lines
+printed, and `impunityDemo.status` is the demo's state, refreshed four times a second. Drive it with
+the in-app browser pane's JavaScript tool. See [SwarmDemo.md](SwarmDemo.md).
+
+Two traps when testing a WebGL page in the in-app browser pane: a tab that isn't being interacted with
+is throttled to a few frames a second (running JavaScript in it wakes it up), so let it run for a few
+seconds before reading rates; and while the editor's build target is WebGL, `ImpunityTCPClient` is its
+stub even in play mode (`tcp://` connections fail with "TCP Client not supported in WebGL"), so
+connect the editor over `ws://` or switch the target back.
 
 ### Multiplayer harness (not ported yet)
 

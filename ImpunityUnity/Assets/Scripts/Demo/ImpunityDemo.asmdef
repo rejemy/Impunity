@@ -1,0 +1,22 @@
+{
+    "name": "ImpunityDemo",
+    "rootNamespace": "",
+    "references": [
+        "Impunity",
+        "DevTools",
+        "Dreamwing",
+        "Unity.InputSystem",
+        "UnityEngine.UI"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [
+        "UltraLiteDB.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

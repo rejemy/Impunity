@@ -1,0 +1,71 @@
+#!/bin/bash
+# demo-server — run a standalone Impunity server for the swarm demo (Assets/Scripts/Demo, TestGameScene), and
+# optionally serve a WebGL build of it.
+#
+#   tools/demo-server                 server only, in the foreground (Ctrl-C stops it)
+#   tools/demo-server --web           also serve Builds/WebGL at http://localhost:8080/
+#   tools/demo-server --public 203.0.113.7    advertise this address to WebRTC clients (behind NAT)
+#   tools/demo-server --no-webrtc     WebRTC off, to compare against WebSocket alone
+#
+# Ports: HTTP/WebSocket 29653, TCP+UDP 29654, WebRTC UDP 29656. World "demo", password "demo" (the demo's
+# defaults). State lives in Temp/demo-server and is wiped on each start, so every run begins with an empty world.
+set -euo pipefail
+
+PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO="$(cd "$PROJECT/.." && pwd)"
+RUN="$PROJECT/Temp/demo-server"
+WEB_ROOT="$PROJECT/Builds/WebGL"
+WEB_PORT=8080
+
+WEB=0
+WEBRTC=true
+PUBLIC=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--web) WEB=1 ;;
+		--no-webrtc) WEBRTC=false ;;
+		--public) PUBLIC="$2"; shift ;;
+		-h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		*) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
+	esac
+	shift
+done
+
+echo "Building the standalone server..."
+dotnet build "$REPO/ImpunityStandaloneServer/ImpunityStandaloneServer.csproj" -c Release -v q --nologo | grep -E "error|Warn|Error" || true
+DLL="$REPO/ImpunityStandaloneServer/bin/Release/net10.0/ImpunityStandaloneServer.dll"
+[ -f "$DLL" ] || { echo "server build failed: $DLL is missing" >&2; exit 1; }
+
+rm -rf "$RUN"
+mkdir -p "$RUN"
+PUBLIC_LINE=""
+[ -n "$PUBLIC" ] && PUBLIC_LINE=", \"public_address\": \"$PUBLIC\""
+cat > "$RUN/config.json" <<JSON
+{
+  "game_type_code": "ImpDemo",
+  "http_port": 29653,
+  "tcp_port": 29654,
+  "datapath": "worlds",
+  "logging_level": "${DEMO_LOG_LEVEL:-info}",
+  "webrtc": { "enabled": $WEBRTC, "udp_port": 29656$PUBLIC_LINE },
+  "worlds": [ { "id": "demo", "name": "Swarm demo", "password": "demo", "max_players": 64 } ]
+}
+JSON
+
+WEB_PID=""
+cleanup() { [ -n "$WEB_PID" ] && kill "$WEB_PID" 2>/dev/null || true; }
+trap cleanup EXIT
+
+if [ "$WEB" = 1 ]; then
+	if [ -f "$WEB_ROOT/index.html" ]; then
+		(cd "$WEB_ROOT" && exec python3 -m http.server "$WEB_PORT" >/dev/null 2>&1) &
+		WEB_PID=$!
+		echo "WebGL build: http://localhost:$WEB_PORT/?server=ws://localhost:29653/ws&spawn=16"
+	else
+		echo "No WebGL build at $WEB_ROOT yet (build it with tools/demo-build webgl); serving nothing." >&2
+	fi
+fi
+
+echo "Server: tcp://127.0.0.1:29654 and ws://localhost:29653/ws, world demo"
+cd "$RUN"
+dotnet "$DLL"
