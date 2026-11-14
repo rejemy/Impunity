@@ -55,9 +55,9 @@ Both implement the same `BaseGameConnection` API, so application code is identic
 | | `LocalGameConnection` | `RemoteGameConnection` |
 |---|---|---|
 | Server | An embedded `GameStateServer` in the same process | A separate process, reached over the network |
-| Transport | Actions queued directly to the server — **no serialization** | BSON over TCP (with optional UDP for unguaranteed sends), or WebSocket |
+| Transport | Actions queued directly to the server — **no serialization** | BSON over TCP (with optional UDP for unguaranteed sends), or WebSocket (with an optional WebRTC data channel for unguaranteed sends, on WebGL) |
 | Threads | Server's own DB/Live worker threads | A background writer thread + the transport's socket reader thread |
-| Unguaranteed sends | Not supported (everything is reliable) | Supported once UDP is negotiated |
+| Unguaranteed sends | Not supported (everything is reliable) | Supported once UDP, or on WebGL a WebRTC data channel, is negotiated |
 | Action timeouts | None (a stuck action waits forever) | Yes — `ImpunityOptions.ActionTimeoutMillis` (default 5 s) |
 | `IsRemote` | `false` | `true` |
 
@@ -111,7 +111,7 @@ var conn   = new LocalGameConnection(server, format);
 conn.Connect(err => { /* … */ });
 ```
 
-There are factory helpers for each remote transport: `MakeTCPRemoteConnection` (by `IPEndPoint`, or by host + port) and `MakeWebsocketRemoteConnection` (host + port, for WebGL). All take the same `gameId`, `gamePassword`, `format`, and optional `ImpunityOptions` / `ClientEntityManager`.
+There are factory helpers for each remote transport: `MakeTCPRemoteConnection` (by `IPEndPoint`, or by host + port) and `MakeWebsocketRemoteConnection` (host + port, or a full URL such as `wss://play.example.com/ws`; for WebGL, where a page served over HTTPS can only open `wss://` sockets). All take the same `gameId`, `gamePassword`, `format`, and optional `ImpunityOptions` / `ClientEntityManager`.
 
 ### What the handshake does
 
@@ -199,7 +199,9 @@ BsonDocument doc = await conn.FindDocumentByIdAsync(collectionId, id);   // thro
 
 ### Guaranteed vs. unguaranteed
 
-Most actions are sent **guaranteed** (reliably, over TCP). A few high-frequency ones — entity property updates — can be sent **unguaranteed** (best-effort, over UDP) when you don't care about losing an intermediate frame. Unguaranteed delivery is only available on a remote connection that has negotiated UDP (a ping/pong exchange during connect); otherwise the send transparently falls back to TCP, and a local connection is always reliable. This matters mainly for distributed fields — see [`DistributedEntities.md`](DistributedEntities.md) §5/§13.
+Most actions are sent **guaranteed** (reliably, over TCP). A few high-frequency ones — entity property updates — can be sent **unguaranteed** (best-effort, over UDP) when you don't care about losing an intermediate frame. Unguaranteed delivery is only available on a remote connection that has negotiated UDP (a ping/pong exchange during connect); otherwise the send transparently falls back to TCP, and a local connection is always reliable. An unguaranteed message over 1,200 bytes is always sent reliably, so it never needs more than one packet.
+
+**In a browser** there is no UDP, so a Unity WebGL client asks the standalone server for a WebRTC data channel as soon as its WebSocket opens, and unguaranteed updates travel on that while it is open. This is automatic and never holds up or breaks the connection: if the browser, the server or the network can't do it, or the channel later dies, unguaranteed sends use the WebSocket as before. `ImpunityOptions.UseWebRtc = false` skips the attempt. The server side needs one UDP port open (the `webrtc` settings in the standalone server's `config.json`); design notes are in [`docs/designs/WebRtcTransport.md`](../designs/WebRtcTransport.md). This matters mainly for distributed fields — see [`DistributedEntities.md`](DistributedEntities.md) §5/§13.
 
 ### Replies, ordering, and timeouts
 

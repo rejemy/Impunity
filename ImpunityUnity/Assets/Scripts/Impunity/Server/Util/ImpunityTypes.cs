@@ -57,6 +57,12 @@ namespace Impunity
 		public ushort ClientPort = ImpunityConstants.DefaultClientPort;
 		/// <summary>Short identifier for the game type, used in discovery packets.</summary>
 		public string GameTypeCode = "IMP";
+		/// <summary>
+		/// Client side, Unity WebGL only: whether to try for a WebRTC data channel beside the WebSocket and send
+		/// unguaranteed updates over it when the server offers one. Failing to get a channel is never an error; the
+		/// connection just keeps using the WebSocket. Turn off to stay on the WebSocket alone.
+		/// </summary>
+		public bool UseWebRtc = true;
 		/// <summary>Timeout in milliseconds for client actions awaiting server response.</summary>
 		public int ActionTimeoutMillis = 5 * 1000;
 		/// <summary>

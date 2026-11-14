@@ -1,9 +1,10 @@
 # WebRTC transport for Unity WebGL
 
-Status: design, revised 2026-11-12 after a review against the code. Stages A to D are implemented: the
-shared-runtime fixes (section 2), the native libraries for four platforms (section 8), the server side of the
-transport (sections 3 to 6, 9), and a headless test client that runs the whole transport battery over a real
-data channel. What is left is the browser: the Unity WebGL bridge (stage E) and measurements (stage F). Section
+Status: design, revised 2026-11-12 after a review against the code. Stages A to D are implemented and tested:
+the shared-runtime fixes (section 2), the native libraries for four platforms (section 8), the server side of
+the transport (sections 3 to 6, 9), and a headless test client that runs the whole transport battery over a real
+data channel. Stage E, the Unity WebGL bridge, is written and its browser code has been run against the real
+server, but **it has not yet been through a Unity WebGL build**. Measurements (stage F) are not started. Section
 11 records what a throwaway spike proved. This revision replaces the original proposal, which is kept beside it
 as [WebRtcTransport.original.md](WebRtcTransport.original.md) for reference.
 
@@ -303,7 +304,7 @@ TURN is not supported in the first version. A client whose network blocks UDP st
 | B (done) | Native build workflow, committed binaries, manifest, `build.sh` change. | Each artifact loads and passes the smoke test on its own runner; dependency checks clean. |
 | C (done) | `LibDataChannelNative`, `WebRtcService`, `WebRtcSession`, `WebSocketController` changes, config. | Server starts with the library deleted and answers `unavailable`. All existing transport legs still pass. |
 | D (done) | Headless test leg `TransportSuite_StandaloneRtc`: a test client in `ImpunityTests/Host` that pairs `ClientWebSocket` with the same P/Invoke layer as the offerer. | The transport battery passes over WebSocket plus data channel in `./test.sh` and in CI on all four runners. Extra cases: reliable write held in flight while the channel fails; channel blackholed while WebSocket lives, and the reverse; `max_peers` reached. |
-| E | `ImpunityWebRTC.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
+| E (written; no Unity build yet) | WebRTC support in `ImpunityWebSocket.jslib`, WebGL client changes, `wss://` overload. | A WebGL build connects and reports `SupportsUnguaranteed` in Chrome, Firefox and Safari. |
 | F | WebGL test scene with moving entities; measurements. | Age of applied state at p50/p95/p99 under induced loss and jitter, WebRTC against WebSocket-only, at 30 and 60 Hz. If the tail is not clearly better, tune the send budget before enabling by default. |
 
 Stage D is what keeps this maintainable: the server half is exercised without a browser on every test run.
@@ -351,6 +352,33 @@ Stages E and F are the only ones that need a Unity WebGL build.
 - Not covered: real packet loss or reordering (everything is loopback), a reliable write held in flight while
   the channel fails, load, and any NAT. The offer from this client carries candidates, which the server strips;
   the fully candidate-less browser offer was proven in the spike (section 11) and in the stage C browser check.
+
+### Stage E as built
+
+- The WebRTC code went into the existing `ImpunityWebSocket.jslib`, not a second file: the peer needs its
+  instance's WebSocket for signaling, and one file keeps one registry. `ImpunityRuntime/build.sh` already ships
+  that file beside the WebGL runtime DLL.
+- Everything about the channel lives in JavaScript: the offer on socket open, the answer or refusal, the
+  keepalive after a second idle, the five-second silence and fifteen-second negotiation limits, and one retry
+  thirty seconds after a failure (a channel that opens earns another, so a tab that was backgrounded gets its
+  channel back). C# sees three callbacks: channel open, channel closed, and an Impunity frame arriving on it.
+  The server's keepalive frames never cross into C#.
+- The WebGL `ImpunityWebSocketClient` reports `SupportsUnguaranteed` while the channel is open and sends
+  unguaranteed messages with `ImpunityRtcSend`, which returns 0 (sent), 1 (dropped, more than 16 KiB already
+  queued) or a negative number (no open channel, so the caller uses the socket).
+- Both JS send functions now take an offset, fixing sends from an `ArraySegment` that does not start at zero.
+- `ImpunityOptions.UseWebRtc` (default true) turns the attempt off. `MakeWebSocketClient(url)` and
+  `MakeWebsocketRemoteConnection(url, ...)` take a full URL, so `wss://` works.
+- Checked: the WebGL branch of the C# compiles (`ImpunityUnityWebGLRuntime.csproj`). The jslib's functions were
+  loaded into a Chromium page through a small stand-in for Unity's runtime and driven against the real server:
+  a real Impunity handshake sent from an offset buffer, channel open 60 to 170 ms after the socket, the channel
+  still open at eight seconds on the bridge's own keepalives (the server closes a silent one at five), sends
+  returning 0 while open and negative after the instance was deleted, and against a server with WebRTC disabled
+  no channel and no retry scheduled.
+- **Not checked, and the real risk:** an actual Unity WebGL build. The stand-in does not reproduce how Unity's
+  Emscripten toolchain processes a `.jslib` (the `makeDynCall` macros, how the shared state object is emitted) or
+  the IL2CPP callback path. Firefox and Safari are also untested. Until a built game reports
+  `SupportsUnguaranteed` in a browser, treat stage E as unproven.
 
 ## 11. Spike results
 

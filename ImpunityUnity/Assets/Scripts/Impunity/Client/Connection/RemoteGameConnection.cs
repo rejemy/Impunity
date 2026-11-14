@@ -182,6 +182,26 @@ namespace Impunity.Connection
 			return new RemoteGameConnection(ImpunityWebSocketClient.MakeWebSocketClient(hostname, port, options), gameId, gamePassword, format, options, em);
 		}
 
+		/// <summary>Creates a connection backed by a WebSocket transport to a full URL, e.g.
+		/// <c>wss://play.example.com/ws</c>. Use this from a page served over HTTPS, which may only open <c>wss://</c>
+		/// sockets.</summary>
+		/// <param name="url">The server's WebSocket URL, including the <c>/ws</c> path.</param>
+		/// <param name="gameId">Identifier of the game world to join.</param>
+		/// <param name="gamePassword">Plaintext world password (hashed before transmission); empty for none.</param>
+		/// <param name="format">The game state format this client uses.</param>
+		/// <param name="options">Optional connection options.</param>
+		/// <param name="em">Optional pre-built entity manager.</param>
+		/// <returns>An unconnected <see cref="RemoteGameConnection"/>; call <see cref="Connect"/> to open it.</returns>
+		public static RemoteGameConnection MakeWebsocketRemoteConnection(string url, string gameId, string gamePassword, GameStateFormat format, ImpunityOptions? options = null, ClientEntityManager? em = null)
+		{
+			if (options == null)
+			{
+				options = new ImpunityOptions();
+			}
+
+			return new RemoteGameConnection(ImpunityWebSocketClient.MakeWebSocketClient(url, options), gameId, gamePassword, format, options, em);
+		}
+
 		/// <summary>
 		/// Opens the transport, starts the background writer thread, then runs the establish handshake and clock sync.
 		/// </summary>

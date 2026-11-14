@@ -8,7 +8,11 @@ namespace Impunity.Networking
 {
 
 	/// <summary>Client-side WebSocket network transport for WebGL platform.
-	/// Uses JavaScript WebSocket via jslib interop. All callbacks fire on the main thread.</summary>
+	/// Uses JavaScript WebSocket via jslib interop. All callbacks fire on the main thread.
+	/// Unless <see cref="ImpunityOptions.UseWebRtc"/> is off, the browser also negotiates a WebRTC data channel with the
+	/// server over the socket; while that channel is open, unguaranteed messages travel on it and
+	/// <see cref="SupportsUnguaranteed"/> is true. The negotiation, keepalives and retries all live in
+	/// ImpunityWebSocket.jslib; this class only hears the channel open and close.</summary>
 	public class ImpunityWebSocketClient : IImpunityNetworkClient
 	{
 		/// <inheritdoc/>
@@ -24,13 +28,15 @@ namespace Impunity.Networking
 		public Action<int>? OnDisconnectedByServer { get; set; }
 
 		/// <inheritdoc/>
-		public bool SupportsUnguaranteed { get; private set; } = false;
+		public bool SupportsUnguaranteed { get => RtcOpen; }
 		/// <inheritdoc/>
 		public int MaxUnguaranteedMessageBytes { get => ImpunityConstants.MaxUnguaranteedMessageSize; }
 
 		private string Url;
+		private bool UseWebRtc;
 		private int InstanceId = -1;
 		private bool Connected;
+		private bool RtcOpen;
 
 		private ImpunityCallback? OnConnectCallback;
 
@@ -45,9 +51,17 @@ namespace Impunity.Networking
 			return new ImpunityWebSocketClient(url, options);
 		}
 
+		/// <summary>Creates a WebSocket client for a full URL, e.g. <c>wss://play.example.com/ws</c>. A page served over
+		/// HTTPS can only open <c>wss://</c> sockets.</summary>
+		public static IImpunityNetworkClient MakeWebSocketClient(string url, ImpunityOptions? options = null)
+		{
+			return new ImpunityWebSocketClient(url, options);
+		}
+
 		private ImpunityWebSocketClient(string url, ImpunityOptions? options)
 		{
 			Url = url;
+			UseWebRtc = options == null || options.UseWebRtc;
 			InitializeJsBridge();
 		}
 
@@ -64,6 +78,9 @@ namespace Impunity.Networking
 			ImpunityWsSetMessageCallback(OnJsMessage);
 			ImpunityWsSetErrorCallback(OnJsError);
 			ImpunityWsSetCloseCallback(OnJsClose);
+			ImpunityRtcSetOpenCallback(OnJsRtcOpen);
+			ImpunityRtcSetCloseCallback(OnJsRtcClose);
+			ImpunityRtcSetMessageCallback(OnJsRtcMessage);
 		}
 
 
@@ -74,6 +91,7 @@ namespace Impunity.Networking
 
 			InstanceId = ImpunityWsCreate(Url);
 			Instances[InstanceId] = this;
+			ImpunityRtcSetEnabled(InstanceId, UseWebRtc ? 1 : 0);
 
 			int result = ImpunityWsConnect(InstanceId);
 			if (result < 0)
@@ -93,12 +111,19 @@ namespace Impunity.Networking
 				return;
 			}
 
-			ImpunityWsSend(InstanceId, messageBytes.Array, messageBytes.Count);
+			ImpunityWsSend(InstanceId, messageBytes.Array, messageBytes.Offset, messageBytes.Count);
 		}
 
 		/// <inheritdoc/>
 		public void SendUnguaranteedMessage(ArraySegment<byte> messageBytes)
 		{
+			// 0 = sent, 1 = dropped because the channel is backed up (fine for an unguaranteed message); negative means
+			// the channel went away between the check and the send, so the socket carries it.
+			if (RtcOpen && InstanceId >= 0 && ImpunityRtcSend(InstanceId, messageBytes.Array, messageBytes.Offset, messageBytes.Count) >= 0)
+			{
+				return;
+			}
+
 			SendGuaranteedMessage(messageBytes);
 		}
 
@@ -114,6 +139,7 @@ namespace Impunity.Networking
 			if (InstanceId >= 0)
 			{
 				Connected = false;
+				RtcOpen = false;
 				int id = InstanceId;
 				InstanceId = -1;
 				Instances.Remove(id);
@@ -219,6 +245,7 @@ namespace Impunity.Networking
 
 			Instances.Remove(instanceId);
 			client.Connected = false;
+			client.RtcOpen = false;
 			client.InstanceId = -1;
 
 			try
@@ -228,6 +255,49 @@ namespace Impunity.Networking
 			catch (Exception e)
 			{
 				ImpunityLogger.LogError("Error in OnDisconnectedByServer handler", e);
+			}
+		}
+
+
+		[MonoPInvokeCallback(typeof(JsCallback))]
+		private static void OnJsRtcOpen(int instanceId)
+		{
+			if (Instances.TryGetValue(instanceId, out var client))
+			{
+				client.RtcOpen = true;
+				ImpunityLogger.LogInformation("WebRTC data channel open; unguaranteed messages will use it");
+			}
+		}
+
+		[MonoPInvokeCallback(typeof(JsCallback))]
+		private static void OnJsRtcClose(int instanceId)
+		{
+			if (Instances.TryGetValue(instanceId, out var client))
+			{
+				client.RtcOpen = false;
+				ImpunityLogger.LogInformation("WebRTC data channel closed; unguaranteed messages are back on the WebSocket");
+			}
+		}
+
+		[MonoPInvokeCallback(typeof(JsMessageCallback))]
+		private static void OnJsRtcMessage(int instanceId, IntPtr bufferPtr, int bufferLength)
+		{
+			if (!Instances.TryGetValue(instanceId, out var client))
+			{
+				return;
+			}
+
+			// The buffer belongs to the browser side and is freed when this returns.
+			byte[] data = new byte[bufferLength];
+			Marshal.Copy(bufferPtr, data, 0, bufferLength);
+
+			try
+			{
+				client.OnUnguaranteedMessageRecieved?.Invoke(new ArraySegment<byte>(data, 0, bufferLength));
+			}
+			catch (Exception e)
+			{
+				ImpunityLogger.LogError("Error in OnUnguaranteedMessageRecieved handler", e);
 			}
 		}
 
@@ -249,7 +319,7 @@ namespace Impunity.Networking
 		[DllImport("__Internal")]
 		private static extern int ImpunityWsClose(int instanceId, int code);
 		[DllImport("__Internal")]
-		private static extern int ImpunityWsSend(int instanceId, byte[] data, int length);
+		private static extern int ImpunityWsSend(int instanceId, byte[] data, int offset, int length);
 		[DllImport("__Internal")]
 		private static extern int ImpunityWsGetState(int instanceId);
 
@@ -261,6 +331,17 @@ namespace Impunity.Networking
 		private static extern void ImpunityWsSetErrorCallback(JsCallback callback);
 		[DllImport("__Internal")]
 		private static extern void ImpunityWsSetCloseCallback(JsCloseCallback callback);
+
+		[DllImport("__Internal")]
+		private static extern void ImpunityRtcSetEnabled(int instanceId, int enabled);
+		[DllImport("__Internal")]
+		private static extern int ImpunityRtcSend(int instanceId, byte[] data, int offset, int length);
+		[DllImport("__Internal")]
+		private static extern void ImpunityRtcSetOpenCallback(JsCallback callback);
+		[DllImport("__Internal")]
+		private static extern void ImpunityRtcSetCloseCallback(JsCallback callback);
+		[DllImport("__Internal")]
+		private static extern void ImpunityRtcSetMessageCallback(JsMessageCallback callback);
 	}
 }
 #else
@@ -308,6 +389,12 @@ namespace Impunity.Networking
 		public static IImpunityNetworkClient MakeWebSocketClient(string host, int port, ImpunityOptions? options = null)
 		{
 			string url = $"ws://{host}:{port}/ws";
+			return new ImpunityWebSocketClient(url, options);
+		}
+
+		/// <summary>Creates a WebSocket client for a full URL, e.g. <c>wss://play.example.com/ws</c>.</summary>
+		public static IImpunityNetworkClient MakeWebSocketClient(string url, ImpunityOptions? options = null)
+		{
 			return new ImpunityWebSocketClient(url, options);
 		}
 
