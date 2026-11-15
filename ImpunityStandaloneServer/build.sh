@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "Building Impunity Standalone Server"
-dotnet build -c Release
+dotnet build -c Release --no-incremental
 
 mkdir -p ../bin/StandaloneServer
 cp bin/Release/net10.0/ImpunityStandaloneServer ../bin/StandaloneServer

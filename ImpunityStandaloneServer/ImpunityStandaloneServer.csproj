@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <PackageId>ImpunityStandaloneServer</PackageId>
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0</AssemblyVersion>
+    <Version>1.7.0</Version>
+    <AssemblyVersion>1.7.0</AssemblyVersion>
     <Authors>Jeremy Friesen</Authors>
     <Product>ImpunityNetworking</Product>
     <Description>Impunity Networking - Unity library enabling networked save state and multiplayer</Description>

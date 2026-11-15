@@ -2,8 +2,8 @@
 set -e
 
 echo "Building Impunity Runtime dlls (all three variants via the solution)"
-dotnet build ImpunityRuntime.sln -c Release
-dotnet build ImpunityRuntime.sln -c Debug
+dotnet build ImpunityRuntime.sln -c Release --no-incremental
+dotnet build ImpunityRuntime.sln -c Debug --no-incremental
 
 # Stage each variant's artifacts into its own folder under ../bin/Runtime/<Variant>/<Config>.
 # Assembly name -> variant folder:

@@ -62,9 +62,9 @@ namespace Impunity.GameState
 		/// callback runs, neither includes time spent queued for the main thread, which is what a round-trip
 		/// measurement (the clock sync) needs.</summary>
 		[BsonIgnore]
-		internal long WireSentAtMillis;
+		internal long WireSentAtMillis = 0;
 		[BsonIgnore]
-		internal long ReplyReceivedAtMillis;
+		internal long ReplyReceivedAtMillis = 0;
 
 		/// <summary>
 		/// Correlation id carried in the message header (not the BSON body). The client assigns a unique id per
