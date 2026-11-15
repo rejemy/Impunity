@@ -1,0 +1,48 @@
+#!/bin/bash
+# Local testing only. Creates a private CA and server certificate; never installs system trust.
+set -euo pipefail
+
+output=${1:-"$(cd "$(dirname "$0")/.." && pwd)/.test-certs"}
+hostname=${2:-localhost}
+if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
+    echo "Usage: $0 [output-directory] [DNS-hostname]" >&2
+    exit 1
+fi
+if [[ -e "$output/fullchain.pem" || -e "$output/privkey.pem" || -e "$output/ca.pem" ]]; then
+    echo "Refusing to overwrite existing certificate files in $output" >&2
+    exit 1
+fi
+umask 077
+mkdir -p "$output"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cat > "$work/leaf.cnf" <<EOF
+subjectAltName=DNS:$hostname,DNS:localhost,IP:127.0.0.1,IP:::1
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid,issuer
+EOF
+if ! (
+    openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 31 \
+        -keyout "$work/ca-key.pem" -out "$work/ca.pem" \
+        -subj "/CN=Impunity local test CA" \
+        -addext "basicConstraints=critical,CA:TRUE" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" &&
+    openssl req -new -newkey rsa:2048 -sha256 -nodes \
+        -keyout "$work/privkey.pem" -out "$work/server.csr" -subj "/CN=$hostname" &&
+    openssl x509 -req -in "$work/server.csr" -CA "$work/ca.pem" -CAkey "$work/ca-key.pem" \
+        -CAcreateserial -days 30 -sha256 -extfile "$work/leaf.cnf" -out "$work/leaf.pem"
+) >"$work/openssl.log" 2>&1; then
+    cat "$work/openssl.log" >&2
+    exit 1
+fi
+cat "$work/leaf.pem" "$work/ca.pem" > "$work/fullchain.pem"
+mv "$work/fullchain.pem" "$output/fullchain.pem"
+mv "$work/privkey.pem" "$output/privkey.pem"
+mv "$work/ca.pem" "$output/ca.pem"
+echo "Created test certificate: $output/fullchain.pem"
+echo "Created test private key: $output/privkey.pem"
+echo "Created test CA: $output/ca.pem (use with curl --cacert)"
+echo "Valid for 30 days. Not installed in system trust; use Certbot certificates for public hosting."

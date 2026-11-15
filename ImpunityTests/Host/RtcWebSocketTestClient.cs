@@ -70,6 +70,8 @@ namespace Impunity.Tests
 
 		readonly string Url;
 		readonly string RuntimesDirectory;
+		readonly System.Net.Security.RemoteCertificateValidationCallback ValidateCertificate;
+		readonly bool UseRtc = true;
 		readonly CancellationTokenSource CancelSource = new CancellationTokenSource();
 		readonly SemaphoreSlim SendLock = new SemaphoreSlim(1, 1);
 
@@ -84,9 +86,17 @@ namespace Impunity.Tests
 		long LastChannelSent, LastChannelReceived;
 
 		public RtcWebSocketTestClient(string host, int port, string runtimesDirectory)
+			: this($"ws://{host}:{port}/ws", runtimesDirectory)
 		{
-			Url = $"ws://{host}:{port}/ws";
+		}
+
+		public RtcWebSocketTestClient(string url, string runtimesDirectory,
+			System.Net.Security.RemoteCertificateValidationCallback validateCertificate = null, bool useRtc = true)
+		{
+			Url = url;
 			RuntimesDirectory = runtimesDirectory;
+			ValidateCertificate = validateCertificate;
+			UseRtc = useRtc;
 		}
 
 		public void Connect(ImpunityCallback onComplete)
@@ -109,11 +119,12 @@ namespace Impunity.Tests
 			try
 			{
 				Socket = new ClientWebSocket();
+				if (ValidateCertificate != null) Socket.Options.RemoteCertificateValidationCallback = ValidateCertificate;
 				await Socket.ConnectAsync(new Uri(Url), CancelSource.Token);
 				connected = true;
 
 				// Like the browser: start WebRTC as soon as the socket is up, without holding up the connection.
-				StartPeer();
+				if (UseRtc) StartPeer();
 
 				OnConnectCallback?.Invoke(null);
 				OnConnectCallback = null;

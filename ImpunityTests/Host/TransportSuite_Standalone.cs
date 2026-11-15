@@ -17,11 +17,14 @@ namespace Impunity.Tests
 	public abstract class TransportSuite_StandaloneBase : TransportSuite
 	{
 		protected StandaloneServerFixture Server;
+		protected TestCertificates Certificates;
+		protected virtual bool UseHttps => false;
 
 		[OneTimeSetUp]
 		public void LaunchServer()
 		{
-			Server = StandaloneServerFixture.Launch();
+			if (UseHttps) Certificates = new TestCertificates();
+			Server = StandaloneServerFixture.Launch(certificates: Certificates);
 		}
 
 		[OneTimeTearDown]
@@ -29,6 +32,8 @@ namespace Impunity.Tests
 		{
 			Server?.Dispose();
 			Server = null;
+			Certificates?.Dispose();
+			Certificates = null;
 		}
 
 		// The server runs out-of-proc for the whole fixture; nothing to do per-test.

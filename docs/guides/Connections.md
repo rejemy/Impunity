@@ -154,7 +154,7 @@ What keeps a connection alive, and what doesn't:
 
 `OnNetworkError` is raised for every way an *established* connection ends on its own: a socket error, the server closing the connection (including dropping this client for silence), or the server going silent. It isn't raised for your own `Dispose()`, or for a failure during `Connect` (that goes to the connect callback). A local connection has no keepalives; it can't go silent.
 
-> **Server-side hosting and discovery** are out of scope here. A remote world is hosted by an `ImpunityServer` / the standalone server (see `CLAUDE.md`); clients can locate worlds via LAN UDP discovery or the HTTP discovery API, which yield `ServerInfo` records you can feed to the factory helpers.
+> **Server-side hosting and discovery:** a remote world is hosted by an `ImpunityServer` / the standalone server. See [HTTPS/WSS hosting](../designs/HttpsTransport.md) for Certbot certificate configuration, automatic reload and browser origins. Clients can locate worlds via LAN UDP discovery or HTTP discovery. `ImpunityHTTPServerFinder.GetServerWorlds(options, "https://play.example.com", callback)` uses HTTPS and returns `ServerInfo.WebSocketUrl` for browser connections, alongside the independent TCP `Hostname`/`Port`. Pass that full URL to `MakeWebsocketRemoteConnection`. Discovery expects a full HTTP(S) URL without a path; omitted ports use the scheme default.
 
 ---
 

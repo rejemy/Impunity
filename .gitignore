@@ -74,6 +74,7 @@ bin
 lib
 obj
 ImpunityStandaloneServer/worlds
+ImpunityStandaloneServer/.test-certs/
 ImpunityUnity/Builds
 
 # Sources and build trees of native/libdatachannel/build.sh

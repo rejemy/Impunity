@@ -14,21 +14,22 @@ namespace Impunity.Networking
 		// BsonMapper.Global would let an app loosen the allow list for its own data and widen this path too.
 		private static readonly BsonMapper ReplyMapper = new BsonMapper();
 
-		/// <summary>Queries a standalone server's HTTP endpoint for its list of available game worlds. Validates version and game type compatibility. Calls <paramref name="onComplete"/> with the results.</summary>
-		/// <param name="options"></param>
-		/// <param name="hostname">Server hostname, optionally with port (e.g., "example.com" or "example.com:29653").</param>
-		/// <param name="onComplete"></param>
-		public static void GetServerWorlds(ImpunityOptions options, string hostname, ImpunityCallback<List<ServerInfo>> onComplete)
+		/// <summary>Queries an HTTP(S) server origin, e.g. <c>https://play.example.com:443</c>, for its worlds.
+		/// Results retain a full <see cref="ServerInfo.WebSocketUrl"/> for browser connections. TLS validation uses the platform defaults.</summary>
+		/// <param name="options">Expected game type and connection settings.</param>
+		/// <param name="serverUrl">Full HTTP(S) URL, optionally with a port, without a path, credentials, query or fragment.</param>
+		/// <param name="onComplete">Called with the discovered worlds or an error.</param>
+		public static void GetServerWorlds(ImpunityOptions options, string serverUrl, ImpunityCallback<List<ServerInfo>> onComplete)
 		{
-			// Preserve the bare host (without any :port) for use in the returned ServerInfo entries.
-			int colonIndex = hostname.IndexOf(':');
-			string bareHost = colonIndex < 0 ? hostname : hostname.Substring(0, colonIndex);
-
-			if (colonIndex < 0)
+			if (serverUrl == null) throw new ArgumentNullException(nameof(serverUrl));
+			if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var serverUri) || (serverUri.Scheme != "http" && serverUri.Scheme != "https")
+				|| serverUri.UserInfo.Length != 0 || serverUri.AbsolutePath != "/" || serverUri.Query.Length != 0 || serverUri.Fragment.Length != 0)
+				throw new ArgumentException("Expected an HTTP(S) server origin without a path, credentials, query or fragment.", nameof(serverUrl));
+			string url = new Uri(serverUri, "/worlds").AbsoluteUri;
+			string webSocketUrl = new UriBuilder(serverUri)
 			{
-				hostname += ":" + ImpunityConstants.DefaultServerHttpPort;
-			}
-			string url = "http://" + hostname + "/worlds";
+				Scheme = serverUri.Scheme == "https" ? "wss" : "ws", Port = serverUri.Port, Path = "/ws"
+			}.Uri.AbsoluteUri;
 
 			ImpunityHttp.Instance.Get(url, (err, body) =>
 			{
@@ -72,15 +73,11 @@ namespace Impunity.Networking
 
 					foreach (var worldInfo in reply.Worlds)
 					{
-						if (reply.TCPPort == null)
-						{
-							continue;
-						}
-
 						var info = new ServerInfo();
 						info.WorldName = worldInfo.WorldName;
-						info.Hostname = bareHost;
-						info.Port = reply.TCPPort.Value;
+						info.Hostname = serverUri.Host;
+						info.Port = reply.TCPPort ?? 0;
+						info.WebSocketUrl = webSocketUrl;
 						info.GameId = worldInfo.WorldId;
 						info.PasswordProtected = worldInfo.PasswordProtected;
 						info.CurrentPlayers = worldInfo.CurrentPlayers;
@@ -109,10 +106,10 @@ namespace Impunity.Networking
 			});
 		}
 
-		/// <summary>Queries a standalone server for a specific game world's info by its ID. Returns an error if the world is not found.</summary>
-		public static void GetServerWorldStatus(ImpunityOptions options, string hostname, string gameId, ImpunityCallback<ServerInfo> onComplete)
+		/// <summary>Queries an HTTP(S) server origin for a world by ID; returns its TCP details and full WebSocket URL.</summary>
+		public static void GetServerWorldStatus(ImpunityOptions options, string serverUrl, string gameId, ImpunityCallback<ServerInfo> onComplete)
 		{
-			GetServerWorlds(options, hostname, (err, worlds) =>
+			GetServerWorlds(options, serverUrl, (err, worlds) =>
 			{
 				if (err != null)
 				{

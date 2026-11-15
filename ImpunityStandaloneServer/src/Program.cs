@@ -1,7 +1,10 @@
 #nullable enable
 
 using System;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -56,10 +59,32 @@ ImpunityAspLogger.Setup(logger, logLevel);
 
 serverLogger.LogInformation("Read configuration from " + configPath);
 
+HttpsCertificateService? certificates = null;
+try
+{
+	config.ValidateWebConfiguration();
+	if (config.https?.enabled == true)
+		certificates = new HttpsCertificateService(config.https, configPath, serverLogger);
+}
+catch (Exception e)
+{
+	serverLogger.LogError("Unable to configure web listeners: {Reason}", e.Message);
+	return 1;
+}
+await using var certificateLifetime = certificates;
 
 // --------------- Create app builder ---------------------
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder();
+builder.WebHost.ConfigureKestrel(options =>
+{
+	if (config.http_enabled) options.ListenAnyIP(config.http_port);
+	if (certificates != null)
+		options.ListenAnyIP(config.https!.port, listener => listener.UseHttps(new TlsHandshakeCallbackOptions
+		{
+			OnConnection = _ => ValueTask.FromResult(certificates.CreateAuthenticationOptions())
+		}));
+});
 
 // --------------- Setup AspNetCore logger ---------------------
 
@@ -104,82 +129,94 @@ if (config.max_send_backlog_bytes.HasValue)
 }
 
 WorldService worldService = new WorldService(config.datapath, config.worlds, impOptions);
-builder.Services.AddSingleton(worldService);
+ConnectionService? connectionService = null;
+WebRtcService? webRtcService = null;
+try
+{
+	builder.Services.AddSingleton(worldService);
 
-ConnectionService connectionService = new ConnectionService(worldService, impOptions);
-builder.Services.AddSingleton(connectionService);
-connectionService.Start();
-serverLogger.LogInformation($"Listening for TCP on port {impOptions.ServerPort}");
+	connectionService = new ConnectionService(worldService, impOptions);
+	builder.Services.AddSingleton(connectionService);
 
 
-builder.Services.AddSingleton(new InfoService(impOptions));
+	builder.Services.AddSingleton(new InfoService(impOptions));
 
-// Optional: anything that goes wrong in here only leaves clients on WebSocket.
-WebRtcService webRtcService = new WebRtcService(config.webrtc);
-builder.Services.AddSingleton(webRtcService);
-webRtcService.Start();
+	// Optional: anything that goes wrong in here only leaves clients on WebSocket.
+	webRtcService = new WebRtcService(config.webrtc);
+	builder.Services.AddSingleton(webRtcService);
 
-// --------------- Setup AspNetCore web server ---------------------
-builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();
+	// --------------- Setup AspNetCore web server ---------------------
+	builder.Services.AddSingleton<IHostLifetime, ConsoleLifetime>();
 
-builder.Services.AddControllers().AddJsonOptions(options =>
+	builder.Services.AddControllers().AddJsonOptions(options =>
+		{
+			options.JsonSerializerOptions.WriteIndented = true;
+		});
+
+	builder.Environment.ApplicationName = "ImpunityStandaloneServer";
+
+	string[]? origins = config.allowed_origins ?? (config.server_hostname == null ? null
+		: new[] { "http://" + config.server_hostname, "https://" + config.server_hostname });
+	if (origins != null)
 	{
-		options.JsonSerializerOptions.WriteIndented = true;
+		builder.Services.AddCors(options =>
+		{
+			options.AddDefaultPolicy(
+				policy =>
+				{
+					policy.WithOrigins(origins).WithMethods("GET").AllowAnyHeader();
+				});
+		});
+	}
+
+	await using WebApplication app = builder.Build();
+
+	WebSocketOptions webSocketOptions = new()
+	{
+		KeepAliveInterval = TimeSpan.FromMinutes(1)
+	};
+
+	app.UseRouting();
+	if (origins != null)
+	{
+		app.UseCors();
+	}
+
+	if (config.allowed_origins != null)
+		foreach (string origin in config.allowed_origins) webSocketOptions.AllowedOrigins.Add(origin);
+	app.UseWebSockets(webSocketOptions);
+
+	app.MapControllers();
+
+	app.Lifetime.ApplicationStarted.Register(() =>
+	{
+		if (config.http_enabled) serverLogger.LogInformation("Listening for HTTP on port {port}", config.http_port);
+		if (certificates != null) serverLogger.LogInformation("Listening for HTTPS/WSS on port {port}", config.https!.port);
 	});
 
-builder.Environment.ApplicationName = "ImpunityStandaloneServer";
+	serverLogger.LogInformation("Impunity Standalone Server starting up");
 
-if (config.server_hostname != null)
-{
-	builder.Services.AddCors(options =>
-	{
-		options.AddDefaultPolicy(
-			policy =>
-			{
-				policy.WithOrigins("http://" + config.server_hostname,
-									"https://" + config.server_hostname);
-			});
-	});
+	// --------------- Run server ---------------------
+
+	connectionService.Start();
+	serverLogger.LogInformation("Listening for TCP on port {port}", impOptions.ServerPort);
+	webRtcService.Start();
+	certificates?.Start();
+	await app.RunAsync();
 }
-
-WebApplication app = builder.Build();
-app.UseWebSockets();
-
-WebSocketOptions webSocketOptions = new()
+finally
 {
-	KeepAliveInterval = TimeSpan.FromMinutes(1)
-};
 
-app.Urls.Add("http://*:" + config.http_port);
+	// --------------- Shutdown server ---------------------
 
-if (config.server_hostname != null)
-{
-	app.UseCors();
+	serverLogger.LogInformation("Shutting down");
+
+	webRtcService?.Stop();
+
+	connectionService?.Stop();
+
+	worldService.Stop();
+
+	serverLogger.LogInformation("Impunity Standalone Server done");
 }
-
-app.UseWebSockets(webSocketOptions);
-
-app.MapControllers();
-
-app.Lifetime.ApplicationStarted.Register(() =>
-{
-	serverLogger.LogInformation("Listening for HTTP on port {port}", config.http_port);
-});
-
-serverLogger.LogInformation("Impunity Standalone Server starting up");
-
-// --------------- Run server ---------------------
-
-app.Run();
-
-// --------------- Shutdown server ---------------------
-
-serverLogger.LogInformation("Shutting down");
-
-webRtcService.Stop();
-
-connectionService.Stop();
-
-worldService.Stop();
-
-serverLogger.LogInformation("Impunity Standalone Server done");
+return 0;

@@ -43,8 +43,11 @@ public class WebRtcConfig
 public class ServerConfig
 {
 	public string? game_type_code { get; set; }
+	public bool http_enabled { get; set; } = true;
 	public ushort http_port { get; set; } = 29653;
 	public ushort tcp_port { get; set; } = 29654;
+	public HttpsConfig? https { get; set; }
+	public string[]? allowed_origins { get; set; }
 
 	public string datapath { get; set; } = "worlds";
 
@@ -64,6 +67,38 @@ public class ServerConfig
 
 	public List<WorldConfig>? worlds { get; set; }
 
+	/// <summary>Validates web listeners and normalizes explicit browser origins before any services start.</summary>
+	public void ValidateWebConfiguration()
+	{
+		bool secure = https?.enabled == true;
+		if (!http_enabled && !secure)
+			throw new ArgumentException("Enable at least one HTTP or HTTPS listener.");
+		if (http_enabled && http_port == 0)
+			throw new ArgumentException("http_port must be between 1 and 65535.");
+		if (secure)
+		{
+			if (https!.port == 0 || (http_enabled && https.port == http_port) || https.port == tcp_port)
+				throw new ArgumentException("https.port must be nonzero and distinct from enabled HTTP and TCP ports.");
+			if (string.IsNullOrWhiteSpace(https.certificate_path) || string.IsNullOrWhiteSpace(https.private_key_path))
+				throw new ArgumentException("HTTPS requires certificate_path and private_key_path.");
+			if (https.reload_interval_seconds < 1 || https.reload_interval_seconds > 86400)
+				throw new ArgumentException("https.reload_interval_seconds must be between 1 and 86400.");
+		}
+		if (http_enabled && http_port == tcp_port)
+			throw new ArgumentException("http_port must differ from tcp_port.");
+		if (allowed_origins == null) return;
+		if (allowed_origins.Length == 0)
+			throw new ArgumentException("allowed_origins must be a nonempty list when specified.");
+		for (int i = 0; i < allowed_origins.Length; i++)
+		{
+			if (!Uri.TryCreate(allowed_origins[i], UriKind.Absolute, out var origin)
+				|| (origin.Scheme != "http" && origin.Scheme != "https") || string.IsNullOrEmpty(origin.Host)
+				|| origin.Host.Contains('*') || origin.UserInfo.Length != 0 || origin.AbsolutePath != "/"
+				|| origin.Query.Length != 0 || origin.Fragment.Length != 0)
+				throw new ArgumentException("allowed_origins entries must be HTTP(S) origins without paths, credentials or wildcards.");
+			allowed_origins[i] = origin.GetLeftPart(UriPartial.Authority);
+		}
+	}
 
 	public static ServerConfig? ReadConfig(string path)
 	{
@@ -105,6 +140,15 @@ public class ServerConfig
 		Console.WriteLine("Unknown log level: " + logging_level);
 		return ImpunityLogLevel.INFO;
 	}
+}
+
+public class HttpsConfig
+{
+	public bool enabled { get; set; } = false;
+	public ushort port { get; set; } = 443;
+	public string? certificate_path { get; set; }
+	public string? private_key_path { get; set; }
+	public int reload_interval_seconds { get; set; } = 60;
 }
 
 #pragma warning restore IDE1006

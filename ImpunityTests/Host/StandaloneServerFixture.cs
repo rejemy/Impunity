@@ -13,6 +13,7 @@ using System.IO;
 using System.Net.Http;
 using System.Reflection;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 
 namespace Impunity.Tests
@@ -21,6 +22,10 @@ namespace Impunity.Tests
 	{
 		public ushort HttpPort { get; private set; }
 		public ushort TcpPort { get; private set; }
+		public ushort HttpsPort { get; private set; }
+		public TestCertificates Certificates { get; private set; }
+		public string BaseUrl => Certificates == null ? $"http://127.0.0.1:{HttpPort}" : $"https://localhost:{HttpsPort}";
+		public string WebSocketUrl => BaseUrl.Replace("https://", "wss://").Replace("http://", "ws://") + "/ws";
 		public string WorldId => "testworld";
 		public string Password => "pw";
 
@@ -55,13 +60,16 @@ namespace Impunity.Tests
 		// Extra members for the "webrtc" config object (JSON, without braces), and extra environment variables.
 		string WebRtcConfigJson;
 		Dictionary<string, string> Environment_;
+		Action<JsonObject> Configure;
 
 		/// <param name="webRtcConfig">Extra members for the server's <c>webrtc</c> config object, as JSON without the
 		/// braces, e.g. <c>"\"enabled\": false"</c>. <c>udp_port</c> is always supplied.</param>
 		/// <param name="environment">Environment variables for the server process.</param>
-		public static StandaloneServerFixture Launch(string webRtcConfig = null, Dictionary<string, string> environment = null)
+		public static StandaloneServerFixture Launch(string webRtcConfig = null, Dictionary<string, string> environment = null,
+			TestCertificates certificates = null, Action<JsonObject> configure = null)
 		{
-			var fixture = new StandaloneServerFixture { WebRtcConfigJson = webRtcConfig, Environment_ = environment };
+			var fixture = new StandaloneServerFixture { WebRtcConfigJson = webRtcConfig, Environment_ = environment,
+				Certificates = certificates, Configure = configure };
 			Exception lastFailure = null;
 			for (int attempt = 0; attempt < 3; attempt++)
 			{
@@ -115,6 +123,7 @@ namespace Impunity.Tests
 			HttpPort = TestPorts.GetFreePort();
 			TcpPort = TestPorts.GetFreePort();
 			WebRtcPort = TestPorts.GetFreePort();
+			HttpsPort = TestPorts.GetFreePort();
 
 			WorkDir = Path.Combine(TestEnv.TempRoot, "ImpunityStandalone_" + Guid.NewGuid().ToString("N"));
 			Directory.CreateDirectory(WorkDir);
@@ -131,7 +140,20 @@ namespace Impunity.Tests
 				$"    {{ \"id\": \"{WorldId}\", \"name\": \"Transport Test World\", \"password\": \"{Password}\", \"max_players\": 16 }}\n" +
 				"  ]\n" +
 				"}\n";
-			File.WriteAllText(Path.Combine(WorkDir, "config.json"), config);
+			var json = JsonNode.Parse(config).AsObject();
+			if (Certificates != null)
+			{
+				json["http_enabled"] = false;
+				json["https"] = new JsonObject
+				{
+					["enabled"] = true, ["port"] = HttpsPort,
+					["certificate_path"] = Path.GetRelativePath(WorkDir, Certificates.CertificatePath),
+					["private_key_path"] = Path.GetRelativePath(WorkDir, Certificates.PrivateKeyPath),
+					["reload_interval_seconds"] = 1
+				};
+			}
+			Configure?.Invoke(json);
+			File.WriteAllText(Path.Combine(WorkDir, "config.json"), json.ToJsonString());
 
 			lock (OutputLock) { Output.Clear(); }
 
@@ -166,8 +188,8 @@ namespace Impunity.Tests
 
 		async Task WaitUntilReady()
 		{
-			using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-			string url = $"http://127.0.0.1:{HttpPort}/info";
+			using var http = CreateHttpClient();
+			string url = BaseUrl + "/info";
 			var deadline = Stopwatch.StartNew();
 
 			while (deadline.Elapsed < TimeSpan.FromSeconds(15))
@@ -180,7 +202,7 @@ namespace Impunity.Tests
 
 				try
 				{
-					var response = await http.GetAsync(url);
+					using var response = await http.GetAsync(url);
 					if (response.IsSuccessStatusCode) return;
 				}
 				catch (HttpRequestException) { }
@@ -195,6 +217,14 @@ namespace Impunity.Tests
 		public string CapturedOutput()
 		{
 			lock (OutputLock) { return Output.ToString(); }
+		}
+
+		public HttpClient CreateHttpClient()
+		{
+			var handler = new HttpClientHandler();
+			if (Certificates != null)
+				handler.ServerCertificateCustomValidationCallback = (request, cert, chain, errors) => Certificates.Validate(request, cert, chain, errors);
+			return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
 		}
 
 		void StopProcess()

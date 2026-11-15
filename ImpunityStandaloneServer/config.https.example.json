@@ -1,0 +1,26 @@
+{
+	"game_type_code": "ImpTest",
+	"http_enabled": false,
+	"http_port": 29653,
+	"tcp_port": 29654,
+	"https": {
+		"enabled": true,
+		"port": 443,
+		"certificate_path": "/etc/letsencrypt/live/impunity.example.com/fullchain.pem",
+		"private_key_path": "/etc/letsencrypt/live/impunity.example.com/privkey.pem",
+		"reload_interval_seconds": 60
+	},
+	"allowed_origins": ["https://game.example.com"],
+	"webrtc": {
+		"enabled": true,
+		"udp_port": 29656,
+		"public_address": "impunity.example.com"
+	},
+	"worlds": [
+		{
+			"id": "world1",
+			"name": "Cool world",
+			"password": "change-this-password"
+		}
+	]
+}

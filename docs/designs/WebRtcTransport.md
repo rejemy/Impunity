@@ -391,9 +391,10 @@ adapter disables fingerprint verification or ships private keys to the other end
 
 HTTPS/WSS has a different role: it authenticates the page and signaling endpoint that supplies those
 fingerprints. Production deployments should serve the game over HTTPS and connect using WSS with a normally
-trusted certificate. Plain WS does not authenticate fingerprint exchange against an intermediary. The server's
-current `Program.cs` binds HTTP; a public TLS endpoint/reverse proxy is a deployment responsibility. The
-`server_hostname` CORS setting is not an explicit WebSocket `Origin` allowlist in the controller.
+trusted certificate. Plain WS does not authenticate fingerprint exchange against an intermediary. The standalone
+server supports direct HTTPS/WSS with Certbot PEM paths and periodic certificate reload. Configure
+`allowed_origins` for HTTP CORS and independent WebSocket origin checks; the legacy `server_hostname` setting
+only configures CORS. See [Standalone HTTPS and WSS](HttpsTransport.md) for configuration and deployment.
 
 The server needs a reachable UDP port in addition to HTTP/WSS:
 

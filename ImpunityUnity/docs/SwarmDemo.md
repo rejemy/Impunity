@@ -47,6 +47,13 @@ tools/demo-server --web
 # http://localhost:8080/?server=ws://localhost:29653/ws&spawn=16
 ```
 
+For a hosted HTTPS page, use an explicit secure destination such as
+`https://game.example.com/?server=wss://impunity.example.com/ws&spawn=16`.
+Configure the standalone server's certificate and `allowed_origins` using the
+[HTTPS/WSS guide](../../docs/designs/HttpsTransport.md). Keep the server's game type code `ImpDemo` and
+the demo world/password settings. WebRTC still needs its reachable UDP port and public address.
+The local `demo-server` helper continues to use HTTP/WS; it does not provision certificates or host HTTPS assets.
+
 **As a macOS app:** `tools/demo-build mac`, then
 `Builds/Mac/ImpunityDemo.app/Contents/MacOS/Impunity -server tcp://127.0.0.1:29654 -spawn 16`.
 

@@ -656,6 +656,8 @@ namespace Impunity
 		public string? Hostname;
 		/// <summary>TCP port for remote servers (used with <see cref="Hostname"/>).</summary>
 		public int Port;
+		/// <summary>Full ws:// or wss:// connection URL from HTTP discovery; null for LAN UDP discovery.</summary>
+		public string? WebSocketUrl;
 		/// <summary>Direct IP endpoint for LAN servers (mutually exclusive with <see cref="Hostname"/>/<see cref="Port"/>).</summary>
 		public IPEndPoint? Address;
 

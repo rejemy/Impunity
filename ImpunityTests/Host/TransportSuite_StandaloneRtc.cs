@@ -20,10 +20,12 @@ namespace Impunity.Tests
 
 		/// <summary>Whether a new connection waits for its data channel before the test goes on.</summary>
 		protected virtual bool ExpectChannel => true;
+		protected virtual bool NegotiateRtc => true;
 
 		protected override async Task<BaseGameConnection> OpenConnectionAsync()
 		{
-			var transport = new RtcWebSocketTestClient("127.0.0.1", Server.HttpPort, StandaloneServerFixture.RuntimesDirectory);
+			var transport = new RtcWebSocketTestClient(Server.WebSocketUrl, StandaloneServerFixture.RuntimesDirectory,
+				Certificates == null ? null : Certificates.Validate, NegotiateRtc);
 			var conn = new RemoteGameConnection(transport, Server.WorldId, Server.Password, Format, Options, null);
 			Transports[conn] = transport;
 			await ConnectAsync(conn);
